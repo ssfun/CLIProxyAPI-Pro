@@ -1,0 +1,1291 @@
+.tableWrapper {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+
+.tableScrollWrapper {
+  max-height: min(560px, 64vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-right: 0;
+  border: 1px solid var(--monitor-line);
+  border-radius: 8px;
+}
+
+.accountTableWrapper {
+  max-height: min(520px, 58vh);
+}
+
+.realtimeTableWrapper {
+  height: 100%;
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: auto;
+  overflow-anchor: none;
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tableScrollWrapper::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.tableScrollWrapper::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--monitor-muted) 34%, transparent);
+  background-clip: padding-box;
+}
+
+.tableScrollWrapper::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tableWrapper::after {
+  content: '';
+  position: sticky;
+  right: 0;
+  display: block;
+  width: 36px;
+  height: 1px;
+  margin-top: -1px;
+  margin-left: auto;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--monitor-surface));
+}
+
+.table {
+  width: 100%;
+  min-width: 0;
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+.accountOverviewTable {
+  --account-col-account: 24%;
+  --account-col-total-calls: 9%;
+  --account-col-success-calls: 10%;
+  --account-col-success-rate: 9%;
+  --account-col-total-tokens: 12%;
+  --account-col-estimated-cost: 10%;
+  --account-col-latest-request: 17%;
+  --account-col-action: 9%;
+  --account-overview-columns:
+    var(--account-col-account)
+    var(--account-col-total-calls)
+    var(--account-col-success-calls)
+    var(--account-col-success-rate)
+    var(--account-col-total-tokens)
+    var(--account-col-estimated-cost)
+    var(--account-col-latest-request)
+    var(--account-col-action);
+
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.accountOverviewTable col:nth-child(1) {
+  width: var(--account-col-account);
+}
+
+.accountOverviewTable col:nth-child(2) {
+  width: var(--account-col-total-calls);
+}
+
+.accountOverviewTable col:nth-child(3) {
+  width: var(--account-col-success-calls);
+}
+
+.accountOverviewTable col:nth-child(4) {
+  width: var(--account-col-success-rate);
+}
+
+.accountOverviewTable col:nth-child(5) {
+  width: var(--account-col-total-tokens);
+}
+
+.accountOverviewTable col:nth-child(6) {
+  width: var(--account-col-estimated-cost);
+}
+
+.accountOverviewTable col:nth-child(7) {
+  width: var(--account-col-latest-request);
+}
+
+.accountOverviewTable col:nth-child(8) {
+  width: var(--account-col-action);
+}
+
+.accountOverviewTable .accountButtonLabel {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.accountOverviewTable .accountButton small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountOverviewTable td:nth-child(7),
+.accountOverviewTable th:nth-child(7) {
+  white-space: normal;
+}
+
+.accountOverviewTable td:nth-child(7) {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.accountOverviewTable td:last-child {
+  min-width: 0;
+}
+
+.accountOverviewTable td:last-child .inlineActionButton {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.realtimeTable {
+  width: var(--realtime-table-min-width, max-content);
+  min-width: var(--realtime-table-min-width, max-content);
+  table-layout: fixed;
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: 10px 12px;
+  background: var(--monitor-surface-muted);
+  text-align: left;
+  color: var(--monitor-ink);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.table thead th::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  background: var(--monitor-line);
+}
+
+.sortableHeaderButton {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.sortableHeaderButton:hover {
+  transform: none;
+  color: var(--monitor-ink);
+}
+
+.sortableHeaderButton:focus,
+.sortableHeaderButton:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.sortableHeaderButtonActive {
+  color: var(--monitor-ink);
+}
+
+.sortIndicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  color: var(--monitor-accent-strong);
+}
+
+.sortIndicator svg {
+  display: block;
+}
+
+.table tbody td {
+  min-width: 0;
+  padding: 10px 12px;
+  vertical-align: top;
+  white-space: nowrap;
+  border-top: 1px solid var(--monitor-line);
+  background: var(--monitor-surface);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.realtimeTable tbody td {
+  vertical-align: middle;
+}
+
+.table tbody td:first-child {
+  border-left: 0;
+  border-radius: 0;
+}
+
+.table tbody td:last-child {
+  border-right: 0;
+}
+
+//.table tbody tr:hover td {
+//  background: var(--monitor-surface-hover);
+//}
+
+.table tbody tr:nth-child(2n) td {
+  background: color-mix(in srgb, var(--monitor-surface-muted) 72%, var(--monitor-surface));
+}
+
+.innerTable {
+  min-width: 940px;
+}
+
+.primaryCell {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.primaryCell span,
+.primaryCell small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+}
+
+.primaryCell span {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.realtimeTimeCell {
+  white-space: normal;
+  line-height: 1.35;
+  font-size: 12px;
+  color: var(--monitor-ink);
+}
+
+.realtimeNowrapCell {
+  white-space: nowrap;
+}
+
+.realtimeMetricCell {
+  text-align: left;
+}
+
+.table thead th.realtimeMetricHeader {
+  text-align: left;
+}
+
+.table thead th.realtimeCenterHeader,
+.realtimeCenterCell {
+  text-align: left;
+}
+
+.realtimeCenterCell > * {
+  margin-inline: 0;
+}
+
+.realtimeCostCell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
+  min-height: 54px;
+  font-variant-numeric: tabular-nums;
+}
+
+.realtimeCostValue {
+  overflow: visible;
+  color: var(--monitor-green);
+  font-weight: 750;
+  line-height: 1.2;
+  text-overflow: clip;
+}
+
+.realtimeCostInfoButton {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--monitor-muted);
+  cursor: help;
+}
+
+.realtimeCostInfoButton:hover,
+.realtimeCostInfoButton:focus-visible {
+  background: color-mix(in srgb, var(--monitor-accent) 10%, transparent);
+  color: var(--monitor-accent-strong);
+  outline: none;
+}
+
+.realtimeCostInfoButton svg {
+  display: block;
+}
+
+.realtimeCostTooltip {
+  position: fixed;
+  z-index: 12000;
+  width: min(336px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 24px));
+  overflow: visible;
+  padding: 18px 20px;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  background: #060b1a;
+  color: #f8fafc;
+  box-shadow: 0 20px 48px -20px rgba(2, 6, 23, 0.72);
+  pointer-events: none;
+}
+
+.realtimeCostTooltip::before {
+  content: '';
+  position: absolute;
+  top: var(--realtime-cost-arrow-top, 50%);
+  width: 14px;
+  height: 14px;
+  border: solid #334155;
+  background: #060b1a;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.realtimeCostTooltip[data-placement='left']::before {
+  right: -8px;
+  border-width: 1px 1px 0 0;
+}
+
+.realtimeCostTooltip[data-placement='right']::before {
+  left: -8px;
+  border-width: 0 0 1px 1px;
+}
+
+.realtimeCostTooltipTitle {
+  display: block;
+  margin-bottom: 12px;
+  color: #cbd5e1;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.realtimeCostTooltipRows {
+  display: grid;
+  gap: 9px;
+  max-height: min(340px, calc(100vh - 90px));
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.realtimeCostTooltipRows > div:not(.realtimeCostTooltipDivider) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.realtimeCostTooltipRows span {
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.realtimeCostTooltipRows strong {
+  color: #f8fafc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.35;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.realtimeCostTooltipRows .realtimeCostRateInput {
+  color: #38bdf8;
+}
+
+.realtimeCostTooltipRows .realtimeCostRateOutput {
+  color: #c4b5fd;
+}
+
+.realtimeCostTooltipDivider {
+  height: 1px;
+  margin: 2px 0;
+  background: #1e293b;
+}
+
+.realtimeCostTooltipEmpty {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.realtimeDraggableHeader {
+  position: relative;
+  white-space: nowrap;
+  cursor: grab;
+}
+
+.realtimeDraggableHeader:active {
+  cursor: grabbing;
+}
+
+.realtimeFixedHeader,
+.realtimeFixedHeader:active {
+  cursor: default;
+}
+
+.realtimeDraggableHeaderActive {
+  color: var(--monitor-accent-strong);
+  background: color-mix(in srgb, var(--monitor-accent) 14%, var(--monitor-surface-muted));
+}
+
+.realtimeHeaderContent {
+  display: inline-block;
+  max-width: calc(100% - 12px);
+  overflow: visible;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.realtimeColumnResizeHandle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  z-index: 4;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.realtimeColumnResizeHandle::after {
+  content: '';
+  position: absolute;
+  top: 9px;
+  right: 3px;
+  bottom: 9px;
+  width: 1px;
+  background: transparent;
+}
+
+.realtimeColumnResizeHandle:hover::after {
+  background: var(--monitor-accent-strong);
+}
+
+.realtimeMetricCell {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.realtimeReasoningCol {
+  min-width: 96px;
+}
+
+.realtimeStreamCol {
+  min-width: 92px;
+}
+
+.realtimeReasoningBadge {
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.realtimeTokensTableCell {
+  white-space: normal;
+}
+
+.realtimeCacheReadTableCell {
+  text-align: left;
+  white-space: normal;
+}
+
+.realtimeStatusErrorButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.realtimeStatusErrorButton:hover {
+  transform: none;
+  filter: brightness(0.97);
+}
+
+.realtimeStatusErrorButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--monitor-red) 42%, var(--monitor-line));
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+
+.realtimeStatusErrorButton .statusBadge {
+  width: 100%;
+}
+
+.realtimeErrorDetailsPanel {
+  display: grid;
+  gap: 14px;
+  padding: 2px 0 4px;
+}
+
+.monitorModalActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.realtimeErrorOverview {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--monitor-red) 24%, var(--monitor-line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--monitor-red) 7%, var(--monitor-surface));
+}
+
+.realtimeErrorOverviewTop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.realtimeErrorOverviewTop .statusBadge {
+  width: auto;
+}
+
+.realtimeErrorOverviewTop span {
+  color: var(--monitor-red);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.realtimeErrorOverview strong {
+  color: var(--monitor-ink);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.realtimeErrorMessageBlock {
+  display: grid;
+  gap: 6px;
+}
+
+.realtimeErrorMessageBlock > span {
+  color: var(--monitor-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.realtimeErrorMessage {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--monitor-line) 86%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--monitor-surface-muted) 58%, var(--monitor-surface));
+  color: var(--monitor-ink);
+  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.realtimeErrorDetailsGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  border: 1px solid color-mix(in srgb, var(--monitor-line) 82%, transparent);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.realtimeErrorDetailItem {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  padding: 9px 12px;
+  background: var(--monitor-surface);
+}
+
+.realtimeErrorDetailItem + .realtimeErrorDetailItem {
+  border-top: 1px solid color-mix(in srgb, var(--monitor-line) 72%, transparent);
+}
+
+.realtimeErrorDetailItem span {
+  flex: 0 0 auto;
+  color: var(--monitor-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.realtimeErrorDetailItem strong {
+  min-width: 0;
+  max-width: 72%;
+  text-align: right;
+  overflow-wrap: anywhere;
+  color: var(--monitor-ink);
+  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.realtimeTokenCell {
+  width: 100%;
+  min-height: 54px;
+  align-content: center;
+  gap: 3px;
+}
+
+.realtimeTokenCell > span,
+.realtimeTokenCell > small {
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.realtimeTokenCell > span {
+  color: var(--monitor-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.realtimeTokenCell > span strong {
+  color: var(--monitor-ink);
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.realtimeTokenCell > small {
+  color: var(--monitor-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.realtimeCacheReadCell {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  width: 100%;
+  min-height: 54px;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.realtimeCacheReadCell strong {
+  color: var(--monitor-ink);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.realtimeCacheReadCell small {
+  color: var(--monitor-muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.realtimeCacheReadCell .realtimeCacheHitLow {
+  color: var(--monitor-red);
+}
+
+.primaryCell small,
+.statusCell small {
+  color: var(--monitor-muted);
+  font-size: 11px;
+}
+
+.monoCell {
+  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.mutedText {
+  color: var(--monitor-muted);
+}
+
+.statusCell {
+  display: grid;
+  gap: 6px;
+  min-width: 88px;
+}
+
+.recentStatusCell {
+  display: flex;
+  align-items: center;
+  min-width: 70px;
+}
+
+.realtimeTable .statusBadge {
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+  justify-content: center;
+  text-align: center;
+  width: 100%;
+}
+
+.realtimeTable .realtimeReasoningBadge .statusBadge {
+  width: auto;
+  min-width: 56px;
+  max-width: 100%;
+  padding-inline: 10px;
+}
+
+.realtimeTable .realtimeNonStreamingBadge .statusBadge {
+  color: var(--monitor-cyan);
+  border-color: color-mix(in srgb, var(--monitor-cyan) 26%, var(--monitor-line));
+  background: color-mix(in srgb, var(--monitor-cyan) 10%, var(--monitor-surface));
+}
+
+.realtimeTable .statusBadge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.accountButton {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 4px 8px;
+  align-items: start;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  min-width: 0;
+  text-align: left;
+  cursor: pointer;
+  white-space: normal;
+}
+
+.accountButton:hover {
+  transform: none;
+  color: var(--monitor-accent-strong);
+}
+
+.accountButton:focus,
+.accountButton:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.accountButton:focus-visible {
+  color: var(--monitor-accent-strong);
+}
+
+.accountButtonLabel {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.accountButton small {
+  grid-column: 2;
+  color: var(--monitor-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.expandedAccountButton {
+  align-items: start;
+}
+
+.focusedRow td {
+  border-color: var(--monitor-line);
+  background: var(--monitor-surface-elevated);
+  box-shadow: none;
+}
+
+.expandedAccountCardRow td {
+  padding: 8px 0;
+  border-top: 1px solid var(--monitor-line);
+  background: transparent;
+  white-space: normal;
+}
+
+.expandedAccountCardRow td:first-child,
+.expandedAccountCardRow td:last-child {
+  border-radius: 0;
+}
+
+//.expandedAccountCardRow:hover td {
+//  background: transparent;
+//}
+
+.expandedAccountCard {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  border-radius: 12px;
+  border: 1px solid var(--monitor-line);
+  background: var(--monitor-surface-elevated);
+}
+
+.expandedAccountSummary {
+  display: grid;
+  grid-template-columns: var(--account-overview-columns);
+  gap: 0;
+  align-items: center;
+  min-width: 0;
+}
+
+.expandedAccountPrimary,
+.expandedAccountBody {
+  min-width: 0;
+}
+
+.expandedAccountPrimary,
+.expandedAccountMetricValue {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 14px 10px;
+  min-width: 0;
+}
+
+.expandedAccountPrimary {
+  align-items: flex-start;
+}
+
+.expandedAccountMetricValue strong {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.expandedAccountAction {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  box-sizing: border-box;
+  padding: 14px 10px;
+  min-width: 0;
+}
+
+.expandPanel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.quotaRefreshButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--monitor-line);
+  border-radius: 999px;
+  background: var(--monitor-surface);
+  color: var(--monitor-ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.quotaRefreshButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+  transform: none;
+}
+
+.quotaSection {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.quotaSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.quotaSectionTitleGroup {
+  display: grid;
+  gap: 4px;
+}
+
+.quotaSectionTitleGroup strong {
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.quotaSectionTitleGroup span,
+.quotaEntryMain small,
+.quotaWindowRow small {
+  color: var(--monitor-muted);
+  font-size: 12px;
+}
+
+.quotaEntryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.quotaCompactCard {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 0;
+  background: color-mix(in srgb, var(--monitor-accent) 6%, var(--monitor-surface-elevated));
+}
+
+.quotaCompactHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.quotaEntryCard {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 0;
+  background: var(--monitor-surface-elevated);
+}
+
+.quotaEntryHeader,
+.quotaEntryMain,
+.quotaWindowList,
+.quotaWindowRow {
+  display: grid;
+  gap: 8px;
+}
+
+.quotaEntryMain strong,
+.quotaWindowHeader strong {
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.quotaWindowHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.quotaWindowHeader span {
+  color: var(--monitor-ink);
+  font-size: 12px;
+}
+
+.quotaProgressTrack {
+  position: relative;
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--monitor-line) 68%, transparent);
+}
+
+.quotaProgressBar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, var(--monitor-accent), var(--monitor-cyan));
+}
+
+.quotaStateMessage {
+  display: grid;
+  min-height: 44px;
+  place-items: center start;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--monitor-line) 82%, transparent);
+  background: color-mix(in srgb, var(--monitor-surface-elevated) 82%, var(--monitor-surface));
+  color: var(--monitor-muted);
+  font-size: 12px;
+}
+
+.accountSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.accountSectionHeader strong {
+  min-width: 0;
+  color: var(--monitor-ink);
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.accountOverviewCard .accountButton {
+  align-items: center;
+}
+
+.accountOverviewCard .accountButtonLabel {
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+  line-height: 1.45;
+}
+
+.accountOverviewCard .accountButton small {
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.accountOverviewCardBody .quotaRefreshButton {
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+.accountOverviewCardBody .quotaSection {
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.accountOverviewCardBody .quotaSectionHeader {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.accountOverviewCardBody .quotaEntryGrid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.accountOverviewCardBody .quotaEntryCard {
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--monitor-line) 82%, transparent);
+  background: color-mix(in srgb, var(--monitor-surface) 78%, var(--monitor-surface-elevated));
+}
+
+.accountQuotaContent,
+.accountQuotaRow,
+.accountQuotaRowHeader,
+.accountQuotaModel,
+.accountQuotaMeta,
+.accountQuotaPlanValue,
+.accountQuotaPremiumPlanValue,
+.accountQuotaResetCreditRow,
+.accountQuotaResetCreditTime {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.accountQuotaContent,
+.accountQuotaRow {
+  width: 100%;
+}
+
+.accountQuotaRowHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, max-content);
+  align-items: baseline;
+  gap: 8px;
+}
+
+.accountQuotaModel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountQuotaMeta {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 8px;
+  width: auto;
+  line-height: 1.4;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.accountQuotaAmount {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.accountQuotaMeta > :not(.accountQuotaAmount) {
+  flex: 0 0 auto;
+}
+
+.accountQuotaPlanValue {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountQuotaPremiumPlanValue {
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountQuotaResetCreditRow {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.accountQuotaResetCreditTime {
+  flex: 1 1 140px;
+  text-align: left;
+}
+
+.realtimeTable .primaryCell small {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.realtimeTokenCell > span,
+.realtimeTokenCell > small {
+  display: block;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.realtimeTable .realtimeTokenCell > small {
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  -webkit-box-orient: initial;
+  -webkit-line-clamp: unset;
+}
+
+.logRowFailed td {
+  border-top-color: color-mix(in srgb, var(--monitor-red) 28%, var(--monitor-line));
+  border-bottom-color: color-mix(in srgb, var(--monitor-red) 28%, var(--monitor-line));
+}
+
+.logRowFailed td:first-child,
+.logRowFailed td:last-child {
+  border-color: color-mix(in srgb, var(--monitor-red) 28%, var(--monitor-line));
+}
+
+//.logRowFailed:hover td {
+//  background: color-mix(in srgb, var(--monitor-red) 5%, var(--monitor-surface-hover));
+//}
+
+.emptyBlock,
+.emptyTable,
+.emptyBlockSmall {
+  display: grid;
+  place-items: center;
+  color: var(--monitor-muted);
+  text-align: center;
+  font-size: 14px;
+}
+
+.emptyBlock,
+.emptyTable {
+  min-height: 120px;
+}
+
+.emptyBlockSmall {
+  min-height: 80px;
+}

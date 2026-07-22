@@ -1,0 +1,903 @@
+.accountStatsCard {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--monitor-line);
+  border-radius: 12px;
+  background: var(--monitor-surface);
+  box-shadow: var(--shadow);
+  overflow: visible;
+}
+
+.accountStatsToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.accountStatsFilters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.accountStatsFilters :global(.form-group) {
+  margin: 0;
+}
+
+.accountStatsSearchInput {
+  width: 180px;
+  min-width: 0;
+  height: 34px;
+  min-height: 34px;
+  padding-block: 0;
+  padding-right: 30px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.accountStatsSelect {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--monitor-line);
+  border-radius: 8px;
+  background: var(--monitor-surface);
+  color: var(--monitor-ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  appearance: auto;
+}
+
+.accountStatsSelect:hover {
+  border-color: color-mix(in srgb, var(--monitor-accent) 35%, var(--monitor-line-strong));
+}
+
+.accountStatsClearButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--monitor-line);
+  border-radius: 8px;
+  background: var(--monitor-surface);
+  color: var(--monitor-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.accountStatsClearButton:hover {
+  border-color: color-mix(in srgb, var(--monitor-accent) 35%, var(--monitor-line-strong));
+  background: var(--monitor-surface-hover);
+  color: var(--monitor-ink);
+}
+
+.accountOverviewCardGrid {
+  --account-card-min-width: 330px;
+
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--account-card-min-width)), 1fr));
+  align-items: start;
+  justify-content: start;
+  gap: 16px;
+}
+
+.accountOverviewCard {
+  display: grid;
+  gap: 14px;
+  align-self: start;
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--monitor-line-strong) 58%, var(--monitor-line));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--floating-surface, #fffdf9) 34%, var(--monitor-surface));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--floating-surface, #fffdf9) 48%, transparent),
+    0 8px 18px -18px rgba(45, 42, 38, 0.34);
+}
+
+.accountOverviewCardExpanded {
+  border-color: color-mix(in srgb, var(--monitor-accent) 28%, var(--monitor-line-strong));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--floating-surface, #fffdf9) 52%, transparent),
+    0 10px 20px -18px rgba(45, 42, 38, 0.38),
+    0 0 0 1px color-mix(in srgb, var(--monitor-accent) 8%, transparent);
+}
+
+.accountOverviewCardFocused {
+  border-color: color-mix(in srgb, var(--monitor-accent) 42%, var(--monitor-line));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--monitor-accent) 18%, transparent),
+    0 12px 24px -18px rgba(45, 42, 38, 0.42),
+    var(--shadow-lg);
+}
+
+.accountOverviewCardHeader {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.accountTitleRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.accountExpandGlyph {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  color: var(--monitor-muted);
+  align-self: center;
+}
+
+.accountIdentityLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.accountStatusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.accountStatusDotEnabled {
+  color: var(--monitor-green);
+}
+
+.accountStatusDotDisabled,
+.accountStatusDotUnavailable {
+  color: var(--monitor-red);
+}
+
+.accountStatusDotMixed {
+  color: var(--monitor-amber);
+}
+
+.accountHealthBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.accountHealthBadgegood {
+  color: var(--monitor-green);
+  border-color: color-mix(in srgb, var(--monitor-green) 26%, var(--monitor-line));
+  background: color-mix(in srgb, var(--monitor-green) 11%, var(--monitor-surface));
+}
+
+.accountHealthBadgewarn {
+  color: color-mix(in srgb, var(--monitor-amber) 86%, #78350f);
+  border-color: color-mix(in srgb, var(--monitor-amber) 30%, var(--monitor-line));
+  background: color-mix(in srgb, var(--monitor-amber) 15%, var(--monitor-surface));
+}
+
+.accountHealthBadgebad {
+  color: var(--monitor-red);
+  border-color: color-mix(in srgb, var(--monitor-red) 26%, var(--monitor-line));
+  background: color-mix(in srgb, var(--monitor-red) 11%, var(--monitor-surface));
+}
+
+.accountOverviewCardTimestamp {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--monitor-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountMetaRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.accountMetaRow .inlineActionButton {
+  margin-left: auto;
+}
+
+.accountFocusButton {
+  min-height: 26px;
+  padding: 0 8px;
+  gap: 5px;
+  border-color: color-mix(in srgb, var(--monitor-line) 56%, transparent);
+  background: color-mix(in srgb, var(--monitor-surface-elevated) 58%, transparent);
+  color: var(--monitor-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.accountMetaSeparator {
+  color: var(--monitor-muted);
+}
+
+.accountOverviewStatusSection,
+.accountTokenStructurePanel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--monitor-line) 82%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--monitor-surface-muted) 34%, var(--monitor-surface));
+}
+
+.accountScopeText {
+  color: var(--monitor-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.accountTokenPanel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.accountSectionInfo {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--monitor-muted) 30%, transparent);
+  color: var(--monitor-muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.healthMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.healthMetricItem {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.healthMetricItem span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--monitor-muted);
+  font-size: 11px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.healthMetricItem strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--monitor-ink);
+  font-size: 16px;
+  font-weight: 750;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.healthMetricItem .successFailureValue,
+.healthMetricItem .successFailureValue span {
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
+.monitoringStatusBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.monitoringStatusBlocks {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+.monitoringStatusBlockWrapper {
+  flex: 1;
+  min-width: 6px;
+  position: relative;
+}
+
+.monitoringStatusBlockButton {
+  width: 100%;
+  padding: 3px 0;
+  display: flex;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.monitoringStatusBlockButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--monitor-accent) 78%, white);
+  outline-offset: 2px;
+}
+
+.monitoringStatusBlockActive .monitoringStatusBlock,
+.monitoringStatusBlockButton:hover .monitoringStatusBlock,
+.monitoringStatusBlockButton:focus-visible .monitoringStatusBlock {
+  transform: scaleY(1.35);
+  opacity: 1;
+}
+
+.monitoringStatusBlock {
+  width: 100%;
+  height: 7px;
+  border-radius: 999px;
+  opacity: 0.92;
+  transform-origin: center;
+  transition:
+    transform 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.monitoringStatusBlockIdle {
+  background-color: color-mix(in srgb, var(--monitor-line) 82%, transparent);
+}
+
+.monitoringStatusTooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  padding: 6px 10px;
+  border: 1px solid var(--monitor-line);
+  border-radius: 8px;
+  background: var(--monitor-surface);
+  box-shadow: var(--shadow-lg);
+  color: var(--monitor-ink);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.monitoringStatusTooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--monitor-surface);
+}
+
+.monitoringStatusTooltip::before {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: var(--monitor-line);
+}
+
+.monitoringStatusTooltipLeft {
+  left: 0;
+  transform: translateX(0);
+}
+
+.monitoringStatusTooltipLeft::after,
+.monitoringStatusTooltipLeft::before {
+  left: 8px;
+  transform: none;
+}
+
+.monitoringStatusTooltipRight {
+  left: auto;
+  right: 0;
+  transform: translateX(0);
+}
+
+.monitoringStatusTooltipRight::after,
+.monitoringStatusTooltipRight::before {
+  left: auto;
+  right: 8px;
+  transform: none;
+}
+
+.monitoringTooltipTime {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--monitor-muted);
+}
+
+.monitoringTooltipStats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.monitoringTooltipSuccess {
+  color: var(--monitor-green);
+}
+
+.monitoringTooltipFailure {
+  color: var(--monitor-red);
+}
+
+.monitoringTooltipRate {
+  color: var(--monitor-muted);
+}
+
+.monitoringStatusRate {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--monitor-surface-elevated) 88%, var(--monitor-surface));
+  color: var(--monitor-muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.monitoringStatusRatePlaceholder {
+  display: none;
+}
+
+.monitoringStatusRateHigh {
+  color: var(--monitor-green);
+  background: color-mix(in srgb, var(--monitor-green) 14%, var(--monitor-surface));
+}
+
+.monitoringStatusRateMedium {
+  color: color-mix(in srgb, var(--monitor-amber) 86%, #78350f);
+  background: color-mix(in srgb, var(--monitor-amber) 16%, var(--monitor-surface));
+}
+
+.monitoringStatusRateLow {
+  color: var(--monitor-red);
+  background: color-mix(in srgb, var(--monitor-red) 14%, var(--monitor-surface));
+}
+
+.accountOverviewMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.accountOverviewMetricCard {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  min-height: 68px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--monitor-line) 80%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--monitor-surface-elevated) 80%, var(--monitor-surface));
+}
+
+.accountOverviewMetricLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--monitor-muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.accountMetricIcon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--monitor-accent) 11%, var(--monitor-surface));
+  color: var(--monitor-accent-strong);
+}
+
+.accountMetricIcon::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.accountMetricIconTotal {
+  background: color-mix(in srgb, var(--monitor-accent) 13%, var(--monitor-surface));
+  color: var(--monitor-accent-strong);
+}
+
+.accountMetricIconInput {
+  background: color-mix(in srgb, var(--monitor-green) 13%, var(--monitor-surface));
+  color: var(--monitor-green);
+}
+
+.accountMetricIconOutput {
+  background: color-mix(in srgb, var(--monitor-amber) 17%, var(--monitor-surface));
+  color: var(--monitor-amber);
+}
+
+.accountMetricIconCached {
+  background: color-mix(in srgb, var(--monitor-cyan) 14%, var(--monitor-surface));
+  color: var(--monitor-cyan);
+}
+
+.accountOverviewMetricValue {
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 750;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.accountOverviewCardBody {
+  display: grid;
+  gap: 14px;
+  padding-top: 2px;
+  min-width: 0;
+}
+
+.accountModelListPanel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.accountModelViewAllButton {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--monitor-accent-strong);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.accountModelViewAllButton:hover {
+  transform: none;
+  color: var(--monitor-accent);
+}
+
+.accountModelList {
+  display: grid;
+  min-width: 0;
+}
+
+.accountModelItem {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 0;
+  border-top: 1px solid color-mix(in srgb, var(--monitor-line) 84%, transparent);
+}
+
+.accountModelItem:first-child {
+  border-top: 0;
+}
+
+.accountModelRow {
+  display: grid;
+  align-items: start;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.accountModelRow:hover {
+  transform: none;
+  color: var(--monitor-accent-strong);
+}
+
+.accountModelStat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 0;
+  text-align: left;
+}
+
+.accountModelStat small {
+  color: var(--monitor-muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.accountModelStat strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--monitor-ink);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountModelMetaLine {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+  color: var(--monitor-muted);
+}
+
+.accountModelMetaLine .accountModelStat {
+  min-width: 0;
+}
+
+.accountModelChevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 14px;
+  min-width: 14px;
+  height: 16px;
+  color: var(--monitor-muted);
+  line-height: 1;
+}
+
+.accountModelExpanded {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px 12px;
+  padding: 8px 10px 4px;
+  border-top: 1px dashed color-mix(in srgb, var(--monitor-line) 80%, transparent);
+}
+
+.accountModelExpandedItem {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.accountModelExpandedItem small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--monitor-muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountModelExpandedItem strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--monitor-ink);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountModelName {
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--monitor-ink);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summaryCard {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  min-height: 104px;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--monitor-surface);
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.summaryCard:hover {
+  transform: translateY(-1px);
+  border-color: var(--monitor-line-strong);
+  box-shadow: var(--shadow);
+}
+
+.summaryLabel {
+  color: var(--monitor-muted);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.summaryValue {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summaryMeta {
+  margin-top: 0;
+  color: var(--monitor-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.statusBadge {
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 8px;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tonegood {
+  color: var(--monitor-green);
+}
+
+.tonewarn {
+  color: var(--monitor-amber);
+}
+
+.tonebad {
+  color: var(--monitor-red);
+}
+
+.statusBadge.tonegood {
+  border-color: color-mix(in srgb, var(--monitor-green) 26%, var(--monitor-line));
+  background: color-mix(in srgb, var(--monitor-green) 10%, var(--monitor-surface));
+}
+
+.statusBadge.tonewarn {
+  border-color: color-mix(in srgb, var(--monitor-amber) 24%, var(--monitor-line));
+  background: color-mix(in srgb, var(--monitor-amber) 10%, var(--monitor-surface));
+}
+
+.statusBadge.tonebad {
+  border-color: color-mix(in srgb, var(--monitor-red) 26%, var(--monitor-line));
+  background: color-mix(in srgb, var(--monitor-red) 10%, var(--monitor-surface));
+}
+
+.successFailureValue {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.12em;
+  min-width: 0;
+}
+
+.goodText {
+  color: var(--monitor-green);
+}
+
+.warnText {
+  color: var(--monitor-amber);
+}
+
+.badText {
+  color: var(--monitor-red);
+}
+
+.patternBars {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 6px;
+  gap: 4px;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--monitor-line);
+  background: var(--monitor-surface-muted);
+}
+
+.patternBarsPlain {
+  grid-auto-columns: 4px;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.patternBar {
+  width: 6px;
+  height: 16px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--monitor-muted) 24%, transparent);
+}
+
+.patternBarPlain {
+  width: 4px;
+  height: 24px;
+}
+
+.patternSuccess {
+  background: var(--monitor-green);
+}
+
+.patternFailed {
+  background: var(--monitor-red);
+}

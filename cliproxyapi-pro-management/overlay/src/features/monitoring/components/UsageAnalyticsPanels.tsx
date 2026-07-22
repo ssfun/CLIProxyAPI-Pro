@@ -17,7 +17,7 @@ import {
 } from '../monitoringAnalytics';
 import { RANKING_METRIC_OPTIONS, TIME_RANGE_OPTIONS } from '../monitoringOptions';
 import { formatCompactNumber, formatUsd } from '@/utils/usage';
-import styles from '@/pages/MonitoringCenterPage.module.scss';
+import styles from '../monitoring.module.scss';
 
 export type UsageMetricCard = {
   key: string;

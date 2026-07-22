@@ -10,7 +10,7 @@ import type { TFunction } from 'i18next';
 import { IconInfo } from '@/components/ui/icons';
 import type { RealtimeLogRow } from '../realtimeLogPresentation';
 import { formatCompactNumber, formatUsdPrecise } from '@/utils/usage';
-import styles from '@/pages/MonitoringCenterPage.module.scss';
+import styles from '../monitoring.module.scss';
 
 type RealtimeCostTooltipPosition = {
   top: number;

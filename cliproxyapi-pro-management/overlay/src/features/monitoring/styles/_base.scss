@@ -1,0 +1,720 @@
+.page,
+.monitorModal {
+  --monitor-bg: var(--bg-secondary);
+  --monitor-surface: var(--bg-primary);
+  --monitor-surface-elevated: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary));
+  --monitor-surface-muted: var(--bg-secondary);
+  --monitor-surface-hover: var(--bg-tertiary);
+  --monitor-ink: var(--text-primary);
+  --monitor-muted: var(--text-secondary);
+  --monitor-line: var(--border-color);
+  --monitor-line-strong: var(--border-primary);
+  --monitor-accent: var(--primary-color);
+  --monitor-accent-strong: var(--primary-color);
+  --monitor-accent-soft: rgba(59, 130, 246, 0.12);
+  --monitor-cyan: #06b6d4;
+  --monitor-green: var(--success-color);
+  --monitor-amber: #f59e0b;
+  --monitor-red: var(--error-color);
+  color: var(--monitor-ink);
+}
+
+.page {
+  container: monitoring-page / inline-size;
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+
+.masthead,
+.panel {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--monitor-line);
+  border-radius: 12px;
+  background: var(--monitor-surface);
+  box-shadow: var(--shadow);
+}
+
+.masthead {
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mastheadGlow {
+  display: none;
+}
+
+.mastheadCopy {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.titleRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 20px;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  min-width: 0;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+.titleActions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--monitor-line) 72%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--monitor-surface) 74%, transparent);
+  box-shadow: 0 12px 28px -26px rgba(15, 23, 42, 0.5);
+  scrollbar-width: none;
+}
+
+.titleActions::-webkit-scrollbar {
+  display: none;
+}
+
+.hiddenFileInput {
+  display: none;
+}
+
+.subtitle {
+  margin: 0;
+  max-width: 760px;
+  color: var(--monitor-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.mastheadActionButton {
+  flex: 0 0 auto;
+  align-self: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--monitor-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mastheadActionButton:hover {
+  border-color: color-mix(in srgb, var(--monitor-accent) 20%, var(--monitor-line));
+  background: color-mix(in srgb, var(--monitor-accent) 8%, var(--monitor-surface));
+  color: var(--monitor-ink);
+  box-shadow: none;
+}
+
+.segmentedControl {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid var(--monitor-line);
+  background: var(--monitor-surface-muted);
+}
+
+.segmentButton,
+.refreshButton,
+.quickLinkButton,
+.clearButton,
+.inlineActionButton,
+.quotaRefreshButton,
+.accountButton,
+.statusBadge {
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.segmentButton {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--monitor-muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.segmentButton:hover {
+  transform: translateY(-1px);
+  color: var(--monitor-ink);
+}
+
+.segmentButtonActive {
+  background: var(--monitor-accent);
+  color: var(--primary-contrast, #fff);
+  box-shadow: 0 8px 18px -14px rgba(0, 0, 0, 0.45);
+}
+
+.refreshCluster {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--monitor-line);
+  background: var(--monitor-surface-muted);
+}
+
+.refreshControls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.syncPill,
+.quickLinkButton,
+.clearButton,
+.inlineActionButton,
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--monitor-line);
+  background: var(--monitor-surface-elevated);
+}
+
+.syncPill,
+.quickLinkButton {
+  color: var(--monitor-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.syncPill {
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+.syncPill.tonegood {
+  border-color: color-mix(in srgb, var(--monitor-green) 30%, var(--monitor-line));
+  background: color-mix(in srgb, var(--monitor-green) 9%, var(--monitor-surface));
+  color: var(--monitor-green);
+}
+
+.syncPill.tonewarn {
+  border-color: color-mix(in srgb, var(--monitor-amber) 30%, var(--monitor-line));
+  background: color-mix(in srgb, var(--monitor-amber) 9%, var(--monitor-surface));
+  color: var(--monitor-amber);
+}
+
+.syncPill.tonebad {
+  border-color: color-mix(in srgb, var(--monitor-red) 30%, var(--monitor-line));
+  background: color-mix(in srgb, var(--monitor-red) 8%, var(--monitor-surface));
+  color: var(--monitor-red);
+}
+
+.quickLinkButton {
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.quickLinkButton {
+  text-decoration: none;
+  cursor: pointer;
+  font: inherit;
+  border-radius: 8px;
+}
+
+.quickLinkButton:hover,
+.clearButton:hover,
+.inlineActionButton:hover,
+.quotaRefreshButton:hover,
+.refreshButton:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--monitor-accent) 35%, var(--monitor-line-strong));
+  background: var(--monitor-surface-hover);
+  color: var(--monitor-ink);
+}
+
+.clearButton,
+.inlineActionButton {
+  gap: 8px;
+  color: var(--monitor-ink);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.autoRefreshField {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 6px 0 10px;
+  border-radius: 12px;
+  border: 1px solid var(--monitor-line);
+  background: var(--monitor-surface);
+}
+
+.autoRefreshLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--monitor-muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.autoRefreshSelect {
+  width: 94px;
+  flex: 0 0 auto;
+}
+
+.autoRefreshSelectTrigger {
+  min-width: 76px;
+  height: 30px !important;
+  padding: 0 2px 0 6px !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--monitor-ink);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.autoRefreshSelectTrigger:hover,
+.autoRefreshSelectTrigger:focus,
+.autoRefreshSelectTrigger[aria-expanded='true'] {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.refreshButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 92px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--monitor-line);
+  border-radius: 12px;
+  background: var(--monitor-surface);
+  color: var(--monitor-ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.refreshButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+  transform: none;
+}
+
+.refreshIcon,
+.refreshIconSpinning {
+  display: block;
+  flex-shrink: 0;
+  transform-origin: center;
+}
+
+.refreshIconSpinning {
+  animation: monitor-spin 0.9s linear infinite;
+}
+
+.refreshButtonLabel {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.panel {
+  min-width: 0;
+  padding: 24px;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.panelTitle {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.panelSubtitle {
+  margin: 6px 0 0;
+  color: var(--monitor-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.panelExtra {
+  flex-shrink: 0;
+}
+
+.toolbarHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: min(420px, 44vw);
+  min-width: 0;
+}
+
+.toolbarHeaderActions :global(.form-group) {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.toolbarHeaderActions :global(.form-group > div) {
+  display: flex;
+  align-items: center;
+}
+
+.toolbarHeaderSearchInput {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  min-height: 40px;
+  padding-block: 0;
+  padding-right: 36px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.toolbarHeaderActions .clearButton {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.pricingPanel,
+.accountPanel {
+  background: var(--monitor-surface);
+}
+
+.realtimePanel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--monitor-line);
+  border-radius: 12px;
+  background: var(--monitor-surface);
+  box-shadow: var(--shadow);
+}
+
+.accountPanelActions {
+  min-width: 180px;
+}
+
+.toolbarControlRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--monitor-line) 60%, transparent);
+  background: color-mix(in srgb, var(--monitor-surface-muted) 60%, transparent);
+}
+
+.filterGrid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.4fr) repeat(4, minmax(128px, 1fr)) auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.filterGrid :global(.form-group) {
+  min-width: 0;
+  margin: 0;
+}
+
+.filterGrid .clearButton {
+  min-height: 40px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.inlineMetrics {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.inlineMetrics::-webkit-scrollbar {
+  display: none;
+}
+
+.inlineMetrics span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--monitor-line);
+  background: var(--monitor-surface-elevated);
+  color: var(--monitor-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.realtimeLogStatusRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.realtimeFollowToggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  color: var(--monitor-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.realtimeFollowToggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.realtimeFollowTrack {
+  position: relative;
+  display: inline-flex;
+  width: 34px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--monitor-muted) 44%, var(--monitor-line));
+  border-radius: 999px;
+  background: var(--monitor-surface-muted);
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.realtimeFollowTrack > span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--monitor-muted);
+  transition: transform 0.16s ease, background 0.16s ease;
+}
+
+.realtimeFollowToggle input:checked + .realtimeFollowTrack {
+  border-color: var(--monitor-accent-strong);
+  background: color-mix(in srgb, var(--monitor-accent) 28%, var(--monitor-surface));
+}
+
+.realtimeFollowToggle input:checked + .realtimeFollowTrack > span {
+  transform: translateX(16px);
+  background: var(--monitor-accent-strong);
+}
+
+.realtimeFollowToggle input:focus-visible + .realtimeFollowTrack {
+  outline: 2px solid color-mix(in srgb, var(--monitor-accent-strong) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.realtimeFollowLabel {
+  color: var(--monitor-ink);
+  font-weight: 650;
+}
+
+.realtimeUpdateBar {
+  position: absolute;
+  top: 50px;
+  right: 14px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: min(460px, calc(100% - 28px));
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--monitor-accent) 30%, var(--monitor-line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--monitor-accent) 7%, var(--monitor-surface));
+  box-shadow: var(--shadow);
+}
+
+.realtimeUpdateCopy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.realtimeUpdateCopy strong {
+  color: var(--monitor-ink);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.realtimeUpdateCopy span {
+  color: var(--monitor-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.realtimeUpdateBar .inlineActionButton {
+  flex: 0 0 auto;
+}
+
+.realtimeTableShell {
+  position: relative;
+  min-width: 0;
+  height: min(620px, 68vh);
+}
+
+.realtimeColumnsMenu {
+  position: relative;
+  min-width: 0;
+}
+
+.realtimeColumnsDropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  display: grid;
+  gap: 10px;
+  width: max-content;
+  min-width: 128px;
+  max-width: min(220px, calc(100vw - 32px));
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--monitor-line) 82%, transparent);
+  border-radius: 8px;
+  background: var(--monitor-surface);
+  box-shadow: var(--shadow);
+}
+
+.realtimeColumnsDropdownHeader {
+  display: grid;
+  gap: 8px;
+  color: var(--monitor-muted);
+  font-size: 12px;
+}
+
+.realtimeColumnsDropdownHeader .inlineActionButton {
+  justify-self: start;
+}
+
+.realtimeColumnsDropdownList {
+  display: grid;
+  gap: 4px;
+}
+
+.realtimeColumnToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  color: var(--monitor-ink);
+  font-size: 12px;
+}
+
+.realtimeColumnToggle:hover {
+  background: color-mix(in srgb, var(--monitor-accent) 8%, transparent);
+}
+
+.realtimeColumnToggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--monitor-accent-strong);
+}
+
+.realtimeColumnToggle span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.errorBox,
+.callout {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--monitor-line);
+}
+
+.errorBox {
+  margin-top: 14px;
+  border-color: color-mix(in srgb, var(--monitor-red) 28%, var(--monitor-line));
+  background: color-mix(in srgb, var(--monitor-red) 10%, var(--monitor-surface));
+  color: var(--monitor-red);
+}
+
+.callout {
+  margin-top: 14px;
+  border-color: color-mix(in srgb, var(--monitor-accent) 24%, var(--monitor-line));
+  background: color-mix(in srgb, var(--monitor-accent) 8%, var(--monitor-surface));
+}

@@ -6,11 +6,19 @@ PAGE_PATH = (
     Path(__file__).resolve().parents[1]
     / 'overlay/src/pages/MonitoringCenterPage.tsx'
 )
-STYLE_PATH = PAGE_PATH.with_suffix('.module.scss')
+STYLE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / 'overlay/src/features/monitoring/monitoring.module.scss'
+)
+STYLE_DIR = STYLE_PATH.parent / 'styles'
 REALTIME_HOOK_PATH = (
     Path(__file__).resolve().parents[1]
     / 'overlay/src/features/monitoring/hooks/useRealtimeLogData.ts'
 )
+
+
+def read_monitoring_styles() -> str:
+    return '\n'.join(path.read_text() for path in sorted(STYLE_DIR.glob('*.scss')))
 
 
 class MonitoringToolbarCustomizationTest(unittest.TestCase):
@@ -42,7 +50,7 @@ class MonitoringToolbarCustomizationTest(unittest.TestCase):
     def test_realtime_logs_restore_the_internal_scroll_anchor(self) -> None:
         source = PAGE_PATH.read_text()
         hook_source = REALTIME_HOOK_PATH.read_text()
-        styles = STYLE_PATH.read_text()
+        styles = read_monitoring_styles()
 
         self.assertIn("data-realtime-row-id={row.id}", source)
         self.assertIn("pendingScrollSnapshotRef", hook_source)
@@ -59,7 +67,7 @@ class MonitoringToolbarCustomizationTest(unittest.TestCase):
 
     def test_realtime_follow_refresh_does_not_change_outer_layout_height(self) -> None:
         source = PAGE_PATH.read_text()
-        styles = STYLE_PATH.read_text()
+        styles = read_monitoring_styles()
 
         self.assertIn("pendingRealtimeEventCount > 0 && realtimeLogAutoRefreshPaused", source)
         self.assertIn("className={styles.realtimeTableShell}", source)

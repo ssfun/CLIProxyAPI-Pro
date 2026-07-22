@@ -1,0 +1,219 @@
+@media (max-width: 900px) {
+  .priceManagerModal :global(.modal-body) {
+    max-height: min(76vh, 680px);
+  }
+
+  .priceRuleWorkspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: 154px minmax(0, 1fr);
+    height: min(70vh, 620px);
+  }
+
+  .priceRuleSidebar {
+    grid-template-rows: auto minmax(0, 1fr);
+    border-right: 0;
+    border-bottom: 1px solid var(--monitor-line);
+  }
+
+  .priceRuleSearch {
+    padding: 10px 14px;
+  }
+
+  .priceRuleList {
+    display: flex;
+    gap: 7px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 7px 10px 10px;
+  }
+
+  .priceRuleListItem {
+    flex: 0 0 220px;
+    min-height: 58px;
+    padding: 8px 10px;
+  }
+
+  .priceRuleListEmpty {
+    flex: 1 1 100%;
+    min-height: 58px;
+  }
+
+  .priceSyncHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .priceSyncActions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .priceSyncSchedule {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .priceSyncScheduleControls {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .priceSyncChangesHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .priceSyncChangesToolbar {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .priceSyncChangeFilters {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .priceSyncChangeRow {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .priceSyncRateChanges {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 680px) {
+  .priceManagerModal :global(.modal-body) {
+    max-height: min(72vh, calc(100dvh - 150px));
+  }
+
+  .priceManagerTabs {
+    padding-inline: 10px 46px;
+  }
+
+  .priceManagerTab {
+    min-width: 0;
+    flex: 1 1 0;
+    justify-content: center;
+    padding-inline: 8px;
+  }
+
+  .priceRuleWorkspace {
+    grid-template-rows: 150px minmax(0, 1fr);
+    height: min(66vh, calc(100dvh - 160px));
+  }
+
+  .priceRuleEditorHeader,
+  .priceRuleSection,
+  .priceRuleEditorFooter,
+  .priceSyncView {
+    padding-inline: 14px;
+  }
+
+  .priceRuleEditorHeader {
+    min-height: 66px;
+  }
+
+  .priceRuleEditorBadges > span:not(:first-child) {
+    display: none;
+  }
+
+  .priceBaseGrid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .priceTierCompactRow {
+    position: relative;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 34px 10px 10px;
+  }
+
+  .priceTierCompactRow label:first-of-type {
+    grid-column: 1 / -1;
+  }
+
+  .priceTierIndex {
+    position: absolute;
+    top: 8px;
+    left: 10px;
+    width: 24px;
+    height: 20px;
+  }
+
+  .priceTierRemoveButton {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    width: 30px;
+    height: 26px;
+  }
+
+  .priceRuleEditorFooter {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .priceRuleEditorFooter > div {
+    width: 100%;
+  }
+
+  .priceRuleEditorFooter > div:last-child :global(.btn) {
+    flex: 1 1 0;
+  }
+
+  .priceSyncView {
+    padding-block: 18px;
+  }
+
+  .priceSyncActions :global(.btn) {
+    flex: 1 1 132px;
+  }
+
+  .priceSyncMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-height: 158px;
+  }
+
+  .priceSyncMetrics > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .priceSyncMetrics > div:nth-child(n + 3) {
+    border-top: 1px solid var(--monitor-line);
+  }
+
+  .priceSyncOverrideAll {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .priceSyncChangeFilters button {
+    flex: 0 0 auto;
+  }
+
+  .priceSyncScheduleControls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+
+  .priceSyncScheduleToggle {
+    grid-column: 1 / -1;
+  }
+
+  .priceSyncScheduleInterval {
+    width: 100%;
+  }
+
+  .priceSyncSchedule :global(.btn) {
+    min-height: 34px;
+  }
+
+  .priceUnmatchedList > div:not(.priceTierEmpty) {
+    align-items: flex-start;
+  }
+}

@@ -1,29 +1,20 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { TFunction } from 'i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Select';
 import {
-  IconChevronDown,
-  IconChevronUp,
-  IconRefreshCw,
   IconSearch,
   IconSlidersHorizontal,
-  IconTrash2,
 } from '@/components/ui/icons';
 import {
   buildAccountRowsByAccount,
   buildLocalDayKey,
-  formatShortDateTime,
   getRangeStartMs,
-  joinUnique,
   useMonitoringData,
-  type MonitoringAccountRow,
   type MonitoringEventRow,
-  type MonitoringStatusTone,
   type MonitoringTimeRange,
 } from '@/features/monitoring/hooks/useMonitoringData';
 import { REALTIME_LOG_PAGE_SIZE, useRealtimeLogData } from '@/features/monitoring/hooks/useRealtimeLogData';
@@ -31,11 +22,23 @@ import { useUsageData, type UsageEventPageFilters, type UsagePayload } from '@/f
 import { useUsageAggregates, type UsageAggregateBucket } from '@/features/monitoring/hooks/useUsageAggregates';
 import { findMonitoringAuthIndexes } from '@/features/monitoring/monitoringAuthSearch';
 import {
-  buildAccountStatusData,
-  buildAccountStatusRange,
-  type AccountStatusData,
-} from '@/features/monitoring/accountHealth';
-import { MonitoringHealthStatusBar } from '@/features/monitoring/components/MonitoringHealthStatusBar';
+  buildAccountQuotaEntriesByAccount,
+  buildAccountQuotaTargetsByAccount,
+  getQuotaForTarget,
+  requestAccountQuota,
+  settleWithConcurrency,
+  type AccountQuotaSourceRow,
+  type AccountQuotaState,
+  type AnyQuotaConfig,
+} from '@/features/monitoring/accountQuota';
+import { AccountStatsPanel } from '@/features/monitoring/components/AccountStatsPanel';
+import { ModelPriceManagerModal } from '@/features/monitoring/components/ModelPriceManagerModal';
+import { MonitoringSettingsModal } from '@/features/monitoring/components/MonitoringSettingsModal';
+import {
+  RealtimeErrorDetailsPanel,
+  RecentPattern,
+  StatusBadge,
+} from '@/features/monitoring/components/RealtimeLogDetails';
 import {
   RealtimeCostCell,
 } from '@/features/monitoring/components/RealtimeCostCell';
@@ -60,17 +63,29 @@ import {
   createMonitoringSummaryAccumulator,
   finalizeMonitoringSummary,
   formatPercent,
-  getAccountHealthTone,
   getAccountSortValue,
   getRankingMetricValue,
-  type AccountHealthTone,
   type AccountSortMetric,
   type RankingMetric,
 } from '@/features/monitoring/monitoringAnalytics';
+import { TIME_RANGE_OPTIONS } from '@/features/monitoring/monitoringOptions';
 import {
-  ACCOUNT_SORT_OPTIONS,
-  TIME_RANGE_OPTIONS,
-} from '@/features/monitoring/monitoringOptions';
+  buildMonitoringSettingsFromDraft,
+  createMonitoringSettingsDraft,
+  type MonitoringSettings,
+  type MonitoringSettingsDraft,
+} from '@/features/monitoring/monitoringSettings';
+import {
+  createPriceDraft,
+  formatDeltaPercent,
+  parsePriceContextSize,
+  parsePriceValue,
+  type PriceDraft,
+  type PriceManagementView,
+  type PriceRuleTarget,
+  type PriceSyncChangeFilter,
+  type PriceTierDraft,
+} from '@/features/monitoring/modelPricePresentation';
 import {
   REALTIME_LOG_COLUMN_DEFAULT_WIDTHS,
   clampRealtimeLogColumnWidth,
@@ -89,9 +104,7 @@ import {
   buildRealtimeLogPageRows,
   buildRealtimeMetaText,
   buildRealtimeStatusLabel,
-  compactRealtimeErrorMessage,
   getClientPaginationRange,
-  translateRealtimeErrorCategory,
   translateRealtimeErrorText,
   type RealtimeLogRow,
 } from '@/features/monitoring/realtimeLogPresentation';
@@ -101,7 +114,7 @@ import { apiClient } from '@/services/api/client';
 import { useAuthStore, useConfigStore, useNotificationStore, useQuotaStore } from '@/stores';
 import type { AuthFileItem } from '@/types';
 import { maskSensitiveText } from '@/utils/format';
-import { getStatusFromError, isAntigravityFile, isClaudeFile, isCodexFile, isKimiFile, isXaiFile } from '@/utils/quota';
+import { getStatusFromError } from '@/utils/quota';
 import {
   deleteModelPriceRule,
   formatCompactNumber,
@@ -115,26 +128,14 @@ import {
   saveModelPriceRule,
   syncModelPricesFromModelsDev,
   type ModelPriceRule,
-  type ModelPriceSyncChangeAction,
   type ModelPriceSyncResult,
   type ModelPriceSyncState,
   type ObservedModelPriceTarget,
 } from '@/utils/usage';
-import {
-  ANTIGRAVITY_CONFIG,
-  CLAUDE_CONFIG,
-  CODEX_CONFIG,
-  KIMI_CONFIG,
-  XAI_CONFIG,
-  type QuotaConfig,
-  type QuotaStore,
-} from '@/components/quota/quotaConfigs';
-import { type QuotaRenderHelpers, type QuotaStatusState } from '@/components/quota/QuotaCard';
-import { QuotaProgressBar as AuthFileQuotaProgressBar } from '@/features/authFiles/components/QuotaProgressBar';
-import authFileQuotaStyles from '@/pages/AuthFilesPage.module.scss';
+import type { QuotaStatusState } from '@/components/quota/QuotaCard';
 import quotaStyles from '@/pages/QuotaPage.module.scss';
 import { quotaPersistenceMiddleware } from '@/extensions/quota/persistenceMiddleware';
-import styles from './MonitoringCenterPage.module.scss';
+import styles from '@/features/monitoring/monitoring.module.scss';
 
 type StatusFilter = 'all' | 'success' | 'failed';
 
@@ -153,6 +154,10 @@ const formatTokenCount = (value: number) => Math.max(0, Math.round(Number(value)
 
 const getCacheHitRate = (row: Pick<MonitoringEventRow, 'inputTokens' | 'cachedTokens'>): number | null => (
   row.inputTokens > 0 ? Math.min(Math.max(row.cachedTokens / row.inputTokens, 0), 1) : null
+);
+
+const getSuccessRateClassName = (rate: number) => (
+  rate >= 0.95 ? styles.goodText : rate >= 0.85 ? styles.warnText : styles.badText
 );
 
 const getRealtimeLogColumnContentTexts = (key: RealtimeLogColumnKey, row: RealtimeLogRow) => {
@@ -221,63 +226,6 @@ const estimateRealtimeLogHeaderWidth = (key: RealtimeLogColumnKey, label: string
   return clampRealtimeLogColumnWidth(key, textWidth + 42);
 };
 
-const formatAccountOverviewScopeText = (rangeLabel: string, t: TFunction) => t('monitoring.account_scope_text', { range: rangeLabel });
-
-type PriceTierDraft = {
-	contextSize: string;
-	input: string;
-	output: string;
-	cacheRead: string;
-	cacheWrite: string;
-};
-
-type PriceDraft = {
-  input: string;
-  output: string;
-  cacheRead: string;
-  cacheWrite: string;
-  tiers: PriceTierDraft[];
-};
-
-type PriceManagementView = 'rules' | 'sync';
-type PriceSyncChangeFilter = 'all' | ModelPriceSyncChangeAction;
-
-type PriceRuleTarget = {
-  key: string;
-  model: string;
-  requests: number;
-  lastSeenAtMs: number;
-  rule?: ModelPriceRule;
-};
-
-type MonitoringSettings = {
-  retentionDays: number;
-	webdav: {
-    enabled: boolean;
-    intervalMinutes: number;
-    retentionDays: number;
-    url: string;
-    username: string;
-    password: string;
-	};
-	modelPriceSync: {
-		enabled: boolean;
-		intervalMinutes: number;
-	};
-};
-
-type MonitoringSettingsDraft = {
-  retentionDays: string;
-  webdavEnabled: boolean;
-  webdavIntervalMinutes: string;
-  webdavRetentionDays: string;
-  webdavUrl: string;
-  webdavUsername: string;
-	webdavPassword: string;
-	modelPriceSyncEnabled: boolean;
-	modelPriceSyncIntervalMinutes: string;
-};
-
 type UsageImportResult = {
   added?: number;
   skipped?: number;
@@ -306,1093 +254,6 @@ type UsageResetResult = {
   generation: number;
   resetAtMs: number;
 };
-
-const createMonitoringSettingsDraft = (settings?: MonitoringSettings): MonitoringSettingsDraft => ({
-  retentionDays: String(settings?.retentionDays ?? 0),
-  webdavEnabled: settings?.webdav.enabled ?? false,
-  webdavIntervalMinutes: String(settings?.webdav.intervalMinutes ?? 1440),
-  webdavRetentionDays: String(settings?.webdav.retentionDays ?? 0),
-  webdavUrl: settings?.webdav.url ?? '',
-  webdavUsername: settings?.webdav.username ?? '',
-	webdavPassword: settings?.webdav.password ?? '',
-	modelPriceSyncEnabled: settings?.modelPriceSync?.enabled ?? false,
-	modelPriceSyncIntervalMinutes: String(settings?.modelPriceSync?.intervalMinutes ?? 1440),
-});
-
-const parseNonNegativeInteger = (value: string) => {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-};
-
-const parsePositiveInteger = (value: string, fallback: number) => {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
-
-const buildMonitoringSettingsFromDraft = (draft: MonitoringSettingsDraft): MonitoringSettings => ({
-  retentionDays: parseNonNegativeInteger(draft.retentionDays),
-  webdav: {
-    enabled: draft.webdavEnabled,
-    intervalMinutes: parsePositiveInteger(draft.webdavIntervalMinutes, 1440),
-    retentionDays: parseNonNegativeInteger(draft.webdavRetentionDays),
-    url: draft.webdavUrl.trim(),
-    username: draft.webdavUsername.trim(),
-		password: draft.webdavPassword,
-	},
-	modelPriceSync: {
-		enabled: draft.modelPriceSyncEnabled,
-		intervalMinutes: parsePositiveInteger(draft.modelPriceSyncIntervalMinutes, 1440),
-	},
-});
-
-
-const SuccessFailureValue = ({ success, failure }: { success: number; failure: number }) => (
-  <span className={styles.successFailureValue}>
-    <span className={styles.goodText}>{formatCompactNumber(success)}</span>
-    <span className={styles.badText}>({formatCompactNumber(failure)})</span>
-  </span>
-);
-
-const buildAccountCardFileName = (row: MonitoringAccountRow, quotaEntries: AccountQuotaEntry[] = []) => {
-  const quotaFileNames = Array.from(new Set(quotaEntries.map((entry) => entry.fileName).filter(Boolean)));
-  if (quotaFileNames.length > 0) return joinUnique(quotaFileNames, 1);
-
-  const fileName = row.authLabels.find((label) => label && label !== '-' && label.endsWith('.json'));
-  return fileName || row.authLabels.find((label) => label && label !== '-') || row.accountMasked || row.account;
-};
-
-const buildAccountCardProviderText = (row: MonitoringAccountRow) => {
-  const providers = row.providers.filter((provider) => provider && provider !== '-');
-  return providers.length > 0 ? joinUnique(providers, 2) : '-';
-};
-
-const sortAccountOverviewCardMetrics = (metrics: AccountSummaryMetric[], t: TFunction) => {
-  const labels: Record<string, string> = {
-    'total-tokens': t('monitoring.token_metric_total'),
-    'input-tokens': t('monitoring.token_metric_input'),
-    'output-tokens': t('monitoring.token_metric_output'),
-    'cached-tokens': t('monitoring.token_metric_cached'),
-  };
-  const order = ['total-tokens', 'input-tokens', 'output-tokens', 'cached-tokens'];
-  return order
-    .map((key) => {
-      const metric = metrics.find((item) => item.key === key);
-      return metric ? { ...metric, label: labels[key] } : undefined;
-    })
-    .filter(Boolean) as AccountSummaryMetric[];
-};
-
-const buildAccountSummaryMetrics = (
-  row: MonitoringAccountRow,
-  hasPrices: boolean,
-  locale: string,
-  t: TFunction
-): AccountSummaryMetric[] => [
-  {
-    key: 'total-calls',
-    label: t('monitoring.total_calls'),
-    value: formatCompactNumber(row.totalCalls),
-  },
-  {
-    key: 'success-calls',
-    label: t('monitoring.success_calls'),
-    value: <SuccessFailureValue success={row.successCalls} failure={row.failureCalls} />,
-  },
-  {
-    key: 'success-rate',
-    label: t('monitoring.call_success_rate'),
-    value: formatPercent(row.successRate),
-    valueClassName:
-      row.successRate >= 0.95
-        ? styles.goodText
-        : row.successRate >= 0.85
-          ? styles.warnText
-          : styles.badText,
-  },
-  {
-    key: 'total-tokens',
-    label: t('monitoring.total_tokens'),
-    value: formatCompactNumber(row.totalTokens),
-  },
-  {
-    key: 'input-tokens',
-    label: t('monitoring.input_tokens'),
-    value: formatCompactNumber(row.inputTokens),
-  },
-  {
-    key: 'output-tokens',
-    label: t('monitoring.output_tokens'),
-    value: formatCompactNumber(row.outputTokens),
-  },
-  {
-    key: 'cached-tokens',
-    label: t('monitoring.cached_tokens'),
-    value: formatCompactNumber(row.cachedTokens),
-  },
-  {
-    key: 'estimated-cost',
-    label: t('monitoring.estimated_cost'),
-    value: hasPrices ? formatUsd(row.totalCost) : '--',
-  },
-  {
-    key: 'latest-request-time',
-    label: t('monitoring.latest_request_time'),
-    value: new Date(row.lastSeenAt).toLocaleString(locale),
-  },
-];
-
-type AnyQuotaConfig = {
-  type: QuotaConfig<QuotaStatusState, unknown>['type'];
-  i18nPrefix: string;
-  fetchQuota: (file: AuthFileItem, t: TFunction) => Promise<unknown>;
-  storeSelector: (state: QuotaStore) => Record<string, QuotaStatusState>;
-  storeSetter: keyof QuotaStore;
-  buildLoadingState: () => QuotaStatusState;
-  buildSuccessState: (data: unknown) => QuotaStatusState;
-  buildErrorState: (message: string, status?: number) => QuotaStatusState;
-  renderQuotaItems: (quota: QuotaStatusState, t: TFunction, helpers: QuotaRenderHelpers) => ReactNode;
-};
-
-const adaptQuotaConfig = <TState extends QuotaStatusState, TData>(
-  config: QuotaConfig<TState, TData>
-): AnyQuotaConfig => ({
-  type: config.type,
-  i18nPrefix: config.i18nPrefix,
-  fetchQuota: config.fetchQuota,
-  storeSelector: config.storeSelector,
-  storeSetter: config.storeSetter,
-  buildLoadingState: config.buildLoadingState,
-  buildSuccessState: (data) => config.buildSuccessState(data as TData),
-  buildErrorState: config.buildErrorState,
-  renderQuotaItems: (quota, t, helpers) => config.renderQuotaItems(quota as TState, t, helpers),
-});
-
-const ACCOUNT_ANTIGRAVITY_QUOTA_CONFIG = adaptQuotaConfig(ANTIGRAVITY_CONFIG);
-const ACCOUNT_CLAUDE_QUOTA_CONFIG = adaptQuotaConfig(CLAUDE_CONFIG);
-const ACCOUNT_CODEX_QUOTA_CONFIG = adaptQuotaConfig(CODEX_CONFIG);
-const ACCOUNT_KIMI_QUOTA_CONFIG = adaptQuotaConfig(KIMI_CONFIG);
-const ACCOUNT_XAI_QUOTA_CONFIG = adaptQuotaConfig(XAI_CONFIG);
-
-type AccountQuotaTarget = {
-  key: string;
-  authIndex: string;
-  authLabel: string;
-  fileName: string;
-  file: AuthFileItem;
-  config: AnyQuotaConfig;
-};
-
-type AccountQuotaEntry = {
-  key: string;
-  authLabel: string;
-  fileName: string;
-  providerLabel: string;
-  quota?: QuotaStatusState;
-  config: AnyQuotaConfig;
-};
-
-type AccountQuotaState = {
-  status: 'idle' | 'loading' | 'success' | 'error';
-  targetKey: string;
-  error?: string;
-  lastRefreshedAt?: number;
-};
-
-type AccountQuotaSourceRow = Pick<MonitoringEventRow, 'authIndex' | 'account' | 'authLabel'>;
-
-type AccountSummaryMetric = {
-  key: string;
-  label: string;
-  value: ReactNode;
-  valueClassName?: string;
-};
-
-const roundCurrency = (value: number) => Math.round(value * 100) / 100;
-
-const formatDeltaPercent = (current: number, previous: number) => {
-  const roundedCurrent = roundCurrency(current);
-  const roundedPrevious = roundCurrency(previous);
-  if (roundedPrevious <= 0) return roundedCurrent > 0 ? '+100.0%' : '0.0%';
-  const delta = (roundedCurrent - roundedPrevious) / roundedPrevious;
-  return `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(1)}%`;
-};
-
-const createPriceDraft = (rule?: ModelPriceRule): PriceDraft => ({
-	input: rule ? String(rule.base.input) : '',
-	output: rule ? String(rule.base.output) : '',
-	cacheRead: rule ? String(rule.base.cacheRead) : '',
-	cacheWrite: rule ? String(rule.base.cacheWrite) : '',
-	tiers: rule?.tiers?.map((tier) => ({
-		contextSize: String(tier.contextSize),
-		input: String(tier.input),
-		output: String(tier.output),
-		cacheRead: String(tier.cacheRead),
-		cacheWrite: String(tier.cacheWrite),
-	})) ?? [],
-});
-
-const parsePriceValue = (value: string) => {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-};
-
-const formatModelPriceRate = (value: number | undefined) => {
-  const normalized = Number(value) || 0;
-  return `$${normalized.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
-};
-
-const MODEL_PRICE_SYNC_RATE_FIELDS = [
-  ['input', 'usage_stats.model_price_input'],
-  ['output', 'usage_stats.model_price_output'],
-  ['cacheRead', 'usage_stats.model_price_cache_read'],
-  ['cacheWrite', 'usage_stats.model_price_cache_write'],
-] as const;
-
-const ACCOUNT_QUOTA_RENDER_HELPERS: QuotaRenderHelpers = {
-  styles: {
-    ...authFileQuotaStyles,
-    quotaRow: `${authFileQuotaStyles.quotaRow} ${styles.accountQuotaRow}`,
-    quotaRowHeader: `${authFileQuotaStyles.quotaRowHeader} ${styles.accountQuotaRowHeader}`,
-    quotaModel: `${authFileQuotaStyles.quotaModel} ${styles.accountQuotaModel}`,
-    quotaMeta: `${authFileQuotaStyles.quotaMeta} ${styles.accountQuotaMeta}`,
-    quotaAmount: `${authFileQuotaStyles.quotaAmount} ${styles.accountQuotaAmount}`,
-    codexPlanValue: `${authFileQuotaStyles.codexPlanValue} ${styles.accountQuotaPlanValue}`,
-    premiumPlanValue: `${authFileQuotaStyles.premiumPlanValue} ${styles.accountQuotaPremiumPlanValue}`,
-    codexResetCreditRow: `${authFileQuotaStyles.codexResetCreditRow} ${styles.accountQuotaResetCreditRow}`,
-    codexResetCreditTime: `${authFileQuotaStyles.codexResetCreditTime} ${styles.accountQuotaResetCreditTime}`,
-  },
-  QuotaProgressBar: AuthFileQuotaProgressBar,
-};
-
-const getQuotaProviderLabel = (config: AnyQuotaConfig, t: TFunction) => {
-  const titleKey = `${config.i18nPrefix}.title`;
-  const translated = t(titleKey);
-  if (translated !== titleKey) return translated;
-  return config.type;
-};
-
-const getAccountQuotaConfig = (file: AuthFileItem): AnyQuotaConfig | undefined => {
-  if (isAntigravityFile(file)) return ACCOUNT_ANTIGRAVITY_QUOTA_CONFIG;
-  if (isClaudeFile(file)) return ACCOUNT_CLAUDE_QUOTA_CONFIG;
-  if (isCodexFile(file)) return ACCOUNT_CODEX_QUOTA_CONFIG;
-  if (isKimiFile(file)) return ACCOUNT_KIMI_QUOTA_CONFIG;
-  if (isXaiFile(file)) return ACCOUNT_XAI_QUOTA_CONFIG;
-  return undefined;
-};
-
-const resolveQuotaErrorMessage = (t: TFunction, quota?: QuotaStatusState): string => {
-  if (!quota) return t('common.unknown_error');
-  if (quota.errorStatus === 404) return t('common.quota_update_required');
-  if (quota.errorStatus === 403) return t('common.quota_check_credential');
-  return quota.error || t('common.unknown_error');
-};
-
-const hasUsableQuotaContent = (quota?: QuotaStatusState) => {
-  if (!quota || quota.status !== 'success') return false;
-  const record = quota as unknown as Record<string, unknown>;
-  const billing = record.billing;
-  return ['groups', 'windows', 'buckets', 'rows'].some((key) => {
-    const value = record[key];
-    return Array.isArray(value) && value.length > 0;
-  }) || Boolean(
-    record.planType
-    || record.tierLabel
-    || record.creditBalance !== undefined
-    || (billing && typeof billing === 'object' && !Array.isArray(billing))
-  );
-};
-
-const getQuotaForTarget = (store: QuotaStore, target: AccountQuotaTarget): QuotaStatusState | undefined => {
-  return target.config.storeSelector(store)[target.fileName] as QuotaStatusState | undefined;
-};
-
-const requestAccountQuota = async (
-  target: AccountQuotaTarget,
-  t: TFunction
-): Promise<QuotaStatusState> => {
-  try {
-    const data = await target.config.fetchQuota(target.file, t);
-    return target.config.buildSuccessState(data) as QuotaStatusState;
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : t('common.unknown_error');
-    return target.config.buildErrorState(message, getStatusFromError(err)) as QuotaStatusState;
-  }
-};
-
-const settleWithConcurrency = async <T, R>(
-  items: T[],
-  concurrency: number,
-  worker: (item: T) => Promise<R>
-): Promise<Array<PromiseSettledResult<R>>> => {
-  const results = new Array<PromiseSettledResult<R>>(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(Math.max(concurrency, 1), items.length);
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (nextIndex < items.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      try {
-        results[index] = { status: 'fulfilled', value: await worker(items[index]) };
-      } catch (reason) {
-        results[index] = { status: 'rejected', reason };
-      }
-    }
-  }));
-  return results;
-};
-
-const buildAccountQuotaTargetsByAccount = (
-  rows: AccountQuotaSourceRow[],
-  authFilesByAuthIndex: Map<string, AuthFileItem>
-) => {
-  const grouped = new Map<string, Map<string, AccountQuotaTarget>>();
-
-  rows.forEach((row) => {
-    const authIndex = normalizeAuthIndex(row.authIndex);
-    if (!authIndex || !row.account) return;
-
-    const file = authFilesByAuthIndex.get(authIndex);
-    if (!file) return;
-
-    const quotaConfig = getAccountQuotaConfig(file);
-    if (!quotaConfig) return;
-
-    const dedupeKey = `${quotaConfig.type}::${authIndex}::${file.name}`;
-    const bucket = grouped.get(row.account) ?? new Map<string, AccountQuotaTarget>();
-    if (!bucket.has(dedupeKey)) {
-      bucket.set(dedupeKey, {
-        key: dedupeKey,
-        authIndex,
-        authLabel: row.authLabel || file.name || authIndex,
-        fileName: file.name,
-        file,
-        config: quotaConfig,
-      });
-    }
-    grouped.set(row.account, bucket);
-  });
-
-  return new Map(
-    Array.from(grouped.entries()).map(([account, bucket]) => [
-      account,
-      Array.from(bucket.values()).sort((left, right) => left.authLabel.localeCompare(right.authLabel)),
-    ])
-  );
-};
-
-const buildAccountQuotaEntriesByAccount = (
-  targetsByAccount: Map<string, AccountQuotaTarget[]>,
-  quotaStore: QuotaStore,
-  t: TFunction
-) => new Map(
-  Array.from(targetsByAccount.entries()).map(([account, targets]) => [
-    account,
-    targets.map((target) => ({
-      key: target.key,
-      authLabel: target.authLabel,
-      fileName: target.fileName,
-      providerLabel: getQuotaProviderLabel(target.config, t),
-      quota: getQuotaForTarget(quotaStore, target),
-      config: target.config,
-    } satisfies AccountQuotaEntry)),
-  ])
-);
-
-const getSuccessRateClassName = (rate: number) =>
-  rate >= 0.95 ? styles.goodText : rate >= 0.85 ? styles.warnText : styles.badText;
-
-const getAccountStatusDotClassName = (tone: AccountHealthTone) => {
-  if (tone === 'good') return styles.accountStatusDotEnabled;
-  if (tone === 'warn') return styles.accountStatusDotMixed;
-  return styles.accountStatusDotDisabled;
-};
-
-function AccountHealthStatusPanel({
-  row,
-  hasPrices,
-  locale,
-  t,
-  statusData,
-  scopeText,
-}: {
-  row: MonitoringAccountRow;
-  hasPrices: boolean;
-  locale: string;
-  t: TFunction;
-  statusData: AccountStatusData;
-  scopeText: string;
-}) {
-  const healthMetrics = [
-    { key: 'total-calls', label: t('monitoring.total_calls'), value: formatCompactNumber(row.totalCalls) },
-    {
-      key: 'success-failure',
-      label: t('monitoring.success_failure'),
-      value: <SuccessFailureValue success={row.successCalls} failure={row.failureCalls} />,
-    },
-    { key: 'estimated-cost', label: t('monitoring.estimated_cost'), value: hasPrices ? formatUsd(row.totalCost) : '--', className: styles.primaryText },
-    { key: 'success-rate', label: t('monitoring.success_rate'), value: formatPercent(row.successRate), className: getSuccessRateClassName(row.successRate) },
-  ];
-
-  return (
-    <section className={styles.accountOverviewStatusSection}>
-      <div className={styles.accountSectionHeader}>
-        <strong>{t('monitoring.account_health_status')}</strong>
-        <span className={styles.accountSectionInfo} title={t('monitoring.account_health_status_hint')}>
-          i
-        </span>
-      </div>
-      <div className={styles.healthMetricGrid}>
-        {healthMetrics.map((metric) => (
-          <div key={metric.key} className={styles.healthMetricItem}>
-            <span>{metric.label}</span>
-            <strong className={metric.className}>{metric.value}</strong>
-          </div>
-        ))}
-      </div>
-      <MonitoringHealthStatusBar statusData={statusData} locale={locale} t={t} showRate={false} />
-      <div className={styles.accountScopeText}>{scopeText}</div>
-    </section>
-  );
-}
-
-function AccountTokenMetricGrid({ metrics, t }: { metrics: AccountSummaryMetric[]; t: TFunction }) {
-  const getTokenMetricToneClassName = (key: string) => {
-    if (key === 'input-tokens') return styles.accountMetricIconInput;
-    if (key === 'output-tokens') return styles.accountMetricIconOutput;
-    if (key === 'cached-tokens') return styles.accountMetricIconCached;
-    return styles.accountMetricIconTotal;
-  };
-
-  return (
-    <section className={styles.accountTokenPanel}>
-      <div className={styles.accountSectionHeader}>
-        <strong>{t('monitoring.token_usage')}</strong>
-      </div>
-      <div className={styles.accountOverviewMetricGrid}>
-        {metrics.map((metric) => (
-          <div key={metric.key} className={styles.accountOverviewMetricCard}>
-            <span className={styles.accountOverviewMetricLabel}>
-              <span
-                className={[styles.accountMetricIcon, getTokenMetricToneClassName(metric.key)]
-                  .filter(Boolean)
-                  .join(' ')}
-                aria-hidden="true"
-              />
-              {metric.label}
-            </span>
-            <strong className={[styles.accountOverviewMetricValue, metric.valueClassName].filter(Boolean).join(' ')}>
-              {metric.value}
-            </strong>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function AccountModelUsageList({
-  row,
-  hasPrices,
-  locale,
-  t,
-  limit = 1,
-}: {
-  row: MonitoringAccountRow;
-  hasPrices: boolean;
-  locale: string;
-  t: TFunction;
-  limit?: number;
-}) {
-  const [showAll, setShowAll] = useState(false);
-  const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>({});
-  const hasExtraModels = row.models.length > limit;
-  const visibleModels = showAll ? row.models : row.models.slice(0, limit);
-  const toggleModel = (key: string) => setExpandedModels((previous) => ({ ...previous, [key]: !previous[key] }));
-
-  return (
-    <section className={styles.accountModelListPanel}>
-      <div className={styles.accountSectionHeader}>
-        <strong>{t('monitoring.top_models')}</strong>
-        {hasExtraModels ? (
-          <button type="button" className={styles.accountModelViewAllButton} onClick={() => setShowAll((previous) => !previous)}>
-            {showAll ? t('monitoring.collapse') : t('monitoring.view_all')}
-          </button>
-        ) : null}
-      </div>
-
-      {visibleModels.length > 0 ? (
-        <div className={styles.accountModelList}>
-          {visibleModels.map((model) => {
-            const modelKey = `${row.id}-${model.model}`;
-            const isModelExpanded = Boolean(expandedModels[modelKey]);
-            return (
-              <div key={modelKey} className={styles.accountModelItem}>
-                <button
-                  type="button"
-                  className={styles.accountModelRow}
-                  onClick={() => toggleModel(modelKey)}
-                  aria-expanded={isModelExpanded}
-                >
-                  <span className={styles.accountModelName} title={model.model}>{model.model}</span>
-                  <span className={styles.accountModelMetaLine}>
-                    <span className={styles.accountModelStat}><small>{t('monitoring.ranking_metric_requests')}</small><strong>{formatCompactNumber(model.totalCalls)}</strong></span>
-                    <span className={styles.accountModelStat}><small>{t('monitoring.success_rate')}</small><strong className={getSuccessRateClassName(model.successRate)}>{formatPercent(model.successRate)}</strong></span>
-                    <span className={styles.accountModelStat}><small>{t('monitoring.ranking_metric_tokens')}</small><strong>{formatCompactNumber(model.totalTokens)}</strong></span>
-                    <span className={styles.accountModelStat}><small>{t('monitoring.ranking_metric_cost')}</small><strong>{hasPrices ? formatUsd(model.totalCost) : '--'}</strong></span>
-                    <span className={styles.accountModelChevron} aria-hidden="true">{isModelExpanded ? <IconChevronDown size={14} /> : '›'}</span>
-                  </span>
-                </button>
-                {isModelExpanded ? (
-                  <div className={styles.accountModelExpanded}>
-                    <div className={styles.accountModelExpandedItem}><small>{t('monitoring.input_tokens')}</small><strong>{formatCompactNumber(model.inputTokens)}</strong></div>
-                    <div className={styles.accountModelExpandedItem}><small>{t('monitoring.output_tokens')}</small><strong>{formatCompactNumber(model.outputTokens)}</strong></div>
-                    <div className={styles.accountModelExpandedItem}><small>{t('monitoring.cached_tokens')}</small><strong>{formatCompactNumber(model.cachedTokens)}</strong></div>
-                    <div className={styles.accountModelExpandedItem}><small>{t('monitoring.latest_request_time')}</small><strong>{new Date(model.lastSeenAt).toLocaleString(locale)}</strong></div>
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className={styles.emptyBlockSmall}>{t('monitoring.no_model_data')}</div>
-      )}
-    </section>
-  );
-}
-
-function AccountQuotaPanel({
-  quotaState,
-  quotaEntries,
-  locale,
-  t,
-  onRefreshQuota,
-}: {
-  quotaState?: AccountQuotaState;
-  quotaEntries: AccountQuotaEntry[];
-  locale: string;
-  t: TFunction;
-  onRefreshQuota: () => void;
-}) {
-  const quotaLoading = quotaState?.status === 'loading';
-  const lastQuotaSync = quotaState?.lastRefreshedAt && Number.isFinite(quotaState.lastRefreshedAt)
-    ? new Date(quotaState.lastRefreshedAt).toLocaleString(locale)
-    : '';
-  const quotaTitle = quotaEntries.length === 1 ? quotaEntries[0].providerLabel : t('quota_management.title');
-
-  const renderRefreshButton = () => (
-    <button type="button" className={styles.quotaRefreshButton} onClick={onRefreshQuota} disabled={quotaLoading}>
-      <IconRefreshCw size={14} className={quotaLoading ? styles.refreshIconSpinning : styles.refreshIcon} />
-      <span>{t('codex_quota.refresh_button')}</span>
-    </button>
-  );
-
-  return (
-    <section className={styles.quotaSection}>
-      <div className={styles.quotaSectionHeader}>
-        <div className={styles.quotaSectionTitleGroup}>
-          <strong>{quotaTitle}</strong>
-          {lastQuotaSync ? <span>{`${t('monitoring.last_sync')}: ${lastQuotaSync}`}</span> : null}
-        </div>
-        {renderRefreshButton()}
-      </div>
-
-      {quotaLoading && quotaEntries.length === 0 ? <div className={styles.quotaStateMessage}>{t('codex_quota.loading')}</div> : null}
-      {!quotaLoading && quotaState?.status === 'error' && quotaEntries.length === 0 ? (
-        <div className={styles.quotaStateMessage}>{t('codex_quota.load_failed', { message: quotaState.error || t('common.unknown_error') })}</div>
-      ) : null}
-      {!quotaLoading && quotaState?.status === 'success' && quotaEntries.length === 0 ? <div className={styles.quotaStateMessage}>{t('monitoring.account_quota_empty')}</div> : null}
-      {!quotaState && quotaEntries.length === 0 ? <div className={styles.quotaStateMessage}>{t('monitoring.account_quota_empty')}</div> : null}
-
-      {quotaEntries.length > 0 ? (
-        <div className={styles.quotaEntryGrid}>
-          {quotaEntries.map((entry) => (
-            <div key={entry.key} className={styles.quotaEntryCard}>
-              <div className={styles.quotaEntryHeader}>
-                <div className={styles.quotaEntryMain}>
-                  <strong>{entry.authLabel}</strong>
-                </div>
-              </div>
-
-              {entry.quota?.status === 'loading' ? (
-                <div className={styles.quotaStateMessage}>{t(`${entry.config.i18nPrefix}.loading`)}</div>
-              ) : entry.quota?.status === 'error' ? (
-                <div className={styles.quotaStateMessage}>
-                  {t(`${entry.config.i18nPrefix}.load_failed`, { message: resolveQuotaErrorMessage(t, entry.quota) })}
-                </div>
-              ) : hasUsableQuotaContent(entry.quota) ? (
-                <div className={`${authFileQuotaStyles.quotaSection} ${styles.accountQuotaContent}`}>
-                  {entry.config.renderQuotaItems(entry.quota!, t, ACCOUNT_QUOTA_RENDER_HELPERS)}
-                </div>
-              ) : (
-                <div className={styles.quotaStateMessage}>{t(`${entry.config.i18nPrefix}.idle`)}</div>
-              )}
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function AccountExpandedDetails({
-  row,
-  hasPrices,
-  locale,
-  t,
-  quotaState,
-  quotaEntries,
-  onRefreshQuota,
-}: {
-  row: MonitoringAccountRow;
-  hasPrices: boolean;
-  locale: string;
-  t: TFunction;
-  quotaState?: AccountQuotaState;
-  quotaEntries: AccountQuotaEntry[];
-  onRefreshQuota: () => void;
-}) {
-  return (
-    <div className={styles.accountOverviewCardBody}>
-      <AccountQuotaPanel quotaState={quotaState} quotaEntries={quotaEntries} locale={locale} t={t} onRefreshQuota={onRefreshQuota} />
-      <AccountModelUsageList row={row} hasPrices={hasPrices} locale={locale} t={t} />
-    </div>
-  );
-}
-
-function AccountOverviewCard({
-  row,
-  hasPrices,
-  locale,
-  t,
-  isExpanded,
-  statusData,
-  scopeText,
-  quotaState,
-  quotaEntries,
-  onToggle,
-  onRefreshQuota,
-}: {
-  row: MonitoringAccountRow;
-  hasPrices: boolean;
-  locale: string;
-  t: TFunction;
-  isExpanded: boolean;
-  statusData: AccountStatusData;
-  scopeText: string;
-  quotaState?: AccountQuotaState;
-  quotaEntries: AccountQuotaEntry[];
-  onToggle: () => void;
-  onRefreshQuota: () => void;
-}) {
-  const summaryMetrics = buildAccountSummaryMetrics(row, hasPrices, locale, t);
-  const cardMetrics = sortAccountOverviewCardMetrics(summaryMetrics, t);
-  const tone = getAccountHealthTone(row);
-  const latestRequestText = new Date(row.lastSeenAt).toLocaleString(locale);
-  const accountLabel = buildAccountCardFileName(row, quotaEntries);
-  const providerText = buildAccountCardProviderText(row);
-
-  return (
-    <Card
-      className={[
-        styles.accountOverviewCard,
-        isExpanded ? styles.accountOverviewCardExpanded : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-    >
-      <div className={styles.accountOverviewCardHeader}>
-        <div className={styles.accountTitleRow}>
-          <button
-            type="button"
-            className={styles.accountButton}
-            onClick={onToggle}
-            aria-expanded={isExpanded}
-            title={accountLabel}
-          >
-            <span className={styles.accountExpandGlyph} aria-hidden="true">
-              {isExpanded ? <IconChevronUp size={15} /> : <IconChevronDown size={15} />}
-            </span>
-            <span className={styles.accountIdentityLine}>
-              <span className={[styles.accountStatusDot, getAccountStatusDotClassName(tone)].filter(Boolean).join(' ')} aria-hidden="true" />
-              <span className={styles.accountButtonLabel}>{accountLabel}</span>
-            </span>
-          </button>
-          <span className={`${styles.accountHealthBadge} ${styles[`accountHealthBadge${tone}`]}`}>
-            {tone === 'good' ? t('monitoring.health_good') : tone === 'warn' ? t('monitoring.health_warn') : t('monitoring.health_bad')}
-          </span>
-        </div>
-        <div className={styles.accountMetaRow}>
-          <span className={styles.accountOverviewCardTimestamp} title={providerText}>{providerText}</span>
-          <span className={styles.accountMetaSeparator}>·</span>
-          <span className={styles.accountOverviewCardTimestamp}>{t('monitoring.latest_request_time_value', { value: latestRequestText })}</span>
-        </div>
-      </div>
-
-      <AccountHealthStatusPanel row={row} hasPrices={hasPrices} locale={locale} t={t} statusData={statusData} scopeText={scopeText} />
-      <AccountTokenMetricGrid metrics={cardMetrics} t={t} />
-
-      {isExpanded ? (
-        <AccountExpandedDetails
-          row={row}
-          hasPrices={hasPrices}
-          locale={locale}
-          t={t}
-          quotaState={quotaState}
-          quotaEntries={quotaEntries}
-          onRefreshQuota={onRefreshQuota}
-        />
-      ) : null}
-    </Card>
-  );
-}
-
-function AccountStatsPanel({
-  rows,
-  metric,
-  emptyText,
-  hasPrices,
-  locale,
-  t,
-  rangeLabel,
-  range,
-  onRangeChange,
-  onHide,
-  expandedAccounts,
-  accountQuotaStates,
-  accountQuotaEntriesByAccount,
-  onMetricChange,
-  onToggleAccount,
-  onRefreshQuota,
-}: {
-  rows: MonitoringAccountRow[];
-  metric: AccountSortMetric;
-  emptyText: string;
-  hasPrices: boolean;
-  locale: string;
-  t: TFunction;
-  rangeLabel: string;
-  range: MonitoringTimeRange;
-  onRangeChange: (range: MonitoringTimeRange) => void;
-  onHide: () => void;
-  expandedAccounts: Record<string, boolean>;
-  accountQuotaStates: Record<string, AccountQuotaState>;
-  accountQuotaEntriesByAccount: Map<string, AccountQuotaEntry[]>;
-  onMetricChange: (metric: AccountSortMetric) => void;
-  onToggleAccount: (accountId: string, account: string) => void;
-  onRefreshQuota: (account: string) => void;
-}) {
-  const ACCOUNT_CARD_MIN_WIDTH = 330;
-  const ACCOUNT_CARD_GAP = 16;
-  const ROWS_PER_PAGE = 2;
-
-  const [cardPage, setCardPage] = useState(0);
-  const [gridEl, setGridEl] = useState<HTMLDivElement | null>(null);
-  const gridRef = useCallback((el: HTMLDivElement | null) => setGridEl(el), []);
-  const [gridCols, setGridCols] = useState(3);
-  const [accountSearch, setAccountSearch] = useState('');
-  const [accountProviderFilter, setAccountProviderFilter] = useState('all');
-  const [accountHealthFilter, setAccountHealthFilter] = useState<'all' | AccountHealthTone>('all');
-
-  useEffect(() => {
-    if (!gridEl) return;
-    const update = () => {
-      const cols = Math.max(1, Math.floor((gridEl.clientWidth + ACCOUNT_CARD_GAP) / (ACCOUNT_CARD_MIN_WIDTH + ACCOUNT_CARD_GAP)));
-      setGridCols((current) => (current === cols ? current : cols));
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(gridEl);
-    return () => observer.disconnect();
-  }, [gridEl]);
-
-  const providerOptions = useMemo(() => {
-    const set = new Set<string>();
-    rows.forEach((row) => row.providers.forEach((p) => { if (p && p !== '-') set.add(p); }));
-    return Array.from(set).sort();
-  }, [rows]);
-
-  const filteredRows = useMemo(() => {
-    const query = accountSearch.trim().toLowerCase();
-    return rows.filter((row) => {
-      if (query) {
-        const haystack = [row.accountMasked, row.account, ...row.authLabels, ...row.providers].join(' ').toLowerCase();
-        if (!haystack.includes(query)) return false;
-      }
-      if (accountProviderFilter !== 'all') {
-        if (!row.providers.includes(accountProviderFilter)) return false;
-      }
-      if (accountHealthFilter !== 'all') {
-        if (getAccountHealthTone(row) !== accountHealthFilter) return false;
-      }
-      return true;
-    });
-  }, [rows, accountSearch, accountProviderFilter, accountHealthFilter]);
-
-  const hasActiveFilters = accountSearch.trim() !== '' || accountProviderFilter !== 'all' || accountHealthFilter !== 'all';
-
-  const itemsPerPage = gridCols * ROWS_PER_PAGE;
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / itemsPerPage));
-  const safePageIndex = Math.min(cardPage, totalPages - 1);
-  const visibleRows = useMemo(
-    () => filteredRows.slice(safePageIndex * itemsPerPage, (safePageIndex + 1) * itemsPerPage),
-    [filteredRows, itemsPerPage, safePageIndex]
-  );
-
-  const accountStatusRange = useMemo(
-    () => buildAccountStatusRange(rows, range),
-    [rows, range]
-  );
-
-  const accountStatusDataById = useMemo(() => {
-    const entries = visibleRows.map((row) => [row.id, buildAccountStatusData(row.rows ?? [], accountStatusRange)] as const);
-    return new Map(entries);
-  }, [accountStatusRange, visibleRows]);
-
-  useEffect(() => {
-    setCardPage(0);
-  }, [accountSearch, accountProviderFilter, accountHealthFilter, metric, range, itemsPerPage]);
-
-  return (
-    <>
-      <div className={styles.usageTrendHeader}>
-        <div className={styles.usageTrendCopy}>
-          <h2>{t('monitoring.account_stats_title')}</h2>
-          <p>{t('monitoring.account_stats_desc')}</p>
-        </div>
-        <button type="button" className={`${styles.rankingMetricButton} ${styles.usageTrendHideButton} ${styles.mobileHeaderHideButton}`} onClick={onHide}>
-          {t('monitoring.hide_analysis')}
-        </button>
-        <div className={styles.usageTrendActions}>
-          <div className={`${styles.rankingMetricSwitch} ${styles.timeRangeControl}`}>
-            {TIME_RANGE_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={`${styles.rankingMetricButton} ${styles.timeRangeButton} ${range === option.value ? styles.rankingMetricButtonActive : ''}`}
-                onClick={() => onRangeChange(option.value)}
-              >
-                {t(option.labelKey)}
-              </button>
-            ))}
-          </div>
-          <button type="button" className={`${styles.rankingMetricButton} ${styles.usageTrendHideButton}`} onClick={onHide}>
-            {t('monitoring.hide_analysis')}
-          </button>
-        </div>
-      </div>
-
-      <Card className={styles.accountStatsCard}>
-        <div className={styles.accountStatsToolbar}>
-          <div className={styles.accountStatsFilters}>
-            <Input
-              value={accountSearch}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => setAccountSearch(event.target.value)}
-              placeholder={t('monitoring.search_account')}
-              className={styles.accountStatsSearchInput}
-              rightElement={<IconSearch size={14} />}
-              aria-label={t('monitoring.search_account')}
-            />
-            {providerOptions.length > 0 && (
-              <select
-                value={accountProviderFilter}
-                onChange={(event) => setAccountProviderFilter(event.target.value)}
-                className={styles.accountStatsSelect}
-                aria-label={t('monitoring.filter_provider')}
-              >
-                <option value="all">{t('monitoring.filter_all_providers')}</option>
-                {providerOptions.map((p) => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
-              </select>
-            )}
-            <select
-              value={accountHealthFilter}
-              onChange={(event) => setAccountHealthFilter(event.target.value as 'all' | AccountHealthTone)}
-              className={styles.accountStatsSelect}
-              aria-label={t('monitoring.filter_health_status')}
-            >
-              <option value="all">{t('monitoring.filter_all_statuses')}</option>
-              <option value="good">{t('monitoring.health_good')}</option>
-              <option value="warn">{t('monitoring.health_warn_filter')}</option>
-              <option value="bad">{t('monitoring.health_bad')}</option>
-            </select>
-            {hasActiveFilters && (
-              <button
-                type="button"
-                className={styles.accountStatsClearButton}
-                onClick={() => { setAccountSearch(''); setAccountProviderFilter('all'); setAccountHealthFilter('all'); }}
-              >
-                {t('monitoring.clear_filters')}
-              </button>
-            )}
-          </div>
-          <div className={styles.rankingMetricSwitch} role="group" aria-label={t('monitoring.account_sort_aria')}>
-            {ACCOUNT_SORT_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={`${styles.rankingMetricButton} ${metric === option.value ? styles.rankingMetricButtonActive : ''}`}
-                onClick={() => onMetricChange(option.value)}
-                disabled={option.value === 'cost' && !hasPrices}
-              >
-                {t(option.labelKey)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {filteredRows.length > 0 ? (
-          <>
-            <div ref={gridRef} className={styles.accountOverviewCardGrid}>
-              {visibleRows.map((row) => {
-                const statusData = accountStatusDataById.get(row.id) ?? buildAccountStatusData([], accountStatusRange);
-                return (
-                  <AccountOverviewCard
-                    key={row.id}
-                    row={row}
-                    hasPrices={hasPrices}
-                    locale={locale}
-                    t={t}
-                    isExpanded={Boolean(expandedAccounts[row.id])}
-                    statusData={statusData}
-                    scopeText={formatAccountOverviewScopeText(rangeLabel, t)}
-                    quotaState={accountQuotaStates[row.account]}
-                    quotaEntries={accountQuotaEntriesByAccount.get(row.account) ?? []}
-                    onToggle={() => onToggleAccount(row.id, row.account)}
-                    onRefreshQuota={() => onRefreshQuota(row.account)}
-                  />
-                );
-              })}
-            </div>
-            {totalPages > 1 && (
-              <div className={quotaStyles.pagination}>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={safePageIndex === 0}
-                  onClick={() => setCardPage((p) => Math.max(0, p - 1))}
-                  aria-label={t('monitoring.previous_page')}
-                >
-                  {t('auth_files.pagination_prev', { defaultValue: t('monitoring.previous_page') })}
-                </Button>
-                <div className={quotaStyles.pageInfo}>
-                  {t('auth_files.pagination_info', {
-                    current: safePageIndex + 1,
-                    total: totalPages,
-                    count: filteredRows.length,
-                    defaultValue: `${safePageIndex + 1} / ${totalPages} · ${filteredRows.length}`,
-                  })}
-                </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={safePageIndex >= totalPages - 1}
-                  onClick={() => setCardPage((p) => Math.min(totalPages - 1, p + 1))}
-                  aria-label={t('monitoring.next_page')}
-                >
-                  {t('auth_files.pagination_next', { defaultValue: t('monitoring.next_page') })}
-                </Button>
-              </div>
-            )}
-          </>
-        ) : (
-          <div className={styles.emptyBlockSmall}>{hasActiveFilters ? t('monitoring.no_matching_accounts') : emptyText}</div>
-        )}
-      </Card>
-    </>
-  );
-}
-
-function StatusBadge({ tone, children }: { tone: MonitoringStatusTone; children: ReactNode }) {
-  return <span className={`${styles.statusBadge} ${styles[`tone${tone}`]}`}>{children}</span>;
-}
-
-function RealtimeErrorDetailsPanel({
-  row,
-  t,
-  language,
-}: {
-  row: RealtimeLogRow;
-  t: ReturnType<typeof useTranslation>['t'];
-  language?: string;
-}) {
-  const categoryText = translateRealtimeErrorCategory(row.errorCategoryKey, t, language);
-  const statusText = buildRealtimeStatusLabel(row, t('monitoring.result_failed'));
-  const summaryText = row.errorMessage
-    ? compactRealtimeErrorMessage(row.errorMessage, 220)
-    : row.errorSummary || row.diagnosticText || categoryText;
-  const detailItems = [
-    { label: translateRealtimeErrorText('http_status', t, language), value: row.statusCode !== null ? String(row.statusCode) : '-' },
-    { label: translateRealtimeErrorText('error_code', t, language), value: row.errorCode || '-' },
-    { label: translateRealtimeErrorText('upstream_request_id', t, language), value: row.upstreamRequestId || '-' },
-    { label: translateRealtimeErrorText('retry_after', t, language), value: row.retryAfter || '-' },
-  ].filter((item) => item.value !== '-');
-
-  return (
-    <div className={styles.realtimeErrorDetailsPanel}>
-      <div className={styles.realtimeErrorOverview}>
-        <div className={styles.realtimeErrorOverviewTop}>
-          <StatusBadge tone="bad">{statusText}</StatusBadge>
-          <span>{categoryText}</span>
-        </div>
-        <strong>{summaryText}</strong>
-      </div>
-      {row.errorMessage ? (
-        <div className={styles.realtimeErrorMessageBlock}>
-          <span>{translateRealtimeErrorText('error_message', t, language)}</span>
-          <pre className={styles.realtimeErrorMessage}>{compactRealtimeErrorMessage(row.errorMessage, 1200)}</pre>
-        </div>
-      ) : null}
-      {detailItems.length > 0 ? (
-        <div className={styles.realtimeErrorDetailsGrid}>
-          {detailItems.map((item) => (
-            <div key={item.label} className={styles.realtimeErrorDetailItem}>
-              <span>{item.label}</span>
-              <strong>{maskSensitiveText(item.value)}</strong>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function RecentPattern({
-  pattern,
-  variant = 'default',
-  label,
-}: {
-  pattern: boolean[];
-  variant?: 'default' | 'plain';
-  label?: string;
-}) {
-  const normalized = pattern.length > 0 ? pattern : Array.from({ length: 10 }, () => true);
-  const successCount = normalized.filter(Boolean).length;
-  const failureCount = normalized.length - successCount;
-  const ariaLabel = label ?? `Recent ${normalized.length} requests: ${successCount} succeeded, ${failureCount} failed`;
-  const containerClassName = [
-    styles.patternBars,
-    variant === 'plain' ? styles.patternBarsPlain : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-  const barClassName = [styles.patternBar, variant === 'plain' ? styles.patternBarPlain : '']
-    .filter(Boolean)
-    .join(' ');
-
-  return (
-    <div className={containerClassName} role="img" aria-label={ariaLabel}>
-      {normalized.map((item, index) => (
-        <span
-          key={index}
-          className={`${barClassName} ${item ? styles.patternSuccess : styles.patternFailed}`}
-          aria-hidden="true"
-        />
-      ))}
-    </div>
-  );
-}
 
 export function MonitoringCenterPage() {
   const { t, i18n } = useTranslation();
@@ -2353,48 +1214,6 @@ export function MonitoringCenterPage() {
     });
   }, [observedPriceModels, priceRules]);
 
-  const filteredPriceRuleTargets = useMemo(() => {
-    const query = priceRuleSearch.trim().toLowerCase();
-    if (!query) return priceRuleTargets;
-    return priceRuleTargets.filter((item) => {
-      const source = item.rule ? `${item.rule.sourceProvider ?? ''}/${item.rule.sourceModel ?? ''}` : '';
-      return `${item.model} ${source}`.toLowerCase().includes(query);
-    });
-  }, [priceRuleSearch, priceRuleTargets]);
-
-  const selectedPriceTarget = useMemo(
-    () => priceRuleTargets.find((item) => item.model === priceModel) ?? null,
-    [priceModel, priceRuleTargets]
-  );
-
-  const configuredPriceRuleCount = priceRuleTargets.filter((item) => Boolean(item.rule)).length;
-  const unconfiguredPriceRuleCount = priceRuleTargets.length - configuredPriceRuleCount;
-  const priceSyncStatus = isPriceSyncing ? 'syncing' : priceSyncState.status;
-  const unmatchedPriceModels = priceSyncResult?.unmatched ?? priceSyncState.unmatchedModels ?? [];
-  const unmatchedPriceModelCount = priceSyncResult ? unmatchedPriceModels.length : (priceSyncState.unmatched ?? unmatchedPriceModels.length);
-  const priceSyncChanges = useMemo(() => priceSyncResult?.changes ?? [], [priceSyncResult]);
-  const priceSyncLockedOverrideSet = useMemo(() => new Set(priceSyncLockedOverrides), [priceSyncLockedOverrides]);
-  const priceSyncChangeCounts = useMemo(() => {
-    const counts: Record<ModelPriceSyncChangeAction, number> = { added: 0, updated: 0, overridden: 0, locked: 0, unmatched: 0 };
-    priceSyncChanges.forEach((change) => {
-      const action = change.action === 'locked' && priceSyncLockedOverrideSet.has(change.model) ? 'overridden' : change.action;
-      counts[action] += 1;
-    });
-    return counts;
-  }, [priceSyncChanges, priceSyncLockedOverrideSet]);
-  const filteredPriceSyncChanges = useMemo(
-    () => priceSyncChangeFilter === 'all'
-      ? priceSyncChanges
-      : priceSyncChanges.filter((change) => {
-        const action = change.action === 'locked' && priceSyncLockedOverrideSet.has(change.model) ? 'overridden' : change.action;
-        return action === priceSyncChangeFilter;
-      }),
-    [priceSyncChangeFilter, priceSyncChanges, priceSyncLockedOverrideSet]
-  );
-  const lockedPriceSyncChanges = useMemo(() => priceSyncChanges.filter((change) => change.action === 'locked'), [priceSyncChanges]);
-  const allLockedPriceSyncChangesSelected = lockedPriceSyncChanges.length > 0
-    && lockedPriceSyncChanges.every((change) => priceSyncLockedOverrideSet.has(change.model));
-
   const selectedFiltersCount =
     [selectedProvider, selectedModel, selectedApiKey, selectedStatus].filter(
       (value) => value !== 'all'
@@ -2736,7 +1555,7 @@ export function MonitoringCenterPage() {
 			},
 			tiers: priceDraft.tiers
 				.map((tier) => ({
-					contextSize: parseNonNegativeInteger(tier.contextSize),
+					contextSize: parsePriceContextSize(tier.contextSize),
 					input: parsePriceValue(tier.input),
 					output: parsePriceValue(tier.output),
 					cacheRead: parsePriceValue(tier.cacheRead),
@@ -3245,574 +2064,54 @@ export function MonitoringCenterPage() {
         ) : null}
       </Modal>
 
-      <Modal
-        open={isMonitoringSettingsOpen}
-        onClose={() => {
-          if (!isMonitoringStatisticsResetting) setIsMonitoringSettingsOpen(false);
-        }}
-        title={t('usage_stats.monitoring_settings')}
-        width={760}
-        className={styles.monitorModal}
-      >
-        <div className={styles.monitoringSettingsEditor}>
-          <div className={styles.settingsSectionCard}>
-            <div className={styles.settingsSectionHeader}>
-              <strong>{t('usage_stats.monitoring_settings_retention_title')}</strong>
-              <span>{t('usage_stats.monitoring_settings_retention_desc')}</span>
-            </div>
-            <label className={styles.settingsField}>
-              <span>{t('usage_stats.monitoring_settings_retention_days')}</span>
-              <Input
-                type="number"
-                min="0"
-                step="1"
-                value={monitoringSettingsDraft.retentionDays}
-                onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, retentionDays: event.target.value }))}
-                placeholder="0"
-              />
-              <small>{t('usage_stats.monitoring_settings_retention_hint')}</small>
-              <div className={styles.settingsScheduleNote}>{t('usage_stats.monitoring_settings_retention_schedule')}</div>
-            </label>
-          </div>
+      <MonitoringSettingsModal
+        isMonitoringSettingsOpen={isMonitoringSettingsOpen}
+        setIsMonitoringSettingsOpen={setIsMonitoringSettingsOpen}
+        monitoringSettingsDraft={monitoringSettingsDraft}
+        setMonitoringSettingsDraft={setMonitoringSettingsDraft}
+        usageTotalRequests={Number(usage?.total_requests) || 0}
+        isMonitoringStatisticsResetting={isMonitoringStatisticsResetting}
+        isMonitoringSettingsSaving={isMonitoringSettingsSaving}
+        handleMonitoringStatisticsReset={handleMonitoringStatisticsReset}
+        handleSaveMonitoringSettings={handleSaveMonitoringSettings}
+        t={t}
+      />
 
-          <div className={styles.settingsSectionCard}>
-            <div className={styles.settingsSectionHeader}>
-              <strong>{t('usage_stats.monitoring_settings_webdav_title')}</strong>
-              <span>{t('usage_stats.monitoring_settings_webdav_desc')}</span>
-            </div>
-            <label className={styles.settingsCheckboxField}>
-              <input
-                type="checkbox"
-                checked={monitoringSettingsDraft.webdavEnabled}
-                onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, webdavEnabled: event.target.checked }))}
-              />
-              <span>{t('usage_stats.monitoring_settings_webdav_enabled')}</span>
-            </label>
-            <div className={styles.settingsGrid}>
-              <label className={styles.settingsField}>
-                <span>{t('usage_stats.monitoring_settings_webdav_interval')}</span>
-                <Input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={monitoringSettingsDraft.webdavIntervalMinutes}
-                  onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, webdavIntervalMinutes: event.target.value }))}
-                  placeholder="1440"
-                />
-              </label>
-              <label className={styles.settingsField}>
-                <span>{t('usage_stats.monitoring_settings_webdav_retention_days')}</span>
-                <Input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={monitoringSettingsDraft.webdavRetentionDays}
-                  onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, webdavRetentionDays: event.target.value }))}
-                  placeholder="0"
-                />
-                <small>{t('usage_stats.monitoring_settings_webdav_retention_hint')}</small>
-              </label>
-              <label className={styles.settingsField}>
-                <span>{t('usage_stats.monitoring_settings_webdav_url')}</span>
-                <Input
-                  value={monitoringSettingsDraft.webdavUrl}
-                  onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, webdavUrl: event.target.value }))}
-                  placeholder="https://example.com/dav/path"
-                />
-              </label>
-              <label className={styles.settingsField}>
-                <span>{t('usage_stats.monitoring_settings_webdav_username')}</span>
-                <Input
-                  value={monitoringSettingsDraft.webdavUsername}
-                  onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, webdavUsername: event.target.value }))}
-                  autoComplete="username"
-                />
-              </label>
-              <label className={styles.settingsField}>
-                <span>{t('usage_stats.monitoring_settings_webdav_password')}</span>
-                <Input
-                  type="password"
-                  value={monitoringSettingsDraft.webdavPassword}
-                  onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, webdavPassword: event.target.value }))}
-                  autoComplete="current-password"
-                />
-              </label>
-            </div>
-            <small className={styles.settingsHint}>{t('usage_stats.monitoring_settings_webdav_hint')}</small>
-          </div>
-
-          <div className={`${styles.settingsSectionCard} ${styles.settingsDangerSection}`}>
-            <div className={styles.settingsSectionHeader}>
-              <strong>{t('usage_stats.monitoring_settings_data_title')}</strong>
-              <span>{t('usage_stats.monitoring_settings_data_desc')}</span>
-            </div>
-            <div className={styles.settingsDangerAction}>
-              <div>
-                <span>{t('usage_stats.monitoring_settings_data_count')}</span>
-                <strong>{formatCompactNumber(Number(usage?.total_requests) || 0)}</strong>
-              </div>
-              <Button
-                variant="danger"
-                size="sm"
-                className={styles.resetStatisticsButton}
-                onClick={handleMonitoringStatisticsReset}
-                disabled={isMonitoringStatisticsResetting || isMonitoringSettingsSaving}
-              >
-                <IconTrash2 size={15} />
-                {isMonitoringStatisticsResetting
-                  ? t('usage_stats.monitoring_settings_resetting')
-                  : t('usage_stats.monitoring_settings_reset_button')}
-              </Button>
-            </div>
-          </div>
-
-          <div className={styles.priceActionsBar}>
-            <Button variant="secondary" size="sm" onClick={() => setIsMonitoringSettingsOpen(false)} disabled={isMonitoringStatisticsResetting}>
-              {t('common.cancel')}
-            </Button>
-            <Button variant="primary" size="sm" onClick={() => void handleSaveMonitoringSettings()} disabled={isMonitoringSettingsSaving || isMonitoringStatisticsResetting}>
-              {isMonitoringSettingsSaving ? t('common.loading') : t('common.save')}
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
-        open={isPriceModalOpen}
-        onClose={() => setIsPriceModalOpen(false)}
-        title={t('usage_stats.model_price_settings')}
-        width={960}
-        className={`${styles.monitorModal} ${styles.priceManagerModal}`}
-      >
-        <div className={styles.priceManager}>
-          <div className={styles.priceManagerTabs} role="tablist" aria-label={t('usage_stats.model_price_settings')}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={priceManagementView === 'rules'}
-              className={`${styles.priceManagerTab} ${priceManagementView === 'rules' ? styles.priceManagerTabActive : ''}`}
-              onClick={() => setPriceManagementView('rules')}
-            >
-              {t('usage_stats.model_price_tab_rules')}
-              <span>{configuredPriceRuleCount}/{priceRuleTargets.length}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={priceManagementView === 'sync'}
-              className={`${styles.priceManagerTab} ${priceManagementView === 'sync' ? styles.priceManagerTabActive : ''}`}
-              onClick={() => setPriceManagementView('sync')}
-            >
-              {t('usage_stats.model_price_tab_sync')}
-              {unconfiguredPriceRuleCount > 0 ? <span>{unconfiguredPriceRuleCount}</span> : null}
-            </button>
-          </div>
-
-          {priceManagementView === 'rules' ? (
-            <div className={styles.priceRuleWorkspace}>
-              <aside className={styles.priceRuleSidebar}>
-                <div className={styles.priceRuleSearch}>
-                  <IconSearch size={15} />
-                  <Input
-                    value={priceRuleSearch}
-                    onChange={(event) => setPriceRuleSearch(event.target.value)}
-                    placeholder={t('usage_stats.model_price_search_placeholder')}
-                  />
-                </div>
-                <div className={styles.priceRuleList}>
-                  {isPriceLoading ? <div className={styles.priceRuleListEmpty}>{t('common.loading')}</div> : null}
-                  {!isPriceLoading && filteredPriceRuleTargets.map((item) => {
-                    const active = item.model === priceModel;
-                    return (
-                      <button
-                        key={item.key}
-                        type="button"
-                        className={`${styles.priceRuleListItem} ${active ? styles.priceRuleListItemActive : ''}`}
-                        onClick={() => selectPriceTarget(item.model)}
-                      >
-                        <span className={styles.priceRuleListIdentity}>
-                          <strong title={item.model}>{item.model}</strong>
-                        </span>
-                        <span className={styles.priceRuleListMeta}>
-                          <span className={item.rule ? styles.priceRuleConfigured : styles.priceRuleUnconfigured}>
-                            {t(item.rule ? 'usage_stats.model_price_configured' : 'usage_stats.model_price_unconfigured')}
-                          </span>
-                          <small>{t('usage_stats.model_price_requests', { count: item.requests })}</small>
-                        </span>
-                      </button>
-                    );
-                  })}
-                  {!isPriceLoading && filteredPriceRuleTargets.length === 0 ? (
-                    <div className={styles.priceRuleListEmpty}>{t('usage_stats.model_price_search_empty')}</div>
-                  ) : null}
-                </div>
-              </aside>
-
-              <section className={styles.priceRuleEditorPane}>
-                {selectedPriceTarget ? (
-                  <>
-                    <header className={styles.priceRuleEditorHeader}>
-                      <div>
-                        <h3 title={selectedPriceTarget.model}>{selectedPriceTarget.model}</h3>
-                        <span>{t('usage_stats.model_price_model_scope')}</span>
-                      </div>
-                      <div className={styles.priceRuleEditorBadges}>
-                        <span className={selectedPriceTarget.rule ? styles.priceRuleConfigured : styles.priceRuleUnconfigured}>
-                          {t(selectedPriceTarget.rule ? 'usage_stats.model_price_configured' : 'usage_stats.model_price_unconfigured')}
-                        </span>
-                        {selectedPriceTarget.rule?.source ? <span>{selectedPriceTarget.rule.source}</span> : null}
-                      </div>
-                    </header>
-
-                    <div className={styles.priceRuleEditorScroll}>
-                      <section className={styles.priceRuleSection}>
-                        <div className={styles.priceRuleSectionHeader}>
-                          <h4>{t('usage_stats.model_price_base_rates')}</h4>
-                          <span>USD / 1M</span>
-                        </div>
-                        <div className={styles.priceBaseGrid}>
-                          {([
-                            ['input', 'usage_stats.model_price_input'],
-                            ['output', 'usage_stats.model_price_output'],
-                            ['cacheRead', 'usage_stats.model_price_cache_read'],
-                            ['cacheWrite', 'usage_stats.model_price_cache_write'],
-                          ] as const).map(([field, label]) => (
-                            <label className={styles.priceField} key={field}>
-                              <span>{t(label)}</span>
-                              <Input
-                                type="number"
-                                min="0"
-                                step="0.0001"
-                                value={priceDraft[field]}
-                                onChange={(event) => handlePriceDraftChange(field, event.target.value)}
-                                placeholder="0.0000"
-                              />
-                            </label>
-                          ))}
-                        </div>
-                      </section>
-
-                      <section className={styles.priceRuleSection}>
-                        <div className={styles.priceRuleSectionHeader}>
-                          <div>
-                            <h4>{t('usage_stats.model_price_context_tier')}</h4>
-                            <span>{t('usage_stats.model_price_tier_count', { count: priceDraft.tiers.length })}</span>
-                          </div>
-                          <Button variant="secondary" size="sm" onClick={addPriceTier}>
-                            {t('usage_stats.model_price_tier_add')}
-                          </Button>
-                        </div>
-                        <div className={styles.priceTierList}>
-                          {priceDraft.tiers.map((tier, index) => (
-                            <div className={styles.priceTierCompactRow} key={index}>
-                              <span className={styles.priceTierIndex}>{index + 1}</span>
-                              <label>
-                                <span>{t('usage_stats.model_price_context_threshold')}</span>
-                                <Input type="number" min="1" step="1" value={tier.contextSize} onChange={(event) => handlePriceTierChange(index, 'contextSize', event.target.value)} placeholder="272000" />
-                              </label>
-                              <label>
-                                <span>{t('usage_stats.model_price_input')}</span>
-                                <Input type="number" min="0" step="0.0001" value={tier.input} onChange={(event) => handlePriceTierChange(index, 'input', event.target.value)} placeholder="0.0000" />
-                              </label>
-                              <label>
-                                <span>{t('usage_stats.model_price_output')}</span>
-                                <Input type="number" min="0" step="0.0001" value={tier.output} onChange={(event) => handlePriceTierChange(index, 'output', event.target.value)} placeholder="0.0000" />
-                              </label>
-                              <label>
-                                <span>{t('usage_stats.model_price_cache_read')}</span>
-                                <Input type="number" min="0" step="0.0001" value={tier.cacheRead} onChange={(event) => handlePriceTierChange(index, 'cacheRead', event.target.value)} placeholder="0.0000" />
-                              </label>
-                              <label>
-                                <span>{t('usage_stats.model_price_cache_write')}</span>
-                                <Input type="number" min="0" step="0.0001" value={tier.cacheWrite} onChange={(event) => handlePriceTierChange(index, 'cacheWrite', event.target.value)} placeholder="0.0000" />
-                              </label>
-                              <button
-                                type="button"
-                                className={styles.priceTierRemoveButton}
-                                onClick={() => removePriceTier(index)}
-                                aria-label={t('usage_stats.model_price_tier_remove')}
-                                title={t('usage_stats.model_price_tier_remove')}
-                              >
-                                <IconTrash2 size={15} />
-                              </button>
-                            </div>
-                          ))}
-                          {priceDraft.tiers.length === 0 ? (
-                            <div className={styles.priceTierEmpty}>{t('usage_stats.model_price_tier_empty')}</div>
-                          ) : null}
-                        </div>
-                      </section>
-                    </div>
-
-                    <footer className={styles.priceRuleEditorFooter}>
-                      <div>
-                        {selectedPriceTarget.rule ? (
-                          <Button variant="secondary" size="sm" onClick={() => void handleDeletePrice(selectedPriceTarget.model)}>
-                            {t('common.delete')}
-                          </Button>
-                        ) : null}
-                      </div>
-                      <div>
-                        <Button variant="secondary" size="sm" onClick={() => setPriceDraft(createPriceDraft(selectedPriceTarget.rule))}>
-                          {t('usage_stats.model_price_reset_changes')}
-                        </Button>
-                        <Button variant="primary" size="sm" onClick={() => void handleSavePrice()} disabled={isPriceSaving}>
-                          {isPriceSaving ? t('common.loading') : t('common.save')}
-                        </Button>
-                      </div>
-                    </footer>
-                  </>
-                ) : (
-                  <div className={styles.priceRuleEditorEmpty}>{t('usage_stats.model_price_select_empty')}</div>
-                )}
-              </section>
-            </div>
-          ) : (
-            <div className={styles.priceSyncView}>
-              <header className={styles.priceSyncHeader}>
-                <div>
-                  <span className={`${styles.priceSyncStatusDot} ${styles[`priceSyncStatus${priceSyncStatus}`] ?? ''}`} />
-                  <div>
-                    <h3>{t(`usage_stats.model_price_sync_state_${priceSyncStatus}`, { defaultValue: priceSyncStatus })}</h3>
-                    <span>
-                      {priceSyncState.lastSuccessMs
-                        ? t('usage_stats.model_price_last_sync', { value: formatShortDateTime(priceSyncState.lastSuccessMs) })
-                        : t('usage_stats.model_price_sync_never')}
-                    </span>
-                  </div>
-                </div>
-                <div className={styles.priceSyncActions}>
-                  <Button variant="secondary" size="sm" onClick={() => void handleSyncPrices(true)} disabled={isPriceSyncing || isPriceLoading}>
-                    {t('usage_stats.model_price_sync_preview')}
-                  </Button>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className={styles.priceSyncApplyButton}
-                    onClick={() => void handleSyncPrices(false)}
-                    disabled={isPriceSyncing || isPriceLoading}
-                  >
-                    <IconRefreshCw size={14} className={styles.priceSyncApplyIcon} />
-                    {isPriceSyncing
-                      ? t('common.loading')
-                      : priceSyncLockedOverrides.length > 0
-                        ? t('usage_stats.model_price_sync_with_overrides', { count: priceSyncLockedOverrides.length })
-                        : t('usage_stats.model_price_sync')}
-                  </Button>
-                </div>
-              </header>
-
-              <div className={styles.priceSyncMetrics}>
-                {([
-                  ['matched', priceSyncResult?.matched ?? priceSyncState.matched ?? 0],
-                  ['added', priceSyncResult?.added ?? priceSyncState.added ?? 0],
-                  ['updated', priceSyncResult?.updated ?? priceSyncState.updated ?? 0],
-                  ['unmatched', unmatchedPriceModelCount],
-                ] as const).map(([key, value]) => (
-                  <div key={key} className={`${styles.priceSyncMetric} ${styles[`priceSyncMetric${key}`] ?? ''}`}>
-                    <span>{t(`usage_stats.model_price_sync_metric_${key}`)}</span>
-                    <strong>{formatCompactNumber(value)}</strong>
-                  </div>
-                ))}
-              </div>
-
-              {priceSyncState.error ? <div className={styles.priceSyncError}>{priceSyncState.error}</div> : null}
-
-              {priceSyncResult ? (
-                <section className={styles.priceSyncChangesSection}>
-                  <div className={styles.priceSyncChangesHeader}>
-                    <div>
-                      <h4>{t(priceSyncResult.dryRun ? 'usage_stats.model_price_sync_preview_details' : 'usage_stats.model_price_sync_applied_details')}</h4>
-                      <span>{t('usage_stats.model_price_sync_change_summary', {
-                        added: priceSyncChangeCounts.added,
-                        updated: priceSyncChangeCounts.updated,
-                        overridden: priceSyncChangeCounts.overridden,
-                        locked: priceSyncChangeCounts.locked,
-                        unmatched: unmatchedPriceModelCount,
-                      })}</span>
-                    </div>
-                    <div className={styles.priceSyncChangesToolbar}>
-                      {lockedPriceSyncChanges.length > 0 ? (
-                        <label className={styles.priceSyncOverrideAll}>
-                          <input
-                            type="checkbox"
-                            checked={allLockedPriceSyncChangesSelected}
-                            onChange={(event) => setPriceSyncLockedOverrides(event.target.checked ? lockedPriceSyncChanges.map((change) => change.model) : [])}
-                          />
-                          <span>{t('usage_stats.model_price_sync_override_all', { count: lockedPriceSyncChanges.length })}</span>
-                        </label>
-                      ) : null}
-                      <div className={styles.priceSyncChangeFilters}>
-                        {(['all', 'added', 'updated', 'overridden', 'locked', 'unmatched'] as const).map((filter) => {
-                          const count = filter === 'all' ? priceSyncChanges.length : priceSyncChangeCounts[filter];
-                          if (filter !== 'all' && count === 0) return null;
-                          const filterLabel = filter === 'overridden' && priceSyncResult.dryRun
-                            ? t('usage_stats.model_price_sync_override_selected')
-                            : t(`usage_stats.model_price_sync_change_${filter}`);
-                          return (
-                            <button
-                              type="button"
-                              key={filter}
-                              className={priceSyncChangeFilter === filter ? styles.priceSyncChangeFilterActive : ''}
-                              onClick={() => setPriceSyncChangeFilter(filter)}
-                            >
-                              <span className={styles.priceSyncChangeFilterLabel}>{filterLabel}</span>
-                              <span className={styles.priceSyncChangeFilterCount}>{count}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className={styles.priceSyncChangeList}>
-                    {filteredPriceSyncChanges.map((change) => {
-                      const rateChanges = MODEL_PRICE_SYNC_RATE_FIELDS.filter(([field]) => (
-                        change.after && (!change.before || change.before.base[field] !== change.after.base[field])
-                      ));
-                      const beforeTierCount = change.before?.tiers?.length ?? 0;
-                      const afterTierCount = change.after?.tiers?.length ?? 0;
-                      const overrideSelected = change.action === 'locked' && priceSyncLockedOverrideSet.has(change.model);
-                      const displayedAction = overrideSelected ? 'overridden' : change.action;
-                      return (
-                        <article className={styles.priceSyncChangeRow} key={`${change.action}/${change.model}`}>
-                          <div className={styles.priceSyncChangeIdentity}>
-                            <span className={`${styles.priceSyncChangeBadge} ${styles[`priceSyncChange${displayedAction}`] ?? ''}`}>
-                              {overrideSelected
-                                ? t('usage_stats.model_price_sync_override_selected')
-                                : t(`usage_stats.model_price_sync_change_${displayedAction}`)}
-                            </span>
-                            <div>
-                              <strong title={change.model}>{change.model}</strong>
-                              <small>
-                                {change.sourceProvider
-                                  ? `${change.sourceProvider}/${change.sourceModel || change.model}`
-                                  : t('usage_stats.model_price_sync_change_no_source')}
-                                {' · '}
-                                {t('usage_stats.model_price_requests', { count: change.requests })}
-                              </small>
-                            </div>
-                          </div>
-
-                          {change.action !== 'unmatched' ? (
-                            <div className={styles.priceSyncRateChanges}>
-                              {rateChanges.map(([field, label]) => (
-                                <div key={field}>
-                                  <span>{t(label)}</span>
-                                  <div>
-                                    {change.before ? <del>{formatModelPriceRate(change.before.base[field])}</del> : null}
-                                    {change.before ? <span aria-hidden="true">-&gt;</span> : null}
-                                    <strong>{formatModelPriceRate(change.after?.base[field])}</strong>
-                                  </div>
-                                </div>
-                              ))}
-                              {beforeTierCount !== afterTierCount ? (
-                                <div>
-                                  <span>{t('usage_stats.model_price_context_tier')}</span>
-                                  <div>
-                                    <del>{beforeTierCount}</del>
-                                    <span aria-hidden="true">-&gt;</span>
-                                    <strong>{afterTierCount}</strong>
-                                  </div>
-                                </div>
-                              ) : null}
-                              {rateChanges.length === 0 && beforeTierCount === afterTierCount ? (
-                                <small>{t(change.action === 'locked'
-                                  ? overrideSelected
-                                    ? 'usage_stats.model_price_sync_override_selected_hint'
-                                    : 'usage_stats.model_price_sync_change_locked_hint'
-                                  : 'usage_stats.model_price_sync_change_metadata_hint')}</small>
-                              ) : null}
-                              {change.action === 'locked' ? (
-                                <label className={styles.priceSyncOverrideOption}>
-                                  <input
-                                    type="checkbox"
-                                    checked={overrideSelected}
-                                    onChange={(event) => setPriceSyncLockedOverrides((previous) => (
-                                      event.target.checked
-                                        ? Array.from(new Set([...previous, change.model]))
-                                        : previous.filter((model) => model !== change.model)
-                                    ))}
-                                  />
-                                  <span>{t(overrideSelected
-                                    ? 'usage_stats.model_price_sync_override_selected'
-                                    : 'usage_stats.model_price_sync_override_option')}</span>
-                                </label>
-                              ) : null}
-                            </div>
-                          ) : (
-                            <span className={styles.priceSyncChangeHint}>{t('usage_stats.model_price_sync_change_unmatched_hint')}</span>
-                          )}
-                        </article>
-                      );
-                    })}
-                    {filteredPriceSyncChanges.length === 0 ? (
-                      <div className={styles.priceSyncChangesEmpty}>{t('usage_stats.model_price_sync_no_changes')}</div>
-                    ) : null}
-                  </div>
-                </section>
-              ) : unmatchedPriceModelCount > 0 ? (
-                <section className={styles.priceSyncResultSection}>
-                  <div className={styles.priceRuleSectionHeader}>
-                    <div>
-                      <h4>{t('usage_stats.model_price_sync_unmatched')}</h4>
-                      <span>{unmatchedPriceModelCount}</span>
-                    </div>
-                  </div>
-                  <div className={styles.priceUnmatchedList}>
-                  {unmatchedPriceModels.map((item) => (
-                    <div key={item.model}>
-                      <span>
-                        <strong title={item.model}>{item.model}</strong>
-                        {item.alias ? <small title={item.alias}>{item.alias}</small> : null}
-                      </span>
-                      <small>{t('usage_stats.model_price_requests', { count: item.requests })}</small>
-                    </div>
-                  ))}
-                  </div>
-                </section>
-              ) : null}
-
-              <section className={styles.priceSyncSchedule}>
-                <div>
-                  <strong>{t('usage_stats.model_price_sync_schedule_title')}</strong>
-                  <span>{t('usage_stats.model_price_sync_schedule_desc')}</span>
-                </div>
-                <div className={styles.priceSyncScheduleControls}>
-                  <label className={styles.priceSyncScheduleToggle}>
-                    <input
-                      type="checkbox"
-                      checked={monitoringSettingsDraft.modelPriceSyncEnabled}
-                      onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, modelPriceSyncEnabled: event.target.checked }))}
-                    />
-                    <span>{t('usage_stats.model_price_sync_schedule_enabled')}</span>
-                  </label>
-                  <label className={styles.priceSyncScheduleInterval}>
-                    <span>{t('usage_stats.model_price_sync_schedule_interval')}</span>
-                    <Input
-                      type="number"
-                      min="60"
-                      step="60"
-                      value={monitoringSettingsDraft.modelPriceSyncIntervalMinutes}
-                      onChange={(event) => setMonitoringSettingsDraft((previous) => ({ ...previous, modelPriceSyncIntervalMinutes: event.target.value }))}
-                      placeholder="1440"
-                      disabled={!monitoringSettingsDraft.modelPriceSyncEnabled}
-                    />
-                  </label>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => void handleSaveMonitoringSettings(false)}
-                    disabled={isMonitoringSettingsLoading || isMonitoringSettingsSaving}
-                  >
-                    {isMonitoringSettingsSaving ? t('common.loading') : t('common.save')}
-                  </Button>
-                </div>
-              </section>
-            </div>
-          )}
-        </div>
-      </Modal>
+      <ModelPriceManagerModal
+        isPriceModalOpen={isPriceModalOpen}
+        setIsPriceModalOpen={setIsPriceModalOpen}
+        priceManagementView={priceManagementView}
+        setPriceManagementView={setPriceManagementView}
+        priceRuleTargets={priceRuleTargets}
+        priceRuleSearch={priceRuleSearch}
+        setPriceRuleSearch={setPriceRuleSearch}
+        priceModel={priceModel}
+        selectPriceTarget={selectPriceTarget}
+        isPriceLoading={isPriceLoading}
+        priceDraft={priceDraft}
+        setPriceDraft={setPriceDraft}
+        handlePriceDraftChange={handlePriceDraftChange}
+        handlePriceTierChange={handlePriceTierChange}
+        addPriceTier={addPriceTier}
+        removePriceTier={removePriceTier}
+        handleDeletePrice={handleDeletePrice}
+        handleSavePrice={handleSavePrice}
+        isPriceSaving={isPriceSaving}
+        priceSyncState={priceSyncState}
+        priceSyncResult={priceSyncResult}
+        isPriceSyncing={isPriceSyncing}
+        handleSyncPrices={handleSyncPrices}
+        priceSyncLockedOverrides={priceSyncLockedOverrides}
+        setPriceSyncLockedOverrides={setPriceSyncLockedOverrides}
+        priceSyncChangeFilter={priceSyncChangeFilter}
+        setPriceSyncChangeFilter={setPriceSyncChangeFilter}
+        monitoringSettingsDraft={monitoringSettingsDraft}
+        setMonitoringSettingsDraft={setMonitoringSettingsDraft}
+        handleSaveMonitoringSettings={handleSaveMonitoringSettings}
+        isMonitoringSettingsLoading={isMonitoringSettingsLoading}
+        isMonitoringSettingsSaving={isMonitoringSettingsSaving}
+        t={t}
+      />
     </div>
   );
 }

@@ -1,0 +1,651 @@
+@keyframes monitor-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes monitor-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@container monitoring-page (max-width: 760px) {
+  .usageStatsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container monitoring-page (max-width: 1120px) {
+  .toolbarControlRow {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .refreshCluster {
+    justify-content: flex-start;
+  }
+}
+
+@container monitoring-page (max-width: 900px) {
+  .usageTrendHeader,
+  .usageTrendCollapsed {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px 12px;
+  }
+
+  .usageTrendCopy {
+    display: contents;
+  }
+
+  .usageTrendCopy h2 {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+  }
+
+  .usageTrendHeader .usageTrendCopy p {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .usageTrendActions {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .usageTrendHeader > .usageTrendActions > .usageTrendHideButton {
+    display: none;
+  }
+
+  .mobileHeaderHideButton {
+    display: inline-flex;
+    grid-column: 2;
+    align-self: center;
+    margin-top: 0;
+    transform: translateY(5px);
+  }
+
+  .timeRangeControl,
+  .usageTrendRangeControl {
+    flex: 0 1 auto;
+  }
+
+  .usageTrendApiKeySelect {
+    width: 150px;
+  }
+
+  .usageTrendInsightsGrid,
+  .rankingGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .modelStatsLayout {
+    grid-template-columns: minmax(0, 1fr) minmax(210px, 240px);
+  }
+
+  .settingsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .accountOverviewTable {
+    min-width: 920px;
+  }
+
+  .realtimeTable {
+    min-width: 1360px;
+  }
+
+  .accountOverviewTable th:first-child,
+  .accountOverviewTable td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    box-shadow: 8px 0 14px color-mix(in srgb, var(--monitor-bg) 56%, transparent);
+  }
+
+  .accountOverviewTable th:first-child {
+    z-index: 4;
+    background: var(--monitor-surface);
+  }
+
+  .accountOverviewTable td:first-child {
+    background: var(--monitor-surface-elevated);
+  }
+
+}
+
+@container monitoring-page (max-width: 680px) {
+  .realtimeLogStatusRow {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .realtimeUpdateBar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .usageTrendActions {
+    align-items: center;
+    overflow: visible;
+  }
+
+  .timeRangeControl,
+  .usageTrendRangeControl {
+    flex: 0 1 auto;
+    min-width: 0;
+    width: auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .timeRangeControl::-webkit-scrollbar,
+  .usageTrendRangeControl::-webkit-scrollbar {
+    display: none;
+  }
+
+  .timeRangeButton,
+  .usageTrendRangeButton {
+    flex: 0 0 auto;
+    min-width: 54px;
+    padding: 0 10px;
+  }
+
+  .usageTrendApiKeySelect {
+    width: 132px;
+  }
+
+  .usageTrendChartCard {
+    height: auto;
+    min-height: 520px;
+    padding: 16px;
+  }
+
+  .professionalChartShell {
+    grid-template-rows: auto minmax(230px, 240px) auto;
+    gap: 16px;
+    align-content: start;
+  }
+
+  .usageTrendSvg {
+    height: 240px;
+  }
+
+  .trendChartLegend {
+    justify-content: flex-start;
+  }
+
+  .accountStatsToolbar {
+    align-items: stretch;
+    flex-direction: column;
+    flex-wrap: nowrap;
+  }
+
+  .accountStatsFilters {
+    display: grid;
+    grid-template-columns: minmax(112px, 1fr) minmax(104px, 0.9fr) minmax(96px, 0.8fr);
+    gap: 8px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+
+  .accountStatsFilters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .accountStatsSearchInput,
+  .accountStatsSelect {
+    width: 100%;
+  }
+
+  .accountStatsToolbar > .rankingMetricSwitch {
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+    justify-content: flex-start;
+    scrollbar-width: none;
+  }
+
+  .accountStatsToolbar > .rankingMetricSwitch::-webkit-scrollbar {
+    display: none;
+  }
+
+  .accountStatsToolbar > .rankingMetricSwitch .rankingMetricButton {
+    flex: 0 0 auto;
+    min-width: 58px;
+    padding: 0 12px;
+  }
+
+  .accountStatsClearButton {
+    display: none;
+  }
+
+  .accountOverviewCardGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .healthMetricGrid,
+  .accountOverviewMetricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .trendCardHeader {
+    flex-direction: column;
+  }
+
+  .trendSummaryStrip {
+    grid-template-columns: repeat(4, minmax(96px, 1fr));
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .trendSummaryStrip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tokenDistributionLegend {
+    justify-content: flex-start;
+  }
+
+  .trendMetricStrip,
+  .tokenTypeSummaryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .modelStatsLayout {
+    grid-template-columns: minmax(0, 1fr) minmax(190px, 220px);
+  }
+
+  .modelStatsCard .modelSharePanel {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 8px;
+  }
+
+  .modelStatsCard .modelShareHeader,
+  .modelStatsCard .modelLegend,
+  .modelStatsCard .donutChart {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .modelStatsCard .donutChart {
+    width: min(150px, 100%);
+  }
+}
+
+@container monitoring-page (max-width: 520px) {
+  .usageStatsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .rankingHeader {
+    flex-wrap: nowrap;
+  }
+
+  .rankingMetricSwitch {
+    justify-content: flex-start;
+    max-width: 100%;
+  }
+
+  .rankingMetricButton {
+    padding: 0 9px;
+  }
+
+  .tokenDistributionHeader {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .tokenCostBadge {
+    min-width: 98px;
+    padding: 7px 9px;
+  }
+
+  .trendSummaryStrip {
+    grid-template-columns: repeat(4, minmax(92px, 1fr));
+  }
+
+  .usageTrendChartCard {
+    min-height: 500px;
+    padding: 12px;
+  }
+
+  .professionalChartShell {
+    grid-template-rows: auto minmax(210px, 220px) auto;
+    gap: 16px;
+  }
+
+  .usageTrendSvg {
+    height: 220px;
+  }
+
+  .trendSummaryItem {
+    padding: 10px 10px 10px 16px;
+  }
+
+  .trendSummaryItem strong {
+    font-size: 17px;
+  }
+
+  .trendChartLegend {
+    gap: 8px 14px;
+  }
+
+  .trendChartLegend span {
+    font-size: 12px;
+  }
+
+  .trendChartLegend span::before {
+    width: 18px;
+  }
+
+  .modelStatsLayout {
+    grid-template-columns: minmax(0, 1fr) minmax(160px, 190px);
+    gap: 12px;
+  }
+
+  .modelStatsCard .modelSharePanel {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 8px;
+  }
+
+  .modelStatsCard .modelShareHeader,
+  .modelStatsCard .modelLegend,
+  .modelStatsCard .donutChart {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .modelStatsCard .donutChart {
+    width: min(140px, 100%);
+  }
+
+  .modelStatsCard .modelLegend {
+    gap: 4px;
+  }
+
+  .modelSharePanel .donutTooltip {
+    right: auto;
+    bottom: auto;
+    left: 50%;
+    top: calc(100% + 12px);
+    transform: translate(-50%, 0);
+  }
+
+  .modelSharePanel .donutChart:hover .donutTooltip,
+  .modelSharePanel .donutChart:focus-within .donutTooltip {
+    transform: translate(-50%, 0);
+  }
+}
+
+@container monitoring-page (max-width: 768px) {
+  .masthead,
+  .panel {
+    border-radius: 12px;
+  }
+
+  .panel {
+    padding: 16px;
+  }
+
+  .masthead {
+    gap: 16px;
+  }
+
+  .titleRow {
+    grid-template-columns: 1fr;
+  }
+
+  .titleActions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .title {
+    font-size: 28px;
+  }
+
+  .subtitle {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .mastheadActionButton {
+    flex: 0 0 auto;
+  }
+
+  .toolbarControlRow {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .segmentedControl,
+  .refreshCluster {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+  }
+
+  .refreshCluster {
+    flex-wrap: wrap;
+  }
+
+  .refreshControls {
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
+  .segmentedControl {
+    flex: 0 0 auto;
+  }
+
+  .quickLinkButton {
+    flex: 0 0 auto;
+  }
+
+  .realtimePanel .panelHeader {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .realtimePanel .panelTitle {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .realtimePanel .panelExtra {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .toolbarHeaderActions {
+    width: 100%;
+  }
+
+  .toolbarHeaderActions .clearButton {
+    flex: 0 0 auto;
+  }
+
+  .autoRefreshField {
+    flex: 1 1 160px;
+    min-width: 0;
+    width: auto;
+    justify-content: flex-start;
+  }
+
+  .autoRefreshSelect {
+    width: 76px;
+  }
+
+  .toolbarHeaderActions {
+    flex-wrap: nowrap;
+  }
+
+  .toolbarHeaderSearchInput {
+    min-width: 0;
+  }
+
+  .refreshCluster {
+    overflow-x: visible;
+    scrollbar-width: none;
+  }
+
+  .refreshCluster::-webkit-scrollbar {
+    display: none;
+  }
+
+  .syncPill {
+    min-width: 0;
+    max-width: 112px;
+    overflow: hidden;
+    padding: 0 8px;
+    font-size: 11px;
+    text-overflow: ellipsis;
+  }
+
+  .autoRefreshLabel {
+    font-size: 10px;
+  }
+
+  .autoRefreshLabel svg {
+    display: none;
+  }
+
+  .autoRefreshSelectTrigger {
+    min-width: 68px;
+  }
+
+  .refreshButtonLabel {
+    display: none;
+  }
+
+  .refreshButton {
+    min-width: 42px;
+  }
+
+  .usageStatsCard {
+    padding: 13px;
+  }
+
+  .usageStatsBody strong {
+    font-size: 22px;
+  }
+
+  .usageStatsFooter {
+    gap: 6px;
+  }
+
+  .filterGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rankingGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .filterGrid :global(.select-trigger) {
+    padding-inline: 8px !important;
+  }
+
+  .filterGrid :global(.select-value) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .settingsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .settingsDangerAction {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settingsDangerAction :global(.btn) {
+    width: 100%;
+  }
+
+  .segmentButton {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .refreshCluster {
+    gap: 8px;
+    padding: 6px;
+  }
+
+  .refreshControls {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+
+  .autoRefreshField {
+    flex-basis: 132px;
+  }
+
+  .syncPill,
+  .autoRefreshField,
+  .refreshButton {
+    min-height: 38px;
+  }
+
+  .refreshButton {
+    min-width: 42px;
+    padding: 0 10px;
+  }
+
+  .filterGrid {
+    gap: 8px;
+  }
+
+  .priceActionsBar {
+    justify-content: stretch;
+  }
+
+  .priceActionsBar :global(.btn) {
+    flex: 1 1 0;
+  }
+
+  .table {
+    min-width: 0;
+  }
+
+  .accountOverviewTable {
+    min-width: 920px;
+  }
+
+  .realtimeTable {
+    min-width: 1360px;
+  }
+}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
 import type { AccountStatusBlockDetail, AccountStatusData } from '../accountHealth';
-import styles from '@/pages/MonitoringCenterPage.module.scss';
+import styles from '../monitoring.module.scss';
 
 
 
