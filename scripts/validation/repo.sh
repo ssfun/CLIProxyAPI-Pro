@@ -10,18 +10,29 @@ export PYTHONPYCACHEPREFIX="${pycache_root}"
 python3 -m py_compile \
   "${repo_root}/cliproxyapi-pro-core/patches/apply_upstream_patches.py" \
   "${repo_root}/cliproxyapi-pro-management/apply_customizations.py" \
-  "${repo_root}/scripts/validation/check_workflow_actions.py"
+  "${repo_root}/scripts/validation/check_workflow_actions.py" \
+  "${repo_root}/scripts/validation/check_reproducible_builds.py" \
+  "${repo_root}/scripts/build/create_reproducible_archive.py"
 
 python3 -m unittest discover \
   -s "${repo_root}/cliproxyapi-pro-management/tests" \
   -p 'test_*.py'
 
+python3 -m unittest discover \
+  -s "${repo_root}/scripts/build/tests" \
+  -p 'test_*.py'
+
 python3 -m json.tool \
   "${repo_root}/cliproxyapi-pro-management/monitoring-locales.json" \
+  >/dev/null
+python3 -m json.tool \
+  "${repo_root}/cliproxyapi-pro-management/overlay-replacements.json" \
   >/dev/null
 
 python3 "${repo_root}/scripts/validation/check_workflow_actions.py" \
   "${repo_root}/.github/workflows"
+python3 "${repo_root}/scripts/validation/check_reproducible_builds.py" \
+  "${repo_root}"
 
 sh -n "${repo_root}/cliproxyapi-pro-core/entrypoint.sh"
 bash -n \

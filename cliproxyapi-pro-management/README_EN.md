@@ -134,10 +134,13 @@ Request Monitoring uses an initial snapshot plus SSE increments and cursor catch
 - `overlay/src/features/monitoring/` — monitoring and inspection logic.
 - `overlay/src/extensions/quota/` — SQLite quota persistence integration.
 - `overlay/src/services/api/` — added API clients.
+- `overlay-replacements.json` — reviewed upstream and overlay SHA-256 pairs for the full-file replacements that intentionally collide with upstream paths.
 - `monitoring-locales.json` — locale additions merged into upstream locale files.
 - `apply_customizations.py` — applies all customizations to a target upstream checkout.
 - `apply.sh` — shell wrapper around `apply_customizations.py`.
 - `quota-persistence.patch` — legacy patch artifact kept for reference; current builds use `apply_customizations.py`.
+
+Overlay collision preflight validates both sides of every reviewed replacement. An upstream file change or a local replacement change must update `overlay-replacements.json` explicitly; new unreviewed path collisions are rejected before any overlay file is copied.
 
 ## Applying locally
 

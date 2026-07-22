@@ -35,6 +35,7 @@ jobs:
       core_repo: ${{ steps.resolve.outputs.core_repo }}
       core_tag: ${{ steps.resolve.outputs.core_tag }}
       core_sha: ${{ steps.resolve.outputs.core_sha }}
+      core_source_date_epoch: ${{ steps.resolve.outputs.core_source_date_epoch }}
       management_repo: ${{ steps.resolve.outputs.management_repo }}
       management_tag: ${{ steps.resolve.outputs.management_tag }}
       management_sha: ${{ steps.resolve.outputs.management_sha }}
@@ -62,12 +63,15 @@ jobs:
             management_tag="$(gh api "repos/${MANAGEMENT_UPSTREAM_REPO}/releases/latest" --jq '.tag_name')"
           fi
           core_sha="$(gh api "repos/${CORE_UPSTREAM_REPO}/commits/${core_tag}" --jq '.sha')"
+          core_commit_date="$(gh api "repos/${CORE_UPSTREAM_REPO}/commits/${core_sha}" --jq '.commit.committer.date')"
+          core_source_date_epoch="$(date -u -d "${core_commit_date}" +%s)"
           management_sha="$(gh api "repos/${MANAGEMENT_UPSTREAM_REPO}/commits/${management_tag}" --jq '.sha')"
 
           echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
           echo "core_repo=${CORE_UPSTREAM_REPO}" >> "${GITHUB_OUTPUT}"
           echo "core_tag=${core_tag}" >> "${GITHUB_OUTPUT}"
           echo "core_sha=${core_sha}" >> "${GITHUB_OUTPUT}"
+          echo "core_source_date_epoch=${core_source_date_epoch}" >> "${GITHUB_OUTPUT}"
           echo "management_repo=${MANAGEMENT_UPSTREAM_REPO}" >> "${GITHUB_OUTPUT}"
           echo "management_tag=${management_tag}" >> "${GITHUB_OUTPUT}"
           echo "management_sha=${management_sha}" >> "${GITHUB_OUTPUT}"
@@ -150,11 +154,15 @@ jobs:
         env:
           CORE_TAG: ${{ needs.resolve-upstream.outputs.core_tag }}
           CORE_SHA: ${{ needs.resolve-upstream.outputs.core_sha }}
+          CORE_SOURCE_DATE_EPOCH: ${{ needs.resolve-upstream.outputs.core_source_date_epoch }}
         run: |
+          customization_source_date_epoch="$(git show -s --format=%ct HEAD)"
+          source_date_epoch="$(printf '%s\n' "${CORE_SOURCE_DATE_EPOCH}" "${customization_source_date_epoch}" | sort -n | tail -n 1)"
           docker build \
             --build-arg "CLIPROXY_VERSION=${CORE_TAG}" \
             --build-arg "CLIPROXY_COMMIT=${CORE_SHA}" \
             --build-arg "CLIPROXY_BUILD_VERSION=${CORE_TAG}-pro-review" \
+            --build-arg "SOURCE_DATE_EPOCH=${source_date_epoch}" \
             --tag cli-proxy-api-pro:review \
             cliproxyapi-pro-core
 

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "router-for-me/Cli-Proxy-API-Management-Center",
+    "tag": "v1.18.5"
+  },
+  "replacements": [
+    {
+      "path": "src/services/api/apiCall.ts",
+      "upstreamSha256": [
+        "52cbd98311904f87f588931114b7a708922e2c3d9049da39eb325be5902ee42b"
+      ],
+      "overlaySha256": "c96370f6f75f0cfb4a77e6910edaa8762af8337a38f6d1e8c551e37a74772917",
+      "reason": "Preserve the reviewed Pro request executor contract."
+    },
+    {
+      "path": "src/utils/quota/resolvers.ts",
+      "upstreamSha256": [
+        "8fcded3c9edd03ac1f156abdfc37421df2bc0f6bba3717ca13664edd8f837b92"
+      ],
+      "overlaySha256": "04fab80ec51e5d0d67ddf8d6332ea3e39d8bd5a337741734974a97d11e1195a0",
+      "reason": "Preserve reviewed Pro quota normalization and provider resolution."
+    },
+    {
+      "path": "src/utils/quota/validators.ts",
+      "upstreamSha256": [
+        "aef0e8b377e569294d5d5f291ce6da10b7b12322516d40f851f2b84521b7840b"
+      ],
+      "overlaySha256": "6fa259e36db125eba8753820997e1e6c383488ec30cf5276f046479ce054b754",
+      "reason": "Preserve reviewed Pro quota validation semantics."
+    }
+  ]
+}

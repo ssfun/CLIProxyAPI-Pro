@@ -16,10 +16,12 @@ class OverlayCollisionCustomizationTest(unittest.TestCase):
     def setUp(self) -> None:
         self.original_overlay_dir = CUSTOMIZATIONS.OVERLAY_DIR
         self.original_hashes = CUSTOMIZATIONS.OVERLAY_REPLACEMENT_HASHES
+        self.original_source_hashes = CUSTOMIZATIONS.OVERLAY_REPLACEMENT_SOURCE_HASHES
 
     def tearDown(self) -> None:
         CUSTOMIZATIONS.OVERLAY_DIR = self.original_overlay_dir
         CUSTOMIZATIONS.OVERLAY_REPLACEMENT_HASHES = self.original_hashes
+        CUSTOMIZATIONS.OVERLAY_REPLACEMENT_SOURCE_HASHES = self.original_source_hashes
 
     def test_allows_reviewed_replacement_and_idempotent_reapplication(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -38,6 +40,9 @@ class OverlayCollisionCustomizationTest(unittest.TestCase):
             CUSTOMIZATIONS.OVERLAY_DIR = overlay
             CUSTOMIZATIONS.OVERLAY_REPLACEMENT_HASHES = {
                 relative_path.as_posix(): {upstream_hash},
+            }
+            CUSTOMIZATIONS.OVERLAY_REPLACEMENT_SOURCE_HASHES = {
+                relative_path.as_posix(): hashlib.sha256(source.read_bytes()).hexdigest(),
             }
 
             CUSTOMIZATIONS.copy_overlay(target)
@@ -62,6 +67,9 @@ class OverlayCollisionCustomizationTest(unittest.TestCase):
             CUSTOMIZATIONS.OVERLAY_REPLACEMENT_HASHES = {
                 relative_path.as_posix(): {'not-the-current-hash'},
             }
+            CUSTOMIZATIONS.OVERLAY_REPLACEMENT_SOURCE_HASHES = {
+                relative_path.as_posix(): hashlib.sha256(source.read_bytes()).hexdigest(),
+            }
 
             with self.assertRaisesRegex(RuntimeError, 'Upstream overlay replacement changed'):
                 CUSTOMIZATIONS.copy_overlay(target)
@@ -81,6 +89,7 @@ class OverlayCollisionCustomizationTest(unittest.TestCase):
 
             CUSTOMIZATIONS.OVERLAY_DIR = overlay
             CUSTOMIZATIONS.OVERLAY_REPLACEMENT_HASHES = {}
+            CUSTOMIZATIONS.OVERLAY_REPLACEMENT_SOURCE_HASHES = {}
 
             with self.assertRaisesRegex(RuntimeError, 'Unexpected overlay collision'):
                 CUSTOMIZATIONS.copy_overlay(target)
@@ -101,10 +110,35 @@ class OverlayCollisionCustomizationTest(unittest.TestCase):
 
             CUSTOMIZATIONS.OVERLAY_DIR = overlay
             CUSTOMIZATIONS.OVERLAY_REPLACEMENT_HASHES = {}
+            CUSTOMIZATIONS.OVERLAY_REPLACEMENT_SOURCE_HASHES = {}
 
             with self.assertRaisesRegex(RuntimeError, 'Unexpected overlay collision'):
                 CUSTOMIZATIONS.copy_overlay(target)
             self.assertFalse((target / 'src/new.ts').exists())
+
+    def test_rejects_unreviewed_overlay_replacement_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            overlay = root / 'overlay'
+            target = root / 'target'
+            relative_path = Path('src/existing.ts')
+            source = overlay / relative_path
+            destination = target / relative_path
+            source.parent.mkdir(parents=True)
+            destination.parent.mkdir(parents=True)
+            source.write_text('changed customization\n')
+            destination.write_text('upstream\n')
+
+            CUSTOMIZATIONS.OVERLAY_DIR = overlay
+            CUSTOMIZATIONS.OVERLAY_REPLACEMENT_HASHES = {
+                relative_path.as_posix(): {hashlib.sha256(destination.read_bytes()).hexdigest()},
+            }
+            CUSTOMIZATIONS.OVERLAY_REPLACEMENT_SOURCE_HASHES = {
+                relative_path.as_posix(): 'not-the-current-overlay-hash',
+            }
+
+            with self.assertRaisesRegex(RuntimeError, 'changed without reviewed manifest update'):
+                CUSTOMIZATIONS.copy_overlay(target)
 
 
 if __name__ == '__main__':

@@ -252,6 +252,8 @@ docker build \
   ./cliproxyapi-pro-core
 ```
 
+Dockerfile 默认使用已审阅的 Debian snapshot `20260715T000000Z`。本地需要确定的 source binary 时，还应传入不可变 `CLIPROXY_COMMIT` 和固定 `SOURCE_DATE_EPOCH`；release workflow 会从不可变输入提交推导该时间，并规范化全部 Core 归档。
+
 ### 应用 management 定制层
 
 ```bash

@@ -1,6 +1,14 @@
 FROM golang:1.26-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651 AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl jq python3 build-essential git && rm -rf /var/lib/apt/lists/*
+ARG DEBIAN_SNAPSHOT=20260715T000000Z
+RUN set -eux; \
+    sed -ri \
+      -e "s#https?://deb.debian.org/debian-security#http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}#g" \
+      -e "s#https?://deb.debian.org/debian#http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}#g" \
+      /etc/apt/sources.list.d/debian.sources; \
+    apt-get -o Acquire::Check-Valid-Until=false update; \
+    apt-get install -y --no-install-recommends ca-certificates curl jq python3 build-essential git; \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src/CLIProxyAPI
 
@@ -8,6 +16,7 @@ ARG CLIPROXY_REPO=router-for-me/CLIProxyAPI
 ARG CLIPROXY_VERSION=""
 ARG CLIPROXY_COMMIT=""
 ARG CLIPROXY_BUILD_VERSION=""
+ARG SOURCE_DATE_EPOCH=""
 ARG GITHUB_TOKEN=""
 ARG TARGETOS
 ARG TARGETARCH
@@ -39,18 +48,31 @@ RUN set -eux; \
     go mod tidy; \
     CLIPROXY_SOURCE_VERSION="$(cat /tmp/cliproxy-version)"; \
     if [ -z "$CLIPROXY_BUILD_VERSION" ]; then CLIPROXY_BUILD_VERSION="$CLIPROXY_SOURCE_VERSION"; fi; \
-    BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
-    CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -buildvcs=false \
+    if [ -n "$SOURCE_DATE_EPOCH" ]; then \
+      BUILD_DATE="$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)"; \
+    else \
+      BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
+    fi; \
+    CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -buildvcs=false -trimpath \
       -ldflags="-s -w -X 'main.Version=${CLIPROXY_BUILD_VERSION}' -X 'main.Commit=release-${CLIPROXY_SOURCE_VERSION}' -X 'main.BuildDate=${BUILD_DATE}'" \
       -o /out/CLIProxyAPI ./cmd/server/
 
 FROM debian:bookworm@sha256:9344f8b8992482f80cba753f323adeaf17690076c095ccff6cc9536be98185dc
 
+ARG DEBIAN_SNAPSHOT=20260715T000000Z
+
 RUN mkdir -p /CLIProxyAPI/usage
 
 COPY --from=ghcr.io/komari-monitor/komari-agent:latest@sha256:48815bdfce540d83c60b92809858d9aea3635d07abf78581486e0433ca97d676 /app/komari-agent /CLIProxyAPI/komari-agent
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tzdata && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    sed -ri \
+      -e "s#https?://deb.debian.org/debian-security#http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}#g" \
+      -e "s#https?://deb.debian.org/debian#http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}#g" \
+      /etc/apt/sources.list.d/debian.sources; \
+    apt-get -o Acquire::Check-Valid-Until=false update; \
+    apt-get install -y --no-install-recommends ca-certificates curl tzdata; \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /CLIProxyAPI
 

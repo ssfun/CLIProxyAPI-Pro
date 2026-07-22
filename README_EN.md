@@ -224,6 +224,8 @@ docker build \
   ./cliproxyapi-pro-core
 ```
 
+The Dockerfiles use the reviewed Debian snapshot `20260715T000000Z`. For a deterministic local source binary, also pass an immutable `CLIPROXY_COMMIT` and a fixed `SOURCE_DATE_EPOCH`; release workflows derive that epoch from immutable source commits and normalize all core archives.
+
 ### Apply the management customization layer
 
 ```bash
