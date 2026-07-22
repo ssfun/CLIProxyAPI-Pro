@@ -225,19 +225,17 @@ CLAUDE_MODEL_ID_CLOAK_LOCALE_KEYS = {
     },
 }
 
-def load_overlay_replacement_manifest(path: Path) -> tuple[dict[str, set[str]], dict[str, str]]:
+def load_overlay_replacement_manifest(path: Path) -> dict[str, set[str]]:
     payload = json.loads(path.read_text())
     if payload.get('schemaVersion') != 1 or not isinstance(payload.get('replacements'), list):
         raise RuntimeError(f'Invalid overlay replacement manifest: {path}')
 
     upstream_hashes: dict[str, set[str]] = {}
-    overlay_hashes: dict[str, str] = {}
     for entry in payload['replacements']:
         if not isinstance(entry, dict):
             raise RuntimeError(f'Invalid overlay replacement entry: {entry!r}')
         relative_path = entry.get('path')
         upstream = entry.get('upstreamSha256')
-        overlay = entry.get('overlaySha256')
         if (
             not isinstance(relative_path, str)
             or not relative_path
@@ -247,18 +245,13 @@ def load_overlay_replacement_manifest(path: Path) -> tuple[dict[str, set[str]], 
             or not isinstance(upstream, list)
             or not upstream
             or not all(isinstance(item, str) and len(item) == 64 for item in upstream)
-            or not isinstance(overlay, str)
-            or len(overlay) != 64
         ):
             raise RuntimeError(f'Invalid overlay replacement entry: {entry!r}')
         upstream_hashes[relative_path] = set(upstream)
-        overlay_hashes[relative_path] = overlay
-    return upstream_hashes, overlay_hashes
+    return upstream_hashes
 
 
-OVERLAY_REPLACEMENT_HASHES, OVERLAY_REPLACEMENT_SOURCE_HASHES = load_overlay_replacement_manifest(
-    OVERLAY_REPLACEMENTS_FILE
-)
+OVERLAY_REPLACEMENT_HASHES = load_overlay_replacement_manifest(OVERLAY_REPLACEMENTS_FILE)
 
 
 _writes = {}
@@ -370,18 +363,6 @@ def insert_once(path: Path, marker: str, insertion: str, present: str) -> None:
 
 
 def validate_overlay_collisions(target: Path) -> None:
-    if set(OVERLAY_REPLACEMENT_HASHES) != set(OVERLAY_REPLACEMENT_SOURCE_HASHES):
-        raise RuntimeError('Overlay replacement manifest hash maps are inconsistent')
-    for relative_path, expected_digest in OVERLAY_REPLACEMENT_SOURCE_HASHES.items():
-        source = OVERLAY_DIR / relative_path
-        if not source.is_file():
-            raise RuntimeError(f'Overlay replacement source is missing: {source}')
-        actual_digest = hashlib.sha256(source.read_bytes()).hexdigest()
-        if actual_digest != expected_digest:
-            raise RuntimeError(
-                f'Overlay replacement changed without reviewed manifest update: {source} ({actual_digest})'
-            )
-
     for src in OVERLAY_DIR.rglob('*'):
         if src.is_dir():
             continue

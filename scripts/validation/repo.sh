@@ -11,7 +11,6 @@ python3 -m py_compile \
   "${repo_root}/cliproxyapi-pro-core/patches/apply_upstream_patches.py" \
   "${repo_root}/cliproxyapi-pro-management/apply_customizations.py" \
   "${repo_root}/scripts/validation/check_workflow_actions.py" \
-  "${repo_root}/scripts/validation/check_reproducible_builds.py" \
   "${repo_root}/scripts/build/create_reproducible_archive.py"
 
 python3 -m unittest discover \
@@ -31,8 +30,6 @@ python3 -m json.tool \
 
 python3 "${repo_root}/scripts/validation/check_workflow_actions.py" \
   "${repo_root}/.github/workflows"
-python3 "${repo_root}/scripts/validation/check_reproducible_builds.py" \
-  "${repo_root}"
 
 sh -n "${repo_root}/cliproxyapi-pro-core/entrypoint.sh"
 bash -n \

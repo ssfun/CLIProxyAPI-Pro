@@ -14,8 +14,6 @@ on:
           - pinned
           - latest
         default: pinned
-  schedule:
-    - cron: '30 21 * * *'
 
 permissions:
   contents: read
@@ -50,7 +48,7 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REQUESTED_MODE: ${{ github.event_name == 'schedule' && 'latest' || inputs.upstream_mode || 'pinned' }}
+          REQUESTED_MODE: ${{ inputs.upstream_mode || 'pinned' }}
         run: |
           set -euo pipefail
           source compatibility/upstream.env
@@ -138,7 +136,7 @@ jobs:
 
       - name: Validate Core customization
         env:
-          VALIDATION_RACE: ${{ github.event_name == 'schedule' && '1' || '0' }}
+          VALIDATION_RACE: ${{ needs.resolve-upstream.outputs.mode == 'latest' && '1' || '0' }}
         run: bash customizations-repo/scripts/validation/core.sh upstream-core
 
   source-image-build:
