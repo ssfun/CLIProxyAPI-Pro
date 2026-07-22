@@ -65,17 +65,19 @@ Details returned by `/usage/events` and `/usage/stream` include a stable event `
 
 ### JSONL usage backup and restore
 
-`/usage/export` returns `application/x-ndjson`, one JSON object per line.
+`/usage/export` returns `application/x-ndjson`, one JSON object per line. New exports start with a `backup_manifest` that records the following line count and SHA-256. Import verifies the complete file before any database write, so truncated or modified backups are rejected as a unit.
 
 The export contains usage events and may also include metadata records:
 
 - `model_prices` — legacy base prices plus complete provider/model pricing rules.
 - `quota_cache` — SQLite-backed quota snapshots used by quota cards and account-scoped refresh.
 - `monitoring_settings` — retention, WebDAV backup, and scheduled models.dev synchronization settings.
+- `routing_cursor_state` — account-routing rotation cursors.
+- `auth_runtime_stats` — account selection, success/failure, and recent-request-bucket statistics.
 - `account_inspection_schedule` — persisted backend account-inspection schedule.
 - `account_inspection_snapshot` — the latest finished inspection result, including run settings, summary, health counts, complete results, and raw error details, but excluding inspection logs.
 
-`/usage/import` accepts the same JSONL format. It reads each line's `record_type` once, imports usage events, and restores model prices, quota cache entries, monitoring settings, the account-inspection schedule, and the latest inspection-result snapshot when present. A restored result snapshot is read-only until a new full inspection runs. Older event-only JSONL files remain compatible.
+`/usage/import` accepts the same JSONL format. It reads and verifies the complete request before writing, then imports usage events and restores model prices, quota cache entries, routing runtime state, monitoring settings, the account-inspection schedule, and the latest inspection-result snapshot when present. Routing cursors and account runtime statistics are restored in one SQLite transaction. A restored result snapshot is read-only until a new full inspection runs. Older manifest-free event-only and mixed JSONL files remain compatible, but cannot receive file-level integrity verification.
 
 Example import response fields:
 

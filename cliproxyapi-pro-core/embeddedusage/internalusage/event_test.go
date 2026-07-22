@@ -113,6 +113,34 @@ func TestNormalizeRawPreservesExportedHashes(t *testing.T) {
 	}
 }
 
+func TestNormalizeRawEventHashSeparatesAPIKeys(t *testing.T) {
+	first, err := NormalizeRaw([]byte(`{
+		"timestamp":"2026-06-13T00:00:00Z",
+		"request_id":"req-shared",
+		"endpoint":"POST /v1/chat/completions",
+		"model":"gpt-test",
+		"api_key":"sk-first",
+		"tokens":{"input_tokens":10,"output_tokens":20}
+	}`))
+	if err != nil {
+		t.Fatalf("NormalizeRaw(first) error = %v", err)
+	}
+	second, err := NormalizeRaw([]byte(`{
+		"timestamp":"2026-06-13T00:00:00Z",
+		"request_id":"req-shared",
+		"endpoint":"POST /v1/chat/completions",
+		"model":"gpt-test",
+		"api_key":"sk-second",
+		"tokens":{"input_tokens":10,"output_tokens":20}
+	}`))
+	if err != nil {
+		t.Fatalf("NormalizeRaw(second) error = %v", err)
+	}
+	if first.EventHash == second.EventHash {
+		t.Fatalf("event hashes collide across API keys: %q", first.EventHash)
+	}
+}
+
 func TestBuildPayloadIncludesUpstreamUsageMetadata(t *testing.T) {
 	payload := BuildPayload([]Event{{
 		Timestamp:         "2026-06-13T00:00:00Z",

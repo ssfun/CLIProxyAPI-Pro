@@ -401,6 +401,40 @@ func TestResetUsageStatisticsOnEmptyStoreIsNoop(t *testing.T) {
 	}
 }
 
+func TestInsertLiveEventsRejectsEventsFromBeforeReset(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	insertTestUsageEvents(t, store, testUsageEvent(0, false, 10))
+	reset, err := store.ResetUsageStatistics(ctx)
+	if err != nil {
+		t.Fatalf("ResetUsageStatistics() error = %v", err)
+	}
+
+	stale := testUsageEvent(1, false, 20)
+	result, err := store.InsertLiveEvents(ctx, []internalusage.Event{stale})
+	if err != nil {
+		t.Fatalf("InsertLiveEvents(stale) error = %v", err)
+	}
+	if result.Inserted != 0 || result.Skipped != 1 {
+		t.Fatalf("InsertLiveEvents(stale) = %+v, want skipped", result)
+	}
+
+	fresh := testUsageEvent(2, false, 30)
+	fresh.TimestampMS = reset.ResetAtMS + 1
+	fresh.Timestamp = time.UnixMilli(fresh.TimestampMS).UTC().Format(time.RFC3339Nano)
+	result, err = store.InsertLiveEvents(ctx, []internalusage.Event{fresh})
+	if err != nil {
+		t.Fatalf("InsertLiveEvents(fresh) error = %v", err)
+	}
+	if result.Inserted != 1 || result.Skipped != 0 {
+		t.Fatalf("InsertLiveEvents(fresh) = %+v, want inserted", result)
+	}
+	events, _, err := store.Counts(ctx)
+	if err != nil || events != 1 {
+		t.Fatalf("Counts() = %d, _, %v; want one fresh event", events, err)
+	}
+}
+
 func TestOpenStoreRebuildsStaleUsageSummary(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "usage.sqlite")
 	ctx := context.Background()
@@ -699,6 +733,121 @@ func TestQueuedAuthRuntimeDeleteCannotBeOverwrittenByPendingSnapshot(t *testing.
 	}
 }
 
+func TestRuntimeStateWriterRetainsSnapshotsAfterWriteFailure(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	if _, err := store.db.ExecContext(ctx, `create trigger fail_auth_runtime_insert before insert on auth_runtime_stats begin select raise(abort, 'forced runtime write failure'); end`); err != nil {
+		t.Fatalf("create trigger error = %v", err)
+	}
+	service := &Service{ctx: ctx, store: store}
+	SetDefaultService(service)
+	defer stopRuntimeStateWriter(service)
+
+	QueueAuthRuntimeStats(AuthRuntimeStats{
+		AuthIndex: "idx-retry", AuthID: "auth-retry", SelectedCount: 7, UpdatedAtMS: 100,
+	})
+	if err := flushRuntimeStateWrites(ctx, store); err == nil {
+		t.Fatal("flushRuntimeStateWrites() error = nil, want forced write failure")
+	}
+	if _, err := store.db.ExecContext(ctx, `drop trigger fail_auth_runtime_insert`); err != nil {
+		t.Fatalf("drop trigger error = %v", err)
+	}
+	if err := flushRuntimeStateWrites(ctx, store); err != nil {
+		t.Fatalf("flushRuntimeStateWrites() retry error = %v", err)
+	}
+	stats, ok, err := store.GetAuthRuntimeStats(ctx, "idx-retry", "auth-retry")
+	if err != nil || !ok || stats.SelectedCount != 7 {
+		t.Fatalf("GetAuthRuntimeStats() after retry = %+v, %v, %v", stats, ok, err)
+	}
+}
+
+func TestRuntimeStateWriterCoalescesOverflowWithoutLosingLatestSnapshot(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	heldTx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx() error = %v", err)
+	}
+	service := &Service{ctx: ctx, store: store}
+	SetDefaultService(service)
+	defer stopRuntimeStateWriter(service)
+	QueueAuthRuntimeStats(AuthRuntimeStats{
+		AuthIndex: "idx-overflow", AuthID: "auth-overflow", SelectedCount: 1, UpdatedAtMS: 1,
+	})
+	time.Sleep(300 * time.Millisecond)
+	for index := 2; index <= 2200; index++ {
+		QueueAuthRuntimeStats(AuthRuntimeStats{
+			AuthIndex: "idx-overflow", AuthID: "auth-overflow", SelectedCount: int64(index), UpdatedAtMS: int64(index),
+		})
+	}
+	if err := heldTx.Commit(); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if err := flushRuntimeStateWrites(ctx, store); err != nil {
+		t.Fatalf("flushRuntimeStateWrites() error = %v", err)
+	}
+	stats, ok, err := store.GetAuthRuntimeStats(ctx, "idx-overflow", "auth-overflow")
+	if err != nil || !ok || stats.SelectedCount != 2200 {
+		t.Fatalf("GetAuthRuntimeStats() = %+v, %v, %v; want latest overflow snapshot", stats, ok, err)
+	}
+}
+
+func TestRuntimeStateWriterRemainsAvailableUntilExplicitStop(t *testing.T) {
+	store := openTestStore(t)
+	serviceCtx, cancelService := context.WithCancel(context.Background())
+	service := &Service{ctx: serviceCtx, store: store}
+	SetDefaultService(service)
+	defer stopRuntimeStateWriter(service)
+	cancelService()
+	time.Sleep(25 * time.Millisecond)
+
+	QueueAuthRuntimeStats(AuthRuntimeStats{
+		AuthIndex: "idx-shutdown", AuthID: "auth-shutdown", SelectedCount: 9, UpdatedAtMS: 900,
+	})
+	flushCtx, cancelFlush := context.WithTimeout(context.Background(), time.Second)
+	defer cancelFlush()
+	if err := flushRuntimeStateWrites(flushCtx, store); err != nil {
+		t.Fatalf("flushRuntimeStateWrites() after service cancellation error = %v", err)
+	}
+	stats, ok, err := store.GetAuthRuntimeStats(context.Background(), "idx-shutdown", "auth-shutdown")
+	if err != nil || !ok || stats.SelectedCount != 9 {
+		t.Fatalf("GetAuthRuntimeStats() = %+v, %v, %v; writer stopped before explicit shutdown", stats, ok, err)
+	}
+}
+
+func TestFailedRuntimeStateDeleteDoesNotSuppressLaterSnapshot(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	if err := store.SetAuthRuntimeStats(ctx, AuthRuntimeStats{
+		AuthIndex: "idx-delete-failure", AuthID: "auth-delete-failure", SelectedCount: 1, UpdatedAtMS: 100,
+	}); err != nil {
+		t.Fatalf("SetAuthRuntimeStats() error = %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `create trigger fail_auth_runtime_delete before delete on auth_runtime_stats begin select raise(abort, 'forced runtime delete failure'); end`); err != nil {
+		t.Fatalf("create trigger error = %v", err)
+	}
+	service := &Service{ctx: ctx, store: store}
+	SetDefaultService(service)
+	defer stopRuntimeStateWriter(service)
+
+	if err := DeleteAuthRuntimeState(ctx, "auth-delete-failure", "idx-delete-failure", ""); err == nil {
+		t.Fatal("DeleteAuthRuntimeState() error = nil, want forced delete failure")
+	}
+	if _, err := store.db.ExecContext(ctx, `drop trigger fail_auth_runtime_delete`); err != nil {
+		t.Fatalf("drop trigger error = %v", err)
+	}
+	QueueAuthRuntimeStats(AuthRuntimeStats{
+		AuthIndex: "idx-delete-failure", AuthID: "auth-delete-failure", SelectedCount: 9, UpdatedAtMS: 200,
+	})
+	if err := flushRuntimeStateWrites(ctx, store); err != nil {
+		t.Fatalf("flushRuntimeStateWrites() error = %v", err)
+	}
+	stats, ok, err := store.GetAuthRuntimeStats(ctx, "idx-delete-failure", "auth-delete-failure")
+	if err != nil || !ok || stats.SelectedCount != 9 {
+		t.Fatalf("GetAuthRuntimeStats() = %+v, %v, %v; want later snapshot", stats, ok, err)
+	}
+}
+
 func TestServerExportFlushesQueuedRuntimeState(t *testing.T) {
 	store := openTestStore(t)
 	ctx := context.Background()
@@ -753,5 +902,23 @@ func TestRuntimeStateImportUsesExplicitRestoreSemantics(t *testing.T) {
 	stats, ok, err := store.GetAuthRuntimeStats(ctx, "idx-a", "auth-a")
 	if err != nil || !ok || stats.SelectedCount != 9 || stats.SuccessCount != 7 || stats.FailureCount != 2 {
 		t.Fatalf("restored stats = %+v, %v, %v", stats, ok, err)
+	}
+}
+
+func TestRuntimeStateImportRollsBackCursorWhenStatsFail(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	if _, err := store.db.ExecContext(ctx, `create trigger fail_auth_runtime_import before insert on auth_runtime_stats begin select raise(abort, 'forced runtime import failure'); end`); err != nil {
+		t.Fatalf("create trigger error = %v", err)
+	}
+	_, _, err := store.ImportRuntimeState(ctx,
+		[]RoutingCursorState{{CursorKey: "single|codex|gpt-5|0|all", LastAuthID: "backup-auth", UpdatedAtMS: 100}},
+		[]AuthRuntimeStats{{AuthIndex: "idx-import", AuthID: "auth-import", SelectedCount: 2, UpdatedAtMS: 100}},
+	)
+	if err == nil {
+		t.Fatal("ImportRuntimeState() error = nil, want forced stats failure")
+	}
+	if _, ok, err := store.GetRoutingCursorState(ctx, "single|codex|gpt-5|0|all"); err != nil || ok {
+		t.Fatalf("GetRoutingCursorState() after rollback = _, %v, %v; want missing", ok, err)
 	}
 }

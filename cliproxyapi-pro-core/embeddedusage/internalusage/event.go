@@ -632,6 +632,7 @@ func buildEventHash(event Event) string {
 		event.Model,
 		event.AuthIndex,
 		event.SourceHash,
+		event.APIKeyHash,
 		strconv.FormatInt(event.InputTokens, 10),
 		strconv.FormatInt(event.OutputTokens, 10),
 		strconv.FormatInt(event.ReasoningTokens, 10),

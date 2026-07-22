@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -15,6 +17,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/embeddedusage/internalusage"
 )
+
+type failingImportReader struct{}
+
+func (failingImportReader) Read([]byte) (int, error) {
+	return 0, errors.New("forced import read failure")
+}
 
 func TestUsageStreamPushesInsertedEventsWithoutPollingDelay(t *testing.T) {
 	store := openTestStore(t)
@@ -94,6 +102,77 @@ func TestHandleUsageResetRequiresConfirmation(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestUsageImportDoesNotWriteBeforeRequestIsFullyRead(t *testing.T) {
+	store := openTestStore(t)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	server := NewServer(Config{QueryLimit: 50000, BatchSize: 1}, store)
+	server.RegisterGinRoutes(router.Group("/usage"))
+	event, err := json.Marshal(testUsageEvent(0, false, 10))
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	body := io.MultiReader(bytes.NewReader(append(event, '\n')), failingImportReader{})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/usage/import", body)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", recorder.Code, recorder.Body.String())
+	}
+	events, _, err := store.Counts(context.Background())
+	if err != nil || events != 0 {
+		t.Fatalf("Counts() = %d, _, %v; import must not partially write", events, err)
+	}
+}
+
+func TestUsageImportDoesNotTreatUnknownRecordAsEvent(t *testing.T) {
+	store := openTestStore(t)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/usage/import", strings.NewReader(`{"record_type":"future_record","model":"must-not-import"}`))
+	testUsageRouter(store).ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 legacy-compatible response; body=%s", recorder.Code, recorder.Body.String())
+	}
+	var result struct {
+		Failed int `json:"failed"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil || result.Failed != 1 {
+		t.Fatalf("import result = %+v, %v; want one failed record", result, err)
+	}
+	events, _, err := store.Counts(context.Background())
+	if err != nil || events != 0 {
+		t.Fatalf("Counts() = %d, _, %v; unknown record must not become an event", events, err)
+	}
+}
+
+func TestUsageImportRejectsTamperedManifestBackupBeforeWriting(t *testing.T) {
+	sourceStore := openTestStore(t)
+	insertTestUsageEvents(t, sourceStore, testUsageEvent(0, false, 10))
+	exportRecorder := httptest.NewRecorder()
+	testUsageRouter(sourceStore).ServeHTTP(exportRecorder, httptest.NewRequest(http.MethodGet, "/usage/export", nil))
+	if exportRecorder.Code != http.StatusOK {
+		t.Fatalf("export status = %d; body=%s", exportRecorder.Code, exportRecorder.Body.String())
+	}
+	if !bytes.HasPrefix(exportRecorder.Body.Bytes(), []byte(`{"record_type":"backup_manifest"`)) {
+		t.Fatalf("export is missing backup manifest: %s", exportRecorder.Body.String())
+	}
+	tampered := bytes.Replace(exportRecorder.Body.Bytes(), []byte(`"model":"model"`), []byte(`"model":"tampered"`), 1)
+	if bytes.Equal(tampered, exportRecorder.Body.Bytes()) {
+		t.Fatal("test backup event was not changed")
+	}
+
+	targetStore := openTestStore(t)
+	importRecorder := httptest.NewRecorder()
+	testUsageRouter(targetStore).ServeHTTP(importRecorder, httptest.NewRequest(http.MethodPost, "/usage/import", bytes.NewReader(tampered)))
+	if importRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("import status = %d, want 400; body=%s", importRecorder.Code, importRecorder.Body.String())
+	}
+	events, _, err := targetStore.Counts(context.Background())
+	if err != nil || events != 0 {
+		t.Fatalf("Counts() = %d, _, %v; tampered backup must not write", events, err)
 	}
 }
 

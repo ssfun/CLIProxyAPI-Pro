@@ -229,6 +229,7 @@ const authRuntimeStatsExportRecordType = "auth_runtime_stats"
 type Store struct {
 	db           *sql.DB
 	quotaCacheMu sync.Mutex
+	usageWriteMu sync.Mutex
 	summaryMu    sync.RWMutex
 	summaryCache *cachedUsageSummary
 	eventMu      sync.Mutex
@@ -481,6 +482,36 @@ func (s *Store) init() error {
 }
 
 func (s *Store) InsertEvents(ctx context.Context, events []internalusage.Event) (InsertResult, error) {
+	s.usageWriteMu.Lock()
+	defer s.usageWriteMu.Unlock()
+	return s.insertEvents(ctx, events)
+}
+
+func (s *Store) InsertLiveEvents(ctx context.Context, events []internalusage.Event) (InsertResult, error) {
+	s.usageWriteMu.Lock()
+	defer s.usageWriteMu.Unlock()
+	if len(events) == 0 {
+		return InsertResult{}, nil
+	}
+	snapshot, err := s.readUsageSummarySnapshot(ctx)
+	if err != nil {
+		return InsertResult{}, err
+	}
+	filtered := make([]internalusage.Event, 0, len(events))
+	skipped := 0
+	for _, event := range events {
+		if snapshot.State.ResetAtMS > 0 && event.TimestampMS <= snapshot.State.ResetAtMS {
+			skipped++
+			continue
+		}
+		filtered = append(filtered, event)
+	}
+	result, err := s.insertEvents(ctx, filtered)
+	result.Skipped += skipped
+	return result, err
+}
+
+func (s *Store) insertEvents(ctx context.Context, events []internalusage.Event) (InsertResult, error) {
 	if len(events) == 0 {
 		return InsertResult{}, nil
 	}
@@ -1451,6 +1482,8 @@ func (s *Store) DeleteEventsBefore(ctx context.Context, beforeMs int64) (int64, 
 	if beforeMs <= 0 {
 		return 0, nil
 	}
+	s.usageWriteMu.Lock()
+	defer s.usageWriteMu.Unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -1512,6 +1545,8 @@ func (s *Store) DeleteEventsBefore(ctx context.Context, beforeMs int64) (int64, 
 }
 
 func (s *Store) ResetUsageStatistics(ctx context.Context) (UsageResetResult, error) {
+	s.usageWriteMu.Lock()
+	defer s.usageWriteMu.Unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return UsageResetResult{}, err
@@ -1879,16 +1914,21 @@ func (s *Store) SetRoutingCursorState(ctx context.Context, state RoutingCursorSt
 }
 
 func (s *Store) ImportRoutingCursorStates(ctx context.Context, items []RoutingCursorState) (int, error) {
-	if len(items) == 0 {
-		return 0, nil
+	imported, _, err := s.ImportRuntimeState(ctx, items, nil)
+	return imported, err
+}
+
+func (s *Store) ImportRuntimeState(ctx context.Context, cursors []RoutingCursorState, stats []AuthRuntimeStats) (int, int, error) {
+	if len(cursors) == 0 && len(stats) == 0 {
+		return 0, 0, nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	imported := 0
-	for _, item := range items {
+	importedCursors := 0
+	for _, item := range cursors {
 		item.CursorKey = strings.TrimSpace(item.CursorKey)
 		item.LastAuthID = strings.TrimSpace(item.LastAuthID)
 		if item.CursorKey == "" || item.LastAuthID == "" {
@@ -1901,18 +1941,36 @@ func (s *Store) ImportRoutingCursorStates(ctx context.Context, items []RoutingCu
 			on conflict(cursor_key) do update set last_auth_id = excluded.last_auth_id, updated_at_ms = excluded.updated_at_ms`,
 			item.CursorKey, item.LastAuthID, item.UpdatedAtMS)
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		if affected, _ := result.RowsAffected(); affected > 0 {
-			imported++
+			importedCursors++
 		}
 	}
-	if imported > 0 {
+	if importedCursors > 0 {
 		if err := bumpRuntimeGenerationTx(ctx, tx, "routing_cursor_state", time.Now().UnixMilli()); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 	}
-	return imported, tx.Commit()
+	importedStats := 0
+	for _, item := range stats {
+		changed, err := setAuthRuntimeStatsTx(ctx, tx, item, true)
+		if err != nil {
+			return 0, 0, err
+		}
+		if changed {
+			importedStats++
+		}
+	}
+	if importedStats > 0 {
+		if err := bumpRuntimeGenerationTx(ctx, tx, "auth_runtime_stats", time.Now().UnixMilli()); err != nil {
+			return 0, 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	return importedCursors, importedStats, nil
 }
 
 func (s *Store) GetAuthRuntimeStats(ctx context.Context, authIndex, authID string) (AuthRuntimeStats, bool, error) {
@@ -2038,27 +2096,8 @@ func (s *Store) SetAuthRuntimeStats(ctx context.Context, item AuthRuntimeStats) 
 }
 
 func (s *Store) ImportAuthRuntimeStats(ctx context.Context, items []AuthRuntimeStats) (int, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	imported := 0
-	for _, item := range items {
-		changed, err := setAuthRuntimeStatsTx(ctx, tx, item, true)
-		if err != nil {
-			return 0, err
-		}
-		if changed {
-			imported++
-		}
-	}
-	if imported > 0 {
-		if err := bumpRuntimeGenerationTx(ctx, tx, "auth_runtime_stats", time.Now().UnixMilli()); err != nil {
-			return 0, err
-		}
-	}
-	return imported, tx.Commit()
+	_, imported, err := s.ImportRuntimeState(ctx, nil, items)
+	return imported, err
 }
 
 func (s *Store) DeleteAuthRuntimeState(ctx context.Context, authID, authIndex, fileName string) error {

@@ -65,17 +65,19 @@ internal/embeddedusage
 
 ### JSONL usage 备份与恢复
 
-`/usage/export` 返回 `application/x-ndjson`，一行一个 JSON 对象。
+`/usage/export` 返回 `application/x-ndjson`，一行一个 JSON 对象。新导出的第一行是 `backup_manifest`，记录后续行数和 SHA-256；导入会在任何数据库写入前校验完整文件，因此截断或篡改的备份会被整体拒绝。
 
 导出内容包含 usage events，也可能包含元数据记录：
 
 - `model_prices` — 基础价格兼容数据和完整 provider/model 价格规则。
 - `quota_cache` — 配额卡片和账号级刷新使用的 SQLite-backed quota snapshots。
 - `monitoring_settings` — 监控日志保留时间、WebDAV 备份配置和 models.dev 定期同步配置。
+- `routing_cursor_state` — 账号路由轮转游标。
+- `auth_runtime_stats` — 账号选择、成功/失败和近期请求桶统计。
 - `account_inspection_schedule` — 后端账号巡检调度设置。
 - `account_inspection_snapshot` — 最近一次已结束的账号巡检结果，包含运行设置、汇总、健康统计、完整结果和原始错误详情，不包含巡检日志。
 
-`/usage/import` 接受同样的 JSONL 格式。导入时会对每行只读取一次 `record_type`，导入 usage events，恢复模型价格、quota cache entries、监控设置、账号巡检调度和最近一次巡检结果快照。恢复的结果快照为只读；发起新的完整巡检后才允许重检、刷新令牌或执行账号变更。
+`/usage/import` 接受同样的 JSONL 格式。导入时会先完整读取和校验请求，再导入 usage events，恢复模型价格、quota cache entries、运行时路由状态、监控设置、账号巡检调度和最近一次巡检结果快照。路由游标与账号运行统计在同一个 SQLite 事务中恢复。恢复的结果快照为只读；发起新的完整巡检后才允许重检、刷新令牌或执行账号变更。旧版无 manifest 的 event-only 或混合 JSONL 仍可导入，但无法获得文件级完整性校验。
 
 导入响应示例字段：
 

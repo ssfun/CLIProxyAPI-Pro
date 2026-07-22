@@ -18,6 +18,9 @@ var globalStateMu sync.RWMutex
 var globalStateWriterCancel context.CancelFunc
 var globalStateWriterDone chan struct{}
 var globalStateQueue chan runtimeStateMutation
+var globalStateOverflowMu sync.Mutex
+var globalStateOverflowCursors map[string]RoutingCursorState
+var globalStateOverflowStats map[string]AuthRuntimeStats
 
 type runtimeStateMutation struct {
 	cursor *RoutingCursorState
@@ -38,17 +41,17 @@ func SetDefaultService(service *Service) {
 	globalStateMu.Lock()
 	if globalStateWriterCancel != nil {
 		globalStateWriterCancel()
-		globalStateWriterCancel = nil
 	}
+	if globalStateWriterDone != nil {
+		<-globalStateWriterDone
+	}
+	globalStateWriterCancel = nil
 	globalService = service
 	globalStateQueue = nil
 	globalStateWriterDone = nil
+	resetRuntimeStateOverflow()
 	if service != nil && service.store != nil {
-		parent := service.ctx
-		if parent == nil {
-			parent = context.Background()
-		}
-		ctx, cancel := context.WithCancel(parent)
+		ctx, cancel := context.WithCancel(context.Background())
 		globalStateWriterCancel = cancel
 		globalStateWriterDone = make(chan struct{})
 		globalStateQueue = make(chan runtimeStateMutation, 1024)
@@ -84,17 +87,39 @@ func runRuntimeStateWriter(ctx context.Context, store *Store, queue <-chan runti
 			}
 		}
 	}
+	drainOverflow := func() {
+		globalStateOverflowMu.Lock()
+		overflowCursors := globalStateOverflowCursors
+		overflowStats := globalStateOverflowStats
+		globalStateOverflowCursors = make(map[string]RoutingCursorState)
+		globalStateOverflowStats = make(map[string]AuthRuntimeStats)
+		globalStateOverflowMu.Unlock()
+		for _, state := range overflowCursors {
+			state := state
+			merge(runtimeStateMutation{cursor: &state})
+		}
+		for _, item := range overflowStats {
+			item := item
+			merge(runtimeStateMutation{stats: &item})
+		}
+	}
 	flush := func() error {
 		var firstErr error
 		for key, state := range cursors {
-			if err := store.SetRoutingCursorState(context.Background(), state); err != nil && firstErr == nil {
-				firstErr = err
+			if err := store.SetRoutingCursorState(context.Background(), state); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
 			}
 			delete(cursors, key)
 		}
 		for key, item := range stats {
-			if err := store.SetAuthRuntimeStats(context.Background(), item); err != nil && firstErr == nil {
-				firstErr = err
+			if err := store.SetAuthRuntimeStats(context.Background(), item); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
 			}
 			delete(stats, key)
 		}
@@ -102,6 +127,7 @@ func runRuntimeStateWriter(ctx context.Context, store *Store, queue <-chan runti
 	}
 	process := func(mutation runtimeStateMutation) {
 		if mutation.flush != nil {
+			drainOverflow()
 			mutation.flush <- flush()
 			close(mutation.flush)
 			return
@@ -110,16 +136,33 @@ func runRuntimeStateWriter(ctx context.Context, store *Store, queue <-chan runti
 			merge(mutation)
 			return
 		}
+		drainOverflow()
 		flushErr := flush()
-		err := store.DeleteAuthRuntimeState(context.Background(), mutation.delete.authID, mutation.delete.authIndex, mutation.delete.fileName)
+		deleteErr := store.DeleteAuthRuntimeState(context.Background(), mutation.delete.authID, mutation.delete.authIndex, mutation.delete.fileName)
+		if deleteErr == nil {
+			for key, item := range stats {
+				if runtimeStateMatchesDelete(item, mutation.delete) {
+					delete(stats, key)
+				}
+			}
+			if mutation.delete.authIndex != "" {
+				deletedAt[mutation.delete.authIndex] = mutation.delete.updatedAt
+			}
+		}
+		err := deleteErr
 		if err == nil {
 			err = flushErr
 		}
-		if mutation.delete.authIndex != "" {
-			deletedAt[mutation.delete.authIndex] = mutation.delete.updatedAt
-		}
 		mutation.delete.done <- err
 		close(mutation.delete.done)
+	}
+	flushBeforeStop := func() {
+		for attempt := 0; attempt < 5; attempt++ {
+			if err := flush(); err == nil {
+				return
+			}
+			time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+		}
 	}
 	for {
 		select {
@@ -129,16 +172,51 @@ func runRuntimeStateWriter(ctx context.Context, store *Store, queue <-chan runti
 				case mutation := <-queue:
 					process(mutation)
 				default:
-					_ = flush()
+					drainOverflow()
+					flushBeforeStop()
 					return
 				}
 			}
 		case mutation := <-queue:
 			process(mutation)
 		case <-ticker.C:
+			drainOverflow()
 			_ = flush()
 		}
 	}
+}
+
+func resetRuntimeStateOverflow() {
+	globalStateOverflowMu.Lock()
+	globalStateOverflowCursors = make(map[string]RoutingCursorState)
+	globalStateOverflowStats = make(map[string]AuthRuntimeStats)
+	globalStateOverflowMu.Unlock()
+}
+
+func mergeRuntimeStateOverflow(mutation runtimeStateMutation) {
+	globalStateOverflowMu.Lock()
+	defer globalStateOverflowMu.Unlock()
+	if mutation.cursor != nil {
+		current, ok := globalStateOverflowCursors[mutation.cursor.CursorKey]
+		if !ok || mutation.cursor.UpdatedAtMS >= current.UpdatedAtMS {
+			globalStateOverflowCursors[mutation.cursor.CursorKey] = *mutation.cursor
+		}
+	}
+	if mutation.stats != nil {
+		current, ok := globalStateOverflowStats[mutation.stats.AuthIndex]
+		if !ok || mutation.stats.UpdatedAtMS >= current.UpdatedAtMS {
+			globalStateOverflowStats[mutation.stats.AuthIndex] = *mutation.stats
+		}
+	}
+}
+
+func runtimeStateMatchesDelete(item AuthRuntimeStats, deletion *runtimeStateDelete) bool {
+	if deletion == nil {
+		return false
+	}
+	return (deletion.authIndex != "" && item.AuthIndex == deletion.authIndex) ||
+		(deletion.authID != "" && item.AuthID == deletion.authID) ||
+		(deletion.fileName != "" && item.FileName == deletion.fileName)
 }
 
 func stopRuntimeStateWriter(service *Service) {
@@ -147,32 +225,31 @@ func stopRuntimeStateWriter(service *Service) {
 		globalStateMu.Unlock()
 		return
 	}
-	cancel := globalStateWriterCancel
-	done := globalStateWriterDone
+	if globalStateWriterCancel != nil {
+		globalStateWriterCancel()
+	}
+	if globalStateWriterDone != nil {
+		<-globalStateWriterDone
+	}
 	globalStateWriterCancel = nil
 	globalStateWriterDone = nil
 	globalStateQueue = nil
 	globalService = nil
+	resetRuntimeStateOverflow()
 	globalStateMu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-	if done != nil {
-		<-done
-	}
 }
 
 func enqueueRuntimeState(mutation runtimeStateMutation) {
 	globalStateMu.RLock()
+	defer globalStateMu.RUnlock()
 	queue := globalStateQueue
-	globalStateMu.RUnlock()
 	if queue == nil {
 		return
 	}
 	select {
 	case queue <- mutation:
 	default:
-		// The next result/selection snapshot is cumulative and will supersede this one.
+		mergeRuntimeStateOverflow(mutation)
 	}
 }
 
@@ -181,11 +258,11 @@ func flushRuntimeStateWrites(ctx context.Context, store *Store) error {
 		ctx = context.Background()
 	}
 	globalStateMu.RLock()
+	defer globalStateMu.RUnlock()
 	var queue chan runtimeStateMutation
 	if globalService != nil && globalService.store == store {
 		queue = globalStateQueue
 	}
-	globalStateMu.RUnlock()
 	if queue == nil {
 		return nil
 	}
@@ -295,9 +372,9 @@ func GetAuthRuntimeStats(ctx context.Context, authIndex, authID string) (AuthRun
 
 func DeleteAuthRuntimeState(ctx context.Context, authID, authIndex, fileName string) error {
 	globalStateMu.RLock()
+	defer globalStateMu.RUnlock()
 	service := globalService
 	queue := globalStateQueue
-	globalStateMu.RUnlock()
 	if service == nil || service.store == nil {
 		return nil
 	}

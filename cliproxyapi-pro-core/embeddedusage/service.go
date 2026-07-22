@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/embeddedusage/internalusage"
@@ -16,10 +17,11 @@ import (
 )
 
 type Service struct {
-	ctx    context.Context
-	cfg    Config
-	store  *Store
-	server *Server
+	ctx     context.Context
+	cfg     Config
+	store   *Store
+	server  *Server
+	workers sync.WaitGroup
 }
 
 func Start(ctx context.Context) (*Service, error) {
@@ -43,12 +45,13 @@ func Start(ctx context.Context) (*Service, error) {
 		store: store,
 	}
 	service.server = NewServer(cfg, store)
-	go service.collect(ctx)
-	go service.maintain(ctx)
-	go service.runWebDAVBackups(ctx)
-	go service.runModelPriceSync(ctx)
+	service.startWorker(func() { service.collect(ctx) })
+	service.startWorker(func() { service.maintain(ctx) })
+	service.startWorker(func() { service.runWebDAVBackups(ctx) })
+	service.startWorker(func() { service.runModelPriceSync(ctx) })
 	go func() {
 		<-ctx.Done()
+		service.workers.Wait()
 		stopRuntimeStateWriter(service)
 		if err := store.Close(); err != nil {
 			log.WithError(err).Warn("failed to close embedded usage store")
@@ -57,6 +60,14 @@ func Start(ctx context.Context) (*Service, error) {
 
 	log.Infof("embedded usage service started with db %s", cfg.DBPath)
 	return service, nil
+}
+
+func (s *Service) startWorker(run func()) {
+	s.workers.Add(1)
+	go func() {
+		defer s.workers.Done()
+		run()
+	}()
 }
 
 func (s *Service) runModelPriceSync(ctx context.Context) {
@@ -99,6 +110,17 @@ func (s *Service) Server() *Server {
 func (s *Service) collect(ctx context.Context) {
 	ticker := time.NewTicker(s.cfg.PollInterval)
 	defer ticker.Stop()
+	pending := make([]internalusage.Event, 0, s.cfg.BatchSize)
+	defer func() {
+		if len(pending) == 0 {
+			return
+		}
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := s.store.InsertLiveEvents(flushCtx, pending); err != nil {
+			log.WithError(err).Warn("failed to flush pending embedded usage events during shutdown")
+		}
+	}()
 
 	for {
 		select {
@@ -107,8 +129,32 @@ func (s *Service) collect(ctx context.Context) {
 		default:
 		}
 
-		items := redisqueue.PopOldest(s.cfg.BatchSize)
-		if len(items) == 0 {
+		if len(pending) == 0 {
+			items := redisqueue.PopOldest(s.cfg.BatchSize)
+			if len(items) == 0 {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					continue
+				}
+			}
+			for _, item := range items {
+				event, err := internalusage.NormalizeRaw(item)
+				if err != nil {
+					if addErr := s.store.AddDeadLetter(ctx, string(item), err); addErr != nil {
+						log.WithError(addErr).Warn("failed to add embedded usage dead letter")
+					}
+					continue
+				}
+				pending = append(pending, event)
+			}
+		}
+		if len(pending) == 0 {
+			continue
+		}
+		if _, err := s.store.InsertLiveEvents(ctx, pending); err != nil {
+			log.WithError(err).Warn("failed to insert embedded usage events")
 			select {
 			case <-ctx.Done():
 				return
@@ -116,21 +162,7 @@ func (s *Service) collect(ctx context.Context) {
 				continue
 			}
 		}
-
-		events := make([]internalusage.Event, 0, len(items))
-		for _, item := range items {
-			event, err := internalusage.NormalizeRaw(item)
-			if err != nil {
-				if addErr := s.store.AddDeadLetter(ctx, string(item), err); addErr != nil {
-					log.WithError(addErr).Warn("failed to add embedded usage dead letter")
-				}
-				continue
-			}
-			events = append(events, event)
-		}
-		if _, err := s.store.InsertEvents(ctx, events); err != nil {
-			log.WithError(err).Warn("failed to insert embedded usage events")
-		}
+		pending = pending[:0]
 	}
 }
 
