@@ -536,6 +536,16 @@ jobs:
           rm -rf "dist/linux-${GOARCH}"
           mkdir -p "${archive_dir}"
 
+          go_archive="go${GO_VERSION}.linux-${GOARCH}.tar.gz"
+          go_sha256="$(
+            curl -fsSL 'https://go.dev/dl/?mode=json&include=all' |
+              python3 -c 'import json, sys; filename = sys.argv[1]; print(next(item["sha256"] for release in json.load(sys.stdin) for item in release["files"] if item["filename"] == filename))' "${go_archive}"
+          )"
+          if [[ ! "${go_sha256}" =~ ^[0-9a-f]{64}$ ]]; then
+            printf 'Invalid SHA256 for %s: %s\n' "${go_archive}" "${go_sha256}" >&2
+            exit 1
+          fi
+
           docker run --rm \
             -v "${PWD}:/src" \
             -w /src \
@@ -544,12 +554,12 @@ jobs:
             -e RELEASE_TAG \
             -e CORE_TAG \
             -e BUILD_DATE \
+            -e "GO_SHA256=${go_sha256}" \
             "${MANYLINUX_IMAGE}" \
             bash -euo pipefail -c '
               go_archive="go${GO_VERSION}.linux-${GOARCH}.tar.gz"
               curl -fsSL "https://go.dev/dl/${go_archive}" -o "/tmp/${go_archive}"
-              curl -fsSL "https://go.dev/dl/${go_archive}.sha256" -o "/tmp/${go_archive}.sha256"
-              printf "%s  %s\n" "$(cat "/tmp/${go_archive}.sha256")" "/tmp/${go_archive}" | sha256sum -c -
+              printf "%s  %s\n" "${GO_SHA256}" "/tmp/${go_archive}" | sha256sum -c -
               rm -rf /usr/local/go
               tar -C /usr/local -xzf "/tmp/${go_archive}"
               export PATH="/usr/local/go/bin:${PATH}"
