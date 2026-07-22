@@ -18,6 +18,8 @@ type QuotaResult struct {
 	Err      error
 }
 
+const quotaObservationFutureSkew = 5 * time.Minute
+
 func (h *Host) HasQuotaProvider(provider string) bool {
 	provider = normalizeProviderID(provider)
 	if h == nil || provider == "" {
@@ -83,9 +85,31 @@ func (h *Host) quotaResultFromResponse(pluginID, provider string, auth *coreauth
 	}
 	var updated *coreauth.Auth
 	if authDataHasValue(resp.AuthUpdate) {
-		updated = h.AuthDataToCoreAuth(authDataWithDefaults(resp.AuthUpdate, auth), path, auth.FileName)
+		updated = h.boundQuotaAuthUpdate(resp.AuthUpdate, auth, path)
 	}
 	return QuotaResult{Handled: true, PluginID: pluginID, Snapshot: snapshot, Auth: updated}
+}
+
+func (h *Host) boundQuotaAuthUpdate(data pluginapi.AuthData, auth *coreauth.Auth, path string) *coreauth.Auth {
+	if h == nil || auth == nil {
+		return nil
+	}
+	data = authDataWithDefaults(data, auth)
+	data.Provider = auth.Provider
+	data.ID = auth.ID
+	data.FileName = auth.FileName
+	data.Attributes = cloneStringMap(auth.Attributes)
+	updated := h.AuthDataToCoreAuth(data, path, auth.FileName)
+	if updated == nil {
+		return nil
+	}
+	updated.Provider = auth.Provider
+	updated.ID = auth.ID
+	updated.FileName = auth.FileName
+	updated.Index = auth.Index
+	updated.CreatedAt = auth.CreatedAt
+	updated.Attributes = cloneStringMap(auth.Attributes)
+	return updated
 }
 
 func (h *Host) callQuotaProviderIdentifier(pluginID string, provider pluginapi.QuotaProvider) (identifier string, ok bool) {
@@ -130,8 +154,9 @@ func normalizeQuotaSnapshot(snapshot pluginapi.QuotaSnapshot, provider string, p
 		snapshot.SchemaVersion = pluginapi.QuotaSnapshotSchemaVersion
 	}
 	snapshot.Provider = provider
-	if snapshot.ObservedAtMS <= 0 {
-		snapshot.ObservedAtMS = time.Now().UnixMilli()
+	now := time.Now().UnixMilli()
+	if snapshot.ObservedAtMS <= 0 || snapshot.ObservedAtMS > now+quotaObservationFutureSkew.Milliseconds() {
+		snapshot.ObservedAtMS = now
 	}
 	if snapshot.Items == nil {
 		snapshot.Items = []pluginapi.QuotaItem{}
@@ -153,6 +178,9 @@ func normalizeQuotaSnapshot(snapshot pluginapi.QuotaSnapshot, provider string, p
 	}
 	if planUnavailable && planError != "" {
 		snapshot.Warnings = append(snapshot.Warnings, pluginapi.QuotaWarning{Code: "plan_unavailable", Message: planError, Retryable: true})
+	}
+	if snapshot.Plan != nil && snapshot.Plan.ObservedAtMS > now+quotaObservationFutureSkew.Milliseconds() {
+		snapshot.Plan.ObservedAtMS = snapshot.ObservedAtMS
 	}
 	return snapshot
 }

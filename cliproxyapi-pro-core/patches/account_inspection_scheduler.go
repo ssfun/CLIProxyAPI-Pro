@@ -213,6 +213,8 @@ const (
 const accountInspectionResultSnapshotVersion = 1
 
 var errAccountInspectionRestoredSnapshotReadOnly = errors.New("restored account inspection snapshot is read-only; run a new inspection first")
+var errAccountInspectionResultStale = errors.New("account inspection result is stale or no longer available")
+var errAccountInspectionSharedSourceDelete = errors.New("cannot delete one plugin virtual auth from a shared source file")
 
 type accountInspectionProgress struct {
 	Total     int `json:"total"`
@@ -293,6 +295,7 @@ type accountInspectionScheduler struct {
 	snapshotPath            string
 	trigger                 chan struct{}
 	mu                      sync.Mutex
+	actionMu                sync.Mutex
 	pause                   *sync.Cond
 	cancel                  context.CancelFunc
 	schedule                accountInspectionSchedule
@@ -1275,8 +1278,12 @@ func (s *accountInspectionScheduler) inspectOne(ctx context.Context, item accoun
 	}
 	schedule := s.schedule
 	s.mu.Unlock()
+	boundItem, err := s.bindActionItemToSnapshot(item)
+	if err != nil {
+		return accountInspectionResult{}, err
+	}
 
-	result, _, runErr := s.executeSingleInspection(ctx, schedule.Settings, item)
+	result, _, runErr := s.executeSingleInspection(ctx, schedule.Settings, boundItem)
 	if runErr != nil {
 		s.appendLog("error", fmt.Sprintf("重新检查失败：%s", runErr.Error()))
 		return result, runErr
@@ -1314,16 +1321,20 @@ func (s *accountInspectionScheduler) refreshTokenNow(ctx context.Context, item a
 	if s.h == nil || s.h.authManager == nil {
 		return accountInspectionResult{}, fmt.Errorf("core auth manager unavailable")
 	}
+	boundItem, err := s.bindActionItemToSnapshot(item)
+	if err != nil {
+		return accountInspectionResult{}, err
+	}
 	auths, err := s.auths()
 	if err != nil {
 		return accountInspectionResult{}, err
 	}
 	for _, auth := range auths {
 		account := accountFromAuth(auth)
-		if item.Key != "" && account.Key != item.Key {
+		if boundItem.Key != "" && account.Key != boundItem.Key {
 			continue
 		}
-		if item.Key == "" && (account.FileName != item.FileName || account.AuthIndex != item.AuthIndex) {
+		if boundItem.Key == "" && (account.FileName != boundItem.FileName || account.AuthIndex != boundItem.AuthIndex) {
 			continue
 		}
 		result := account.baseResult()
@@ -2985,10 +2996,23 @@ func setAuthInspectionDisabledState(auth *coreauth.Auth, disabled bool) {
 		auth.Status = coreauth.StatusDisabled
 		auth.StatusMessage = "disabled by scheduled account inspection"
 	} else {
-		auth.Status = coreauth.StatusActive
-		auth.StatusMessage = ""
-		auth.Unavailable = false
-		syncAuthInspectionLastError(auth, nil)
+		code := authInspectionLastErrorCode(auth)
+		if code != "" && !isInspectionAuthErrorCode(code) {
+			auth.Status = coreauth.StatusError
+			auth.Unavailable = true
+			if auth.LastError != nil {
+				auth.StatusMessage = strings.TrimSpace(auth.LastError.Message)
+			} else if raw, ok := auth.Metadata["last_error"].(map[string]any); ok {
+				auth.StatusMessage = strings.TrimSpace(stringFromAny(raw["message"]))
+			}
+		} else {
+			auth.Status = coreauth.StatusActive
+			auth.StatusMessage = ""
+			auth.Unavailable = false
+			if isInspectionAuthErrorCode(code) {
+				syncAuthInspectionLastError(auth, nil)
+			}
+		}
 	}
 	auth.UpdatedAt = time.Now()
 }
@@ -3195,15 +3219,46 @@ func (s *accountInspectionScheduler) updateInspectionAuth(ctx context.Context, a
 		return nil
 	}
 	mutate(auth)
-	_, err := s.h.authManager.Update(ctx, auth)
-	return err
+	updated, err := s.h.authManager.Update(ctx, auth)
+	if err != nil {
+		return err
+	}
+	if updated == nil {
+		return fmt.Errorf("auth not found")
+	}
+	return nil
+}
+
+func (s *accountInspectionScheduler) updateInspectionErrorAuth(ctx context.Context, authIndex string, mutate func(*coreauth.Auth)) error {
+	if s == nil || s.h == nil || s.h.authManager == nil {
+		return fmt.Errorf("core auth manager unavailable")
+	}
+	auth := s.h.authByIndex(authIndex)
+	if auth == nil {
+		return fmt.Errorf("auth not found")
+	}
+	if !coreauth.IsPluginVirtualAuth(auth) {
+		return s.updateInspectionAuth(ctx, authIndex, mutate)
+	}
+	if mutate == nil {
+		return nil
+	}
+	mutate(auth)
+	updated, err := s.h.authManager.Update(ctx, auth)
+	if err != nil {
+		return err
+	}
+	if updated == nil {
+		return fmt.Errorf("auth not found")
+	}
+	return nil
 }
 
 func (s *accountInspectionScheduler) syncInspectionAuthError(ctx context.Context, account accountInspectionAccount, code string, message string, status int) {
 	if s == nil || s.h == nil || s.h.authManager == nil || account.AuthIndex == "" {
 		return
 	}
-	err := s.updateInspectionAuth(ctx, account.AuthIndex, func(auth *coreauth.Auth) {
+	err := s.updateInspectionErrorAuth(ctx, account.AuthIndex, func(auth *coreauth.Auth) {
 		auth.Status = coreauth.StatusError
 		auth.StatusMessage = message
 		auth.Unavailable = true
@@ -3226,7 +3281,7 @@ func (s *accountInspectionScheduler) clearInspectionAuthError(ctx context.Contex
 	if !isInspectionAuthErrorCode(authInspectionLastErrorCode(auth)) {
 		return
 	}
-	err := s.updateInspectionAuth(ctx, account.AuthIndex, func(auth *coreauth.Auth) {
+	err := s.updateInspectionErrorAuth(ctx, account.AuthIndex, func(auth *coreauth.Auth) {
 		if auth.Disabled {
 			auth.Status = coreauth.StatusDisabled
 		} else {
@@ -3368,6 +3423,39 @@ func (item accountInspectionActionItem) toResult() accountInspectionResult {
 	}
 }
 
+func accountInspectionActionItemFromResult(result accountInspectionResult, action accountInspectionAction) accountInspectionActionItem {
+	return accountInspectionActionItem{
+		Key:         result.Key,
+		Provider:    result.Provider,
+		FileName:    result.FileName,
+		DisplayName: result.DisplayName,
+		Email:       result.Email,
+		Name:        result.Name,
+		AuthIndex:   result.AuthIndex,
+		Disabled:    result.Disabled,
+		Action:      action,
+	}
+}
+
+func (s *accountInspectionScheduler) bindActionItemToSnapshot(item accountInspectionActionItem) (accountInspectionActionItem, error) {
+	if s == nil {
+		return accountInspectionActionItem{}, fmt.Errorf("account inspection scheduler unavailable")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, result := range s.status.Results {
+		if item.Key != "" {
+			if result.Key != item.Key {
+				continue
+			}
+		} else if result.FileName != item.FileName || result.AuthIndex != item.AuthIndex {
+			continue
+		}
+		return accountInspectionActionItemFromResult(result, item.Action), nil
+	}
+	return accountInspectionActionItem{}, errAccountInspectionResultStale
+}
+
 func (s *accountInspectionScheduler) removeInspectionResultLocked(result accountInspectionResult) bool {
 	for index, current := range s.status.Results {
 		if !sameAccountInspectionResult(current, result) {
@@ -3416,7 +3504,18 @@ func (s *accountInspectionScheduler) executeManualActions(ctx context.Context, i
 	if restoredSnapshot {
 		return nil, errAccountInspectionRestoredSnapshotReadOnly
 	}
-	executableItems := dedupeExecutionActionItems(items)
+	boundItems := make([]accountInspectionActionItem, 0, len(items))
+	for _, item := range items {
+		if item.Action == accountInspectionActionKeep || item.Action == "" {
+			continue
+		}
+		boundItem, err := s.bindActionItemToSnapshot(item)
+		if err != nil {
+			return nil, err
+		}
+		boundItems = append(boundItems, boundItem)
+	}
+	executableItems := dedupeExecutionActionItems(boundItems)
 	outcomes := make([]accountInspectionActionOutcome, len(executableItems))
 	executedResults := make([]accountInspectionResult, len(executableItems))
 	runAccountInspectionWorkers(len(executableItems), accountInspectionMaxDeleteWorkers, nil, func(index int) bool {
@@ -3654,17 +3753,64 @@ func (s *accountInspectionScheduler) executeAction(ctx context.Context, result a
 	if s.h == nil || s.h.authManager == nil {
 		return fmt.Errorf("core auth manager unavailable")
 	}
+	s.actionMu.Lock()
+	defer s.actionMu.Unlock()
+	auth, err := s.actionAuthForResult(result)
+	if err != nil {
+		return err
+	}
 	switch action {
 	case accountInspectionActionDisable, accountInspectionActionEnable:
 		return s.updateInspectionAuth(ctx, result.AuthIndex, func(auth *coreauth.Auth) {
 			setAuthInspectionDisabledState(auth, action == accountInspectionActionDisable)
 		})
 	case accountInspectionActionDelete:
-		_, _, err := s.h.deleteAuthFileByName(ctx, result.FileName)
+		if s.pluginVirtualSourceAuthCount(auth) > 1 {
+			return errAccountInspectionSharedSourceDelete
+		}
+		_, _, err := s.h.deleteAuthFileByName(ctx, accountFromAuth(auth).FileName)
 		return err
 	default:
 		return fmt.Errorf("unsupported action %s", action)
 	}
+}
+
+func (s *accountInspectionScheduler) actionAuthForResult(result accountInspectionResult) (*coreauth.Auth, error) {
+	if s == nil || s.h == nil || s.h.authManager == nil || strings.TrimSpace(result.AuthIndex) == "" {
+		return nil, errAccountInspectionResultStale
+	}
+	auth := s.h.authByIndex(result.AuthIndex)
+	if auth == nil {
+		return nil, errAccountInspectionResultStale
+	}
+	account := accountFromAuth(auth)
+	if result.Key != "" && result.Key != account.Key {
+		return nil, errAccountInspectionResultStale
+	}
+	if result.FileName != "" && result.FileName != account.FileName {
+		return nil, errAccountInspectionResultStale
+	}
+	if result.Provider != "" && !strings.EqualFold(strings.TrimSpace(result.Provider), account.Provider) {
+		return nil, errAccountInspectionResultStale
+	}
+	return auth, nil
+}
+
+func (s *accountInspectionScheduler) pluginVirtualSourceAuthCount(auth *coreauth.Auth) int {
+	if s == nil || s.h == nil || s.h.authManager == nil || auth == nil || !coreauth.IsPluginVirtualAuth(auth) {
+		return 0
+	}
+	sourcePath := pluginVirtualSourcePath(auth)
+	if sourcePath == "" {
+		return 0
+	}
+	count := 0
+	for _, candidate := range s.h.authManager.List() {
+		if candidate != nil && coreauth.IsPluginVirtualAuth(candidate) && sameAuthSourcePath(pluginVirtualSourcePath(candidate), sourcePath) {
+			count++
+		}
+	}
+	return count
 }
 
 func summarizeAccountInspection(totalFiles int, probeSetCount int, accounts []accountInspectionAccount, results []accountInspectionResult) accountInspectionSummary {
@@ -5768,7 +5914,7 @@ func (h *Handler) InspectOneAccount(c *gin.Context) {
 	snapshot := scheduler.snapshotForRequest(c)
 	if err != nil {
 		statusCode := http.StatusOK
-		if errors.Is(err, errAccountInspectionRestoredSnapshotReadOnly) {
+		if errors.Is(err, errAccountInspectionRestoredSnapshotReadOnly) || errors.Is(err, errAccountInspectionResultStale) {
 			statusCode = http.StatusConflict
 		}
 		c.JSON(statusCode, gin.H{"error": err.Error(), "result": result, "schedule": snapshot["schedule"], "status": snapshot["status"]})
@@ -5803,7 +5949,7 @@ func (h *Handler) RefreshAccountInspectionToken(c *gin.Context) {
 	snapshot := scheduler.snapshotForRequest(c)
 	if err != nil {
 		statusCode := http.StatusOK
-		if errors.Is(err, errAccountInspectionRestoredSnapshotReadOnly) {
+		if errors.Is(err, errAccountInspectionRestoredSnapshotReadOnly) || errors.Is(err, errAccountInspectionResultStale) {
 			statusCode = http.StatusConflict
 		}
 		c.JSON(statusCode, gin.H{"error": err.Error(), "result": result, "schedule": snapshot["schedule"], "status": snapshot["status"]})
@@ -5857,7 +6003,7 @@ func (h *Handler) ExecuteAccountInspectionActions(c *gin.Context) {
 	snapshot := scheduler.snapshotForRequest(c)
 	if err != nil {
 		statusCode := http.StatusInternalServerError
-		if errors.Is(err, errAccountInspectionRestoredSnapshotReadOnly) {
+		if errors.Is(err, errAccountInspectionRestoredSnapshotReadOnly) || errors.Is(err, errAccountInspectionResultStale) {
 			statusCode = http.StatusConflict
 		}
 		c.JSON(statusCode, gin.H{

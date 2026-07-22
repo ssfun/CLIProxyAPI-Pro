@@ -2,7 +2,9 @@ package pluginhost
 
 import (
 	"context"
+	"reflect"
 	"testing"
+	"time"
 
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -32,8 +34,8 @@ func TestFetchQuotaNormalizesAndRetainsPreviousPlan(t *testing.T) {
 		}, nil
 	}}
 	host := newHostWithRecords(capabilityRecord{
-		id: "geminicli",
-		meta: pluginapi.Metadata{Name: "Gemini CLI", Version: "1.0.0"},
+		id:     "geminicli",
+		meta:   pluginapi.Metadata{Name: "Gemini CLI", Version: "1.0.0"},
 		plugin: pluginapi.Plugin{Capabilities: pluginapi.Capabilities{QuotaProvider: provider}},
 	})
 	result := host.FetchQuota(context.Background(), &coreauth.Auth{ID: "auth-1", Provider: "gemini-cli", FileName: "gemini.json"}, previous)
@@ -81,5 +83,61 @@ func TestFetchQuotaRejectsNewerSnapshotSchema(t *testing.T) {
 	result := host.FetchQuota(context.Background(), &coreauth.Auth{ID: "auth-1", Provider: "gemini-cli"}, nil)
 	if !result.Handled || result.Err == nil {
 		t.Fatalf("FetchQuota() = %#v, want handled schema error", result)
+	}
+}
+
+func TestFetchQuotaConstrainsAuthUpdateToCurrentIdentity(t *testing.T) {
+	provider := quotaProviderStub{identifier: "gemini-cli", fetch: func(context.Context, pluginapi.QuotaFetchRequest) (pluginapi.QuotaFetchResponse, error) {
+		return pluginapi.QuotaFetchResponse{AuthUpdate: pluginapi.AuthData{
+			Provider:    "codex",
+			ID:          "other-auth",
+			FileName:    "other.json",
+			StorageJSON: []byte(`{"access_token":"refreshed"}`),
+			Attributes:  map[string]string{"path": "/tmp/other.json", "runtime_only": "true"},
+		}}, nil
+	}}
+	host := newHostWithRecords(capabilityRecord{id: "geminicli", plugin: pluginapi.Plugin{Capabilities: pluginapi.Capabilities{QuotaProvider: provider}}})
+	createdAt := time.Now().Add(-time.Hour).UTC()
+	auth := &coreauth.Auth{
+		ID:         "auth-1",
+		Index:      "gemini-cli:auth-1",
+		Provider:   "gemini-cli",
+		FileName:   "gemini.json",
+		CreatedAt:  createdAt,
+		Attributes: map[string]string{"path": "/tmp/gemini.json", "project_id": "project-a"},
+	}
+
+	result := host.FetchQuota(context.Background(), auth, nil)
+	if !result.Handled || result.Err != nil || result.Auth == nil {
+		t.Fatalf("FetchQuota() = %#v", result)
+	}
+	if result.Auth.ID != auth.ID || result.Auth.Index != auth.Index || result.Auth.Provider != auth.Provider || result.Auth.FileName != auth.FileName {
+		t.Fatalf("auth identity = id:%q index:%q provider:%q file:%q", result.Auth.ID, result.Auth.Index, result.Auth.Provider, result.Auth.FileName)
+	}
+	if !result.Auth.CreatedAt.Equal(createdAt) {
+		t.Fatalf("CreatedAt = %v, want %v", result.Auth.CreatedAt, createdAt)
+	}
+	if !reflect.DeepEqual(result.Auth.Attributes, auth.Attributes) {
+		t.Fatalf("Attributes = %#v, want %#v", result.Auth.Attributes, auth.Attributes)
+	}
+}
+
+func TestFetchQuotaClampsFutureObservationTime(t *testing.T) {
+	future := time.Now().Add(24 * time.Hour).UnixMilli()
+	provider := quotaProviderStub{identifier: "gemini-cli", fetch: func(context.Context, pluginapi.QuotaFetchRequest) (pluginapi.QuotaFetchResponse, error) {
+		return pluginapi.QuotaFetchResponse{Snapshot: pluginapi.QuotaSnapshot{ObservedAtMS: future, Plan: &pluginapi.QuotaPlan{ObservedAtMS: future}}}, nil
+	}}
+	host := newHostWithRecords(capabilityRecord{id: "geminicli", plugin: pluginapi.Plugin{Capabilities: pluginapi.Capabilities{QuotaProvider: provider}}})
+	before := time.Now().UnixMilli()
+	result := host.FetchQuota(context.Background(), &coreauth.Auth{ID: "auth-1", Provider: "gemini-cli"}, nil)
+	after := time.Now().UnixMilli()
+	if !result.Handled || result.Err != nil {
+		t.Fatalf("FetchQuota() = %#v", result)
+	}
+	if result.Snapshot.ObservedAtMS < before || result.Snapshot.ObservedAtMS > after {
+		t.Fatalf("ObservedAtMS = %d, want host time in [%d,%d]", result.Snapshot.ObservedAtMS, before, after)
+	}
+	if result.Snapshot.Plan == nil || result.Snapshot.Plan.ObservedAtMS != result.Snapshot.ObservedAtMS {
+		t.Fatalf("plan ObservedAtMS = %#v, want normalized snapshot time", result.Snapshot.Plan)
 	}
 }

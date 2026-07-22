@@ -61,8 +61,13 @@ func (h *Handler) FetchPluginQuota(c *gin.Context) {
 		return
 	}
 	if result.Auth != nil {
-		if _, errUpdate := manager.Update(c.Request.Context(), result.Auth); errUpdate != nil {
+		updated, errUpdate := manager.Update(c.Request.Context(), result.Auth)
+		if errUpdate != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "auth update failed", "message": errUpdate.Error()})
+			return
+		}
+		if updated == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "auth update target no longer exists"})
 			return
 		}
 	}

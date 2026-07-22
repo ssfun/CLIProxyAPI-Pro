@@ -737,6 +737,134 @@ func TestExecuteActionDisablesGeminiCLIPluginVirtualSourceFile(t *testing.T) {
 	}
 }
 
+func TestManualActionsBindIdentityToCurrentSnapshot(t *testing.T) {
+	manager := coreauth.NewManager(nil, nil, nil)
+	registeredA, err := manager.Register(context.Background(), &coreauth.Auth{Provider: "codex", ID: "auth-a", FileName: "a.json", Metadata: map[string]any{"email": "a@example.com"}})
+	if err != nil {
+		t.Fatalf("Register(auth-a) error = %v", err)
+	}
+	registeredB, err := manager.Register(context.Background(), &coreauth.Auth{Provider: "codex", ID: "auth-b", FileName: "b.json", Metadata: map[string]any{"email": "b@example.com"}})
+	if err != nil {
+		t.Fatalf("Register(auth-b) error = %v", err)
+	}
+	resultA := accountFromAuth(registeredA).baseResult()
+	scheduler := &accountInspectionScheduler{
+		h:      &Handler{authManager: manager},
+		status: accountInspectionStatus{Results: []accountInspectionResult{resultA}},
+	}
+	outcomes, err := scheduler.executeManualActions(context.Background(), []accountInspectionActionItem{{
+		Key:       resultA.Key,
+		FileName:  registeredB.FileName,
+		AuthIndex: registeredB.Index,
+		Provider:  registeredB.Provider,
+		Action:    accountInspectionActionDisable,
+	}})
+	if err != nil {
+		t.Fatalf("executeManualActions() error = %v", err)
+	}
+	if len(outcomes) != 1 || !outcomes[0].Success || outcomes[0].AuthIndex != registeredA.Index || outcomes[0].FileName != registeredA.FileName {
+		t.Fatalf("outcomes = %+v, want canonical auth-a identity", outcomes)
+	}
+	gotA, _ := manager.GetByID(registeredA.ID)
+	gotB, _ := manager.GetByID(registeredB.ID)
+	if gotA == nil || !gotA.Disabled {
+		t.Fatalf("auth-a = %#v, want disabled", gotA)
+	}
+	if gotB == nil || gotB.Disabled {
+		t.Fatalf("auth-b = %#v, want enabled", gotB)
+	}
+}
+
+func TestExecuteActionRejectsStaleRuntimeIdentity(t *testing.T) {
+	manager := coreauth.NewManager(nil, nil, nil)
+	registeredA, _ := manager.Register(context.Background(), &coreauth.Auth{Provider: "codex", ID: "auth-a", FileName: "a.json", Metadata: map[string]any{}})
+	registeredB, _ := manager.Register(context.Background(), &coreauth.Auth{Provider: "codex", ID: "auth-b", FileName: "b.json", Metadata: map[string]any{}})
+	result := accountFromAuth(registeredA).baseResult()
+	result.AuthIndex = registeredB.Index
+	scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
+	if err := scheduler.executeAction(context.Background(), result, accountInspectionActionDisable); !errors.Is(err, errAccountInspectionResultStale) {
+		t.Fatalf("executeAction() error = %v, want stale result", err)
+	}
+	gotA, _ := manager.GetByID(registeredA.ID)
+	gotB, _ := manager.GetByID(registeredB.ID)
+	if gotA.Disabled || gotB.Disabled {
+		t.Fatalf("auths mutated after stale action: a=%v b=%v", gotA.Disabled, gotB.Disabled)
+	}
+}
+
+func TestExecuteActionRejectsSharedPluginVirtualSourceDelete(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "gemini-cli.json")
+	if err := os.WriteFile(authPath, []byte(`{"type":"gemini-cli","project_ids":["project-a","project-b"]}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	manager := coreauth.NewManager(nil, nil, nil)
+	primary := &coreauth.Auth{Provider: "gemini-cli", ID: "primary", FileName: "gemini-cli.json", Metadata: map[string]any{}, Attributes: map[string]string{"path": authPath}}
+	secondary := &coreauth.Auth{Provider: "gemini-cli", ID: "secondary", FileName: "project-b.json", Metadata: map[string]any{}, Attributes: map[string]string{"path": authPath, "runtime_only": "true"}}
+	coreauth.MarkPluginVirtualAuth(primary, authPath, 0)
+	coreauth.MarkPluginVirtualAuth(secondary, authPath, 1)
+	registeredPrimary, _ := manager.Register(context.Background(), primary)
+	_, _ = manager.Register(context.Background(), secondary)
+	scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
+	if err := scheduler.executeAction(context.Background(), accountFromAuth(registeredPrimary).baseResult(), accountInspectionActionDelete); !errors.Is(err, errAccountInspectionSharedSourceDelete) {
+		t.Fatalf("executeAction(delete) error = %v, want shared-source rejection", err)
+	}
+	if _, err := os.Stat(authPath); err != nil {
+		t.Fatalf("shared source file was removed: %v", err)
+	}
+}
+
+func TestPluginVirtualInspectionErrorStaysOnTargetIdentity(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "gemini-cli.json")
+	if err := os.WriteFile(authPath, []byte(`{"type":"gemini-cli","project_ids":["project-a","project-b"]}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	manager := coreauth.NewManager(nil, nil, nil)
+	primary := &coreauth.Auth{Provider: "gemini-cli", ID: "primary", FileName: "gemini-cli.json", Metadata: map[string]any{"project_id": "project-a"}, Attributes: map[string]string{"path": authPath}}
+	secondary := &coreauth.Auth{Provider: "gemini-cli", ID: "secondary", FileName: "project-b.json", Metadata: map[string]any{"project_id": "project-b"}, Attributes: map[string]string{"path": authPath, "runtime_only": "true"}}
+	coreauth.MarkPluginVirtualAuth(primary, authPath, 0)
+	coreauth.MarkPluginVirtualAuth(secondary, authPath, 1)
+	registeredPrimary, _ := manager.Register(context.Background(), primary)
+	registeredSecondary, _ := manager.Register(context.Background(), secondary)
+	scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
+	scheduler.syncInspectionAuthError(context.Background(), accountFromAuth(registeredSecondary), "inspection_probe_error", "project-b failed", 0)
+
+	gotPrimary, _ := manager.GetByID(registeredPrimary.ID)
+	gotSecondary, _ := manager.GetByID(registeredSecondary.ID)
+	if gotPrimary.LastError != nil || gotPrimary.Status == coreauth.StatusError {
+		t.Fatalf("primary auth was polluted: %#v", gotPrimary)
+	}
+	if gotSecondary.LastError == nil || gotSecondary.LastError.Code != "inspection_probe_error" || gotSecondary.Status != coreauth.StatusError {
+		t.Fatalf("secondary auth error = %#v, want scoped inspection error", gotSecondary)
+	}
+	raw, err := os.ReadFile(authPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if strings.Contains(string(raw), "last_error") {
+		t.Fatalf("shared source contains identity-local error: %s", raw)
+	}
+}
+
+func TestEnablePreservesNonInspectionLastError(t *testing.T) {
+	auth := &coreauth.Auth{
+		Disabled:    true,
+		Status:      coreauth.StatusDisabled,
+		LastError:   &coreauth.Error{Code: "upstream_refresh_error", Message: "refresh failed"},
+		Metadata:    map[string]any{"last_error": map[string]any{"code": "upstream_refresh_error", "message": "refresh failed"}},
+		Unavailable: true,
+	}
+	setAuthInspectionDisabledState(auth, false)
+	if auth.Disabled || auth.Status != coreauth.StatusError || !auth.Unavailable {
+		t.Fatalf("enabled auth state = disabled:%v status:%q unavailable:%v", auth.Disabled, auth.Status, auth.Unavailable)
+	}
+	if auth.LastError == nil || auth.LastError.Code != "upstream_refresh_error" {
+		t.Fatalf("LastError = %#v, want preserved upstream error", auth.LastError)
+	}
+	if _, ok := auth.Metadata["last_error"]; !ok {
+		t.Fatal("metadata last_error was removed")
+	}
+}
+
 func TestQuotaSuccessStateIncludesParserMetadata(t *testing.T) {
 	state := quotaSuccessState(map[string]any{"rawShapeHash": jsonShapeHash(`{"a":1,"items":[{"b":true}]}`)})
 	if state["schemaVersion"] != 2 || state["parserVersion"] != accountInspectionQuotaParserVersion || state["status"] != "success" {
