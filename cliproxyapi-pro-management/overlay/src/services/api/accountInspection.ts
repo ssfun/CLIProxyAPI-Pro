@@ -106,6 +106,9 @@ export const buildAccountInspectionLogsWebSocketUrl = (apiBase: string, includeD
 export const accountInspectionWebSocketProtocol = (managementKey: string) =>
   `cpa-management.${encodeURIComponent(managementKey)}`;
 
+export const nextAccountInspectionReconnectDelay = (currentDelayMs: number) =>
+  Math.min(Math.max(currentDelayMs, 1000) * 2, 30000);
+
 export const accountInspectionApi = {
   getSchedule: (includeDetails = false) =>
     apiClient.get<AccountInspectionScheduleResponse>('/account-inspection/schedule', {

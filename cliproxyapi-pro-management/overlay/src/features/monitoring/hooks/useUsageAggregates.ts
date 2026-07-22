@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '@/services/api/client';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { getRangeStartMs, type MonitoringTimeRange } from './useMonitoringData';
 
 export type UsageAggregateBucket = {
@@ -84,9 +85,18 @@ export function useUsageAggregates({
   const refreshPendingRef = useRef(false);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasDataRef = useRef(false);
+  const activeConnectionKeyRef = useRef('');
+  const apiBase = useAuthStore((state) => state.apiBase);
+  const managementKey = useAuthStore((state) => state.managementKey);
+  const connectionStatus = useAuthStore((state) => state.connectionStatus);
+  const connectionKey = `${apiBase}\n${managementKey}`;
+  const effectiveEnabled = enabled
+    && connectionStatus === 'connected'
+    && Boolean(apiBase)
+    && Boolean(managementKey);
 
   const load = useCallback(async () => {
-    if (!enabled) return;
+    if (!effectiveEnabled) return;
     if (refreshInFlightRef.current) {
       refreshPendingRef.current = true;
       return;
@@ -209,7 +219,7 @@ export function useUsageAggregates({
         }
       }
     }
-  }, [apiKeyHash, enabled, timeRange]);
+  }, [apiKeyHash, effectiveEnabled, timeRange]);
 
   const loadRef = useRef(load);
 
@@ -218,20 +228,29 @@ export function useUsageAggregates({
   }, [load]);
 
   useEffect(() => {
+    const connectionChanged = activeConnectionKeyRef.current !== connectionKey;
+    activeConnectionKeyRef.current = connectionKey;
     queryGenerationRef.current += 1;
+    if (connectionChanged || !effectiveEnabled) {
+      requestIdRef.current += 1;
+      refreshInFlightRef.current = false;
+      refreshPendingRef.current = false;
+      hasDataRef.current = false;
+      setData(null);
+    }
     lastFetchedAtRef.current = 0;
     refreshPendingRef.current = refreshInFlightRef.current;
     setError('');
-    setLoading(enabled && !hasDataRef.current);
+    setLoading(effectiveEnabled && !hasDataRef.current);
     if (refreshTimerRef.current) {
       window.clearTimeout(refreshTimerRef.current);
       refreshTimerRef.current = null;
     }
     setRefreshNonce((value) => value + 1);
-  }, [apiKeyHash, enabled, timeRange]);
+  }, [apiKeyHash, connectionKey, effectiveEnabled, timeRange]);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!effectiveEnabled) {
       if (refreshTimerRef.current) {
         window.clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = null;
@@ -244,7 +263,7 @@ export function useUsageAggregates({
       refreshTimerRef.current = null;
       void loadRef.current();
     }, lastFetchedAtRef.current > 0 ? AGGREGATE_REFRESH_DEBOUNCE_MS : 0);
-  }, [enabled, latestId, refreshNonce, timeRange]);
+  }, [effectiveEnabled, latestId, refreshNonce, timeRange]);
 
   useEffect(() => () => {
     if (refreshTimerRef.current) {

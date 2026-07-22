@@ -515,6 +515,89 @@ def patch_modal_content_scrollbar_layout(target: Path) -> None:
         raise RuntimeError(f'Pattern not found in {path}: modal content scroll lock')
 
 
+def patch_api_client_connection_isolation(target: Path) -> None:
+    client = target / 'src/services/api/client.ts'
+    replace_once(
+        client,
+        "  private runtimeKind: ServerRuntimeKind = 'unknown';\n",
+        "  private runtimeKind: ServerRuntimeKind = 'unknown';\n"
+        "  private connectionGeneration: number = 0;\n",
+    )
+    replace_once(
+        client,
+        "    if (connectionChanged) {\n"
+        "      this.runtimeKind = 'unknown';\n"
+        "    }\n",
+        "    if (connectionChanged) {\n"
+        "      this.connectionGeneration += 1;\n"
+        "      this.runtimeKind = 'unknown';\n"
+        "    }\n",
+    )
+    insert_once(
+        client,
+        "  /**\n   * 设置请求/响应拦截器\n   */\n",
+        "  private isStaleConnection(config: AxiosRequestConfig | undefined): boolean {\n"
+        "    const generation = (config as AxiosRequestConfig & { __connectionGeneration?: number } | undefined)\n"
+        "      ?.__connectionGeneration;\n"
+        "    return typeof generation === 'number' && generation !== this.connectionGeneration;\n"
+        "  }\n\n"
+        "  private staleConnectionError(): Error {\n"
+        "    return new axios.CanceledError('Connection changed while the request was in flight');\n"
+        "  }\n\n"
+        "  /**\n   * 设置请求/响应拦截器\n   */\n",
+        'private isStaleConnection(config: AxiosRequestConfig | undefined)',
+    )
+    replace_once(
+        client,
+        "      (config) => {\n"
+        "        // 设置 baseURL\n"
+        "        config.baseURL = this.apiBase;\n",
+        "      (config) => {\n"
+        "        (config as AxiosRequestConfig & { __connectionGeneration?: number })\n"
+        "          .__connectionGeneration = this.connectionGeneration;\n"
+        "        // 设置 baseURL\n"
+        "        config.baseURL = this.apiBase;\n",
+    )
+    replace_once(
+        client,
+        "      (response) => {\n"
+        "        const headers = response.headers as Record<string, string | undefined>;\n",
+        "      (response) => {\n"
+        "        if (this.isStaleConnection(response.config)) {\n"
+        "          throw this.staleConnectionError();\n"
+        "        }\n"
+        "        const headers = response.headers as Record<string, string | undefined>;\n",
+    )
+    replace_once(
+        client,
+        "        return response;\n"
+        "      },\n"
+        "      (error) => Promise.reject(this.handleError(error))\n"
+        "    );\n",
+        "        return response;\n"
+        "      },\n"
+        "      (error) => {\n"
+        "        if (axios.isAxiosError(error) && this.isStaleConnection(error.config)) {\n"
+        "          return Promise.reject(this.staleConnectionError());\n"
+        "        }\n"
+        "        return Promise.reject(this.handleError(error));\n"
+        "      }\n"
+        "    );\n",
+    )
+
+    auth_store = target / 'src/stores/useAuthStore.ts'
+    replace_once(
+        auth_store,
+        "        useQuotaStore.getState().clearQuotaCache();\n"
+        "        set({\n"
+        "          isAuthenticated: false,\n",
+        "        useQuotaStore.getState().clearQuotaCache();\n"
+        "        apiClient.setConfig({ apiBase: '', managementKey: '' });\n"
+        "        set({\n"
+        "          isAuthenticated: false,\n",
+    )
+
+
 def patch_routes(target: Path) -> None:
     path = target / 'src/router/MainRoutes.tsx'
     replace_once(
@@ -2246,6 +2329,7 @@ def main() -> None:
     patch_auth_files_gemini_quota(target)
     patch_auth_files_runtime_state(target)
     patch_runtime_detection(target)
+    patch_api_client_connection_isolation(target)
     patch_supporting_api_and_types(target)
     patch_claude_model_id_cloak_setting(target)
     patch_locales(target)

@@ -185,6 +185,7 @@ export function RoutingPolicyPage() {
   const [error, setError] = useState('');
   const [dirty, setDirty] = useState(false);
   const floatingActionsRef = useRef<HTMLDivElement>(null);
+  const runtimeRequestIdRef = useRef(0);
 
   const disabled = connectionStatus !== 'connected';
   const shouldRenderFloatingActions = isCurrentLayer;
@@ -226,39 +227,62 @@ export function RoutingPolicyPage() {
   }, []);
 
   const loadPolicy = useCallback(async () => {
+    const requestId = runtimeRequestIdRef.current + 1;
+    runtimeRequestIdRef.current = requestId;
+    if (connectionStatus !== 'connected') {
+      setData(null);
+      setGlobalSettings(null);
+      setRequestProtection(null);
+      setError('');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError('');
     try {
-      applyConfigResponse(await routingPolicyApi.get());
+      const response = await routingPolicyApi.get();
+      if (runtimeRequestIdRef.current !== requestId) return;
+      applyConfigResponse(response);
     } catch (error: unknown) {
+      if (runtimeRequestIdRef.current !== requestId) return;
       const message = error instanceof Error ? error.message : t('routing_policy.load_failed');
       setError(message);
       showNotification(`${t('routing_policy.load_failed')}: ${message}`, 'error');
     } finally {
-      setLoading(false);
+      if (runtimeRequestIdRef.current === requestId) setLoading(false);
     }
-  }, [applyConfigResponse, showNotification, t]);
+  }, [applyConfigResponse, connectionStatus, showNotification, t]);
 
   useEffect(() => {
     void loadPolicy();
   }, [loadPolicy]);
 
   useEffect(() => {
-    if (activeView !== 'runtime' || connectionStatus !== 'connected') return;
+    if (activeView !== 'runtime' || connectionStatus !== 'connected' || saving || releasing) return;
+    let inFlight = false;
+    let cancelled = false;
     const timer = window.setInterval(() => {
-      void routingPolicyApi
-        .get()
+      if (inFlight) return;
+      inFlight = true;
+      const requestId = runtimeRequestIdRef.current + 1;
+      runtimeRequestIdRef.current = requestId;
+      void routingPolicyApi.get()
         .then((response) => {
+          if (cancelled || runtimeRequestIdRef.current !== requestId) return;
           setData((current) =>
             current
               ? { ...current, active: response.active, recentEvents: response.recentEvents }
               : response
           );
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => { inFlight = false; });
     }, 15000);
-    return () => window.clearInterval(timer);
-  }, [activeView, connectionStatus]);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeView, connectionStatus, releasing, saving]);
 
   const setGlobal = useCallback(
     <Key extends keyof RoutingPolicyGlobalSettings>(
@@ -322,15 +346,18 @@ export function RoutingPolicyPage() {
     }
 
     setSaving(true);
+    const requestId = runtimeRequestIdRef.current + 1;
+    runtimeRequestIdRef.current = requestId;
     try {
-      applyConfigResponse(
-        await routingPolicyApi.update({
-          global: globalSettings,
-          requestProtection: { ...requestProtection, providers },
-        })
-      );
+      const response = await routingPolicyApi.update({
+        global: globalSettings,
+        requestProtection: { ...requestProtection, providers },
+      });
+      if (runtimeRequestIdRef.current !== requestId) return;
+      applyConfigResponse(response);
       showNotification(t('routing_policy.save_success'), 'success');
     } catch (error: unknown) {
+      if (runtimeRequestIdRef.current !== requestId) return;
       const message = error instanceof Error ? error.message : t('routing_policy.save_failed');
       showNotification(`${t('routing_policy.save_failed')}: ${message}`, 'error');
     } finally {
@@ -339,12 +366,16 @@ export function RoutingPolicyPage() {
   };
 
   const refreshRuntime = useCallback(async () => {
+    const requestId = runtimeRequestIdRef.current + 1;
+    runtimeRequestIdRef.current = requestId;
     try {
       const response = await routingPolicyApi.get();
+      if (runtimeRequestIdRef.current !== requestId) return;
       setData((current) =>
         current ? { ...current, active: response.active, recentEvents: response.recentEvents } : response
       );
     } catch (error: unknown) {
+      if (runtimeRequestIdRef.current !== requestId) return;
       const message = error instanceof Error ? error.message : t('routing_policy.load_failed');
       showNotification(`${t('routing_policy.load_failed')}: ${message}`, 'error');
     }
@@ -373,8 +404,11 @@ export function RoutingPolicyPage() {
       cancelText: t('common.cancel'),
       onConfirm: async () => {
         setReleasing(authIndex);
+        const requestId = runtimeRequestIdRef.current + 1;
+        runtimeRequestIdRef.current = requestId;
         try {
           const response = await routingPolicyApi.release(authIndex);
+          if (runtimeRequestIdRef.current !== requestId) return;
           setData((current) =>
             current
               ? { ...current, active: response.active, recentEvents: response.recentEvents }
@@ -382,10 +416,11 @@ export function RoutingPolicyPage() {
           );
           showNotification(t('routing_policy.release_success'), 'success');
         } catch (error: unknown) {
+          if (runtimeRequestIdRef.current !== requestId) return;
           const message = error instanceof Error ? error.message : t('routing_policy.release_failed');
           showNotification(`${t('routing_policy.release_failed')}: ${message}`, 'error');
         } finally {
-          setReleasing(null);
+          setReleasing((current) => current === authIndex ? null : current);
         }
       },
     });

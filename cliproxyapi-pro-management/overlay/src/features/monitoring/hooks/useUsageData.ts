@@ -9,6 +9,7 @@ import {
   saveModelPricesToSqlite,
   type ModelPrice,
 } from '@/utils/usage';
+import { processUsageSseBlocks } from '../usageStream';
 
 export interface UsagePayload {
   total_requests?: number;
@@ -350,31 +351,6 @@ const buildUsageStreamUrl = (apiBase: string, afterId: number, generation: numbe
   return url.toString();
 };
 
-const readSseMessage = (block: string): { event: string; data: string } | null => {
-  if (!block.trim()) return null;
-  let event = 'message';
-  const dataLines: string[] = [];
-  block.split('\n').forEach((line) => {
-    if (line.startsWith('event:')) event = line.slice(6).trim();
-    if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
-  });
-  return dataLines.length > 0 ? { event, data: dataLines.join('\n') } : null;
-};
-
-type UsageSseMessage = {
-  event: 'usage' | 'ready' | 'reset';
-  payload: UsagePayload;
-};
-
-const parseUsageSseMessage = (block: string): UsageSseMessage | null => {
-  const message = readSseMessage(block);
-  if (!message || !['usage', 'ready', 'reset'].includes(message.event)) return null;
-  return {
-    event: message.event as UsageSseMessage['event'],
-    payload: JSON.parse(message.data) as UsagePayload,
-  };
-};
-
 const nextUsageReconnectDelay = (currentDelay: number) => Math.min(currentDelay * 2, 30000);
 
 type MutableRef<T> = { current: T };
@@ -578,31 +554,17 @@ const connectUsageStream = async ({
     const { value, done } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
+    buffer = buffer.replace(/\r\n/g, '\n');
     const parts = buffer.split('\n\n');
     buffer = parts.pop() ?? '';
-    parts.forEach((part) => {
-      try {
-        const message = parseUsageSseMessage(part);
-        if (!message) return;
-        const nextGeneration = toNumber(message.payload.generation);
-        const generationChanged = nextGeneration > 0
-          && datasetGenerationRef.current > 0
-          && nextGeneration !== datasetGenerationRef.current;
-        if (message.event === 'reset' || generationChanged) {
-          void reloadUsage();
-          return;
-        }
-        if (nextGeneration > 0) datasetGenerationRef.current = nextGeneration;
-        if (message.event === 'usage') {
-          applyUsagePayload(message.payload);
-          if (message.payload.details_limited) {
-            void loadUsageIncremental();
-          }
-        }
-      } catch {
-        void loadUsageIncremental();
-      }
+    const keepStream = processUsageSseBlocks(parts, {
+      currentGeneration: () => datasetGenerationRef.current,
+      setGeneration: (generation) => { datasetGenerationRef.current = generation; },
+      applyUsage: (payload) => { applyUsagePayload(payload as UsagePayload); },
+      reloadUsage: () => { void reloadUsage(); },
+      loadIncremental: () => { void loadUsageIncremental(); },
     });
+    if (!keepStream) return;
   }
 };
 
@@ -621,6 +583,7 @@ export function useUsageData(): UseUsageDataReturn {
   const apiBase = useAuthStore((state) => state.apiBase);
   const managementKey = useAuthStore((state) => state.managementKey);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
+  const connectionKey = `${apiBase}\n${managementKey}`;
   const requestIdRef = useRef(0);
   const latestIdRef = useRef(0);
   const datasetGenerationRef = useRef(0);
@@ -657,6 +620,9 @@ export function useUsageData(): UseUsageDataReturn {
   }, []);
 
   const loadUsage = useCallback(() => {
+    if (connectionStatus !== 'connected' || !apiBase || !managementKey) {
+      return Promise.resolve(false);
+    }
     clearPendingUsagePayload();
     return loadUsageSnapshot({
       requestIdRef,
@@ -672,7 +638,7 @@ export function useUsageData(): UseUsageDataReturn {
       syncGenerationRef,
       datasetGenerationRef,
     });
-  }, [clearPendingUsagePayload]);
+  }, [apiBase, clearPendingUsagePayload, connectionStatus, managementKey]);
 
   const applyUsagePayload = useCallback((payload: UsagePayload | null) => {
     const nextGeneration = toNumber(payload?.generation);
@@ -699,17 +665,18 @@ export function useUsageData(): UseUsageDataReturn {
       incrementalPendingRef.current = true;
       return incrementalPromiseRef.current;
     }
+    const syncGeneration = syncGenerationRef.current;
     setSyncStatus('syncing');
     const promise = loadUsageIncrementalSnapshot({
       latestIdRef,
       datasetGenerationRef,
       incrementalLoadingRef,
       incrementalPendingRef,
-      loadUsage,
-      applyUsagePayload,
+      loadUsage: () => syncGenerationRef.current === syncGeneration ? loadUsage() : Promise.resolve(false),
+      applyUsagePayload: (payload) => syncGenerationRef.current === syncGeneration && applyUsagePayload(payload),
       setSyncStatus,
     }).then((success) => {
-      if (success) {
+      if (success && syncGenerationRef.current === syncGeneration) {
         setSyncStatus(pageVisible ? 'live' : 'paused');
       }
       return success;
@@ -723,31 +690,69 @@ export function useUsageData(): UseUsageDataReturn {
   }, [applyUsagePayload, loadUsage, pageVisible]);
 
   const refreshUsage = useCallback(async () => {
-    if (refreshingRef.current) return;
+    if (refreshingRef.current || connectionStatus !== 'connected' || !apiBase || !managementKey) return;
+    const syncGeneration = syncGenerationRef.current;
     refreshingRef.current = true;
     setRefreshing(true);
     try {
       const [success] = await Promise.all([
         loadUsage(),
         loadModelPricesFromSqlite()
-          .then(setModelPricesState)
+          .then((prices) => {
+            if (syncGenerationRef.current === syncGeneration) setModelPricesState(prices);
+          })
           .catch((err) => console.error('Failed to refresh model prices from sqlite:', err)),
       ]);
-      if (success) {
+      if (success && syncGenerationRef.current === syncGeneration) {
         setLastRefreshedAt(new Date());
         setError('');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setSyncStatus('error');
+      if (syncGenerationRef.current === syncGeneration) {
+        setError(err instanceof Error ? err.message : String(err));
+        setSyncStatus('error');
+      }
     } finally {
-      refreshingRef.current = false;
-      setRefreshing(false);
+      if (syncGenerationRef.current === syncGeneration) {
+        refreshingRef.current = false;
+        setRefreshing(false);
+      }
     }
-  }, [loadUsage]);
+  }, [apiBase, connectionStatus, loadUsage, managementKey]);
 
   useEffect(() => {
     let cancelled = false;
+    syncGenerationRef.current += 1;
+    requestIdRef.current += 1;
+    latestIdRef.current = 0;
+    datasetGenerationRef.current = 0;
+    incrementalLoadingRef.current = false;
+    incrementalPendingRef.current = false;
+    incrementalPromiseRef.current = null;
+    refreshingRef.current = false;
+    clearPendingUsagePayload();
+    setUsage(null);
+    setLatestId(0);
+    setLastRefreshedAt(null);
+    setLastEventAt(null);
+    setError('');
+    setRefreshing(false);
+    setSnapshotReady(false);
+
+    if (connectionStatus !== 'connected' || !apiBase || !managementKey) {
+      setLoading(false);
+      setSyncStatus('paused');
+      setModelPricesState({});
+      return () => {
+        cancelled = true;
+        syncGenerationRef.current += 1;
+        requestIdRef.current += 1;
+        clearPendingUsagePayload();
+      };
+    }
+
+    setLoading(true);
+    setSyncStatus('loading');
     const legacyPrices = loadLegacyModelPrices();
     setModelPricesState(legacyPrices);
 
@@ -772,8 +777,11 @@ export function useUsageData(): UseUsageDataReturn {
 
     return () => {
       cancelled = true;
+      syncGenerationRef.current += 1;
+      requestIdRef.current += 1;
+      clearPendingUsagePayload();
     };
-  }, [loadUsage]);
+  }, [apiBase, clearPendingUsagePayload, connectionKey, connectionStatus, loadUsage, managementKey]);
 
   useEffect(() => clearPendingUsagePayload, [clearPendingUsagePayload]);
 

@@ -1,6 +1,7 @@
-import { startTransition, useCallback, useEffect, useMemo, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authFilesApi } from '@/services/api/authFiles';
 import { apiClient } from '@/services/api/client';
+import { useAuthStore } from '@/stores/useAuthStore';
 import type { AuthFileItem } from '@/types/authFile';
 import type { Config } from '@/types/config';
 import type { CredentialInfo } from '@/types/sourceInfo';
@@ -1429,6 +1430,12 @@ export function useMonitoringData({
   const [channels, setChannels] = useState<MonitoringChannelMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const requestIdRef = useRef(0);
+  const activeConnectionKeyRef = useRef('');
+  const apiBase = useAuthStore((state) => state.apiBase);
+  const managementKey = useAuthStore((state) => state.managementKey);
+  const connectionStatus = useAuthStore((state) => state.connectionStatus);
+  const connectionKey = `${apiBase}\n${managementKey}`;
 
   const applyMetaPayload = useCallback((payload: MonitoringMetaPayload, deferred = false) => {
     const apply = () => {
@@ -1445,28 +1452,45 @@ export function useMonitoringData({
   }, []);
 
   const refreshMeta = useCallback(async (showLoading: boolean = true) => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    if (connectionStatus !== 'connected' || !apiBase || !managementKey) {
+      setAuthFiles([]);
+      setChannels([]);
+      setError('');
+      setLoading(false);
+      return;
+    }
     if (showLoading) {
       setLoading(true);
       setError('');
     }
 
-    const payload = await loadMonitoringMetaPayload(config);
-    applyMetaPayload(payload, true);
-  }, [applyMetaPayload, config]);
+    try {
+      const payload = await loadMonitoringMetaPayload(config);
+      if (requestIdRef.current !== requestId) return;
+      applyMetaPayload(payload, true);
+    } catch (reason) {
+      if (requestIdRef.current !== requestId) return;
+      setError(reason instanceof Error ? reason.message : String(reason));
+      setLoading(false);
+    }
+  }, [apiBase, applyMetaPayload, config, connectionStatus, managementKey]);
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-
-    loadMonitoringMetaPayload(config).then((payload) => {
-      if (cancelled) return;
-      applyMetaPayload(payload, true);
-    });
-
+    const connectionChanged = activeConnectionKeyRef.current !== connectionKey;
+    activeConnectionKeyRef.current = connectionKey;
+    requestIdRef.current += 1;
+    if (connectionChanged || connectionStatus !== 'connected') {
+      setAuthFiles([]);
+      setChannels([]);
+      setError('');
+    }
+    void refreshMeta(true);
     return () => {
-      cancelled = true;
+      requestIdRef.current += 1;
     };
-  }, [applyMetaPayload, config]);
+  }, [connectionKey, connectionStatus, refreshMeta]);
 
   const authMetaMap = useMemo(() => {
     const map = new Map<string, MonitoringAuthMeta>();

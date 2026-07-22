@@ -43,6 +43,7 @@ import {
   accountInspectionWebSocketProtocol,
   apiClient,
   buildAccountInspectionLogsWebSocketUrl,
+  nextAccountInspectionReconnectDelay,
   type AccountInspectionInspectOneItem,
   type AccountInspectionLogStreamMessage,
   type AccountInspectionScheduleResponse,
@@ -1674,6 +1675,7 @@ export function AccountInspectionPage() {
   });
   const refreshedBackendFinishedAtRef = useRef(0);
   const loadedBackendDetailsKeyRef = useRef('');
+  const backendScheduleRequestIdRef = useRef(0);
 
 
   useEffect(() => {
@@ -1793,12 +1795,18 @@ export function AccountInspectionPage() {
   }), [logLevelFilter, logPage, resultFilter, resultPage, selectedResultProvider]);
 
   const loadBackendSchedule = useCallback(async () => {
-    if (connectionStatus !== 'connected') return;
+    const requestId = backendScheduleRequestIdRef.current + 1;
+    backendScheduleRequestIdRef.current = requestId;
+    if (connectionStatus !== 'connected') {
+      dispatchBackendState({ type: 'clearSchedule' });
+      return;
+    }
     try {
       const response = await accountInspectionApi.getStatus();
+      if (backendScheduleRequestIdRef.current !== requestId) return;
       applyBackendResponse(response);
     } catch {
-      dispatchBackendState({ type: 'clearSchedule' });
+      // Preserve the last server snapshot across transient transport failures.
     }
   }, [applyBackendResponse, connectionStatus]);
 
@@ -1810,45 +1818,90 @@ export function AccountInspectionPage() {
     if (connectionStatus !== 'connected' || !apiBase || !managementKey) return;
     let closed = false;
     let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let pollTimer: number | null = null;
+    let reconnectDelay = 1000;
 
-    try {
-      socket = new WebSocket(
-        buildAccountInspectionLogsWebSocketUrl(apiBase),
-        accountInspectionWebSocketProtocol(managementKey)
-      );
-    } catch {
-      return;
-    }
-
-    socket.onmessage = (event) => {
-      if (closed || typeof event.data !== 'string') return;
-      try {
-        const message = JSON.parse(event.data) as AccountInspectionLogStreamMessage;
-        if (message.log) {
-          dispatchBackendState({
-            type: 'appendLog',
-            level: message.log!.level,
-            message: message.log!.message,
-            timestamp: message.log!.time,
-          });
-          if (message.type === 'log') {
-            return;
-          }
-        }
-        applyBackendResponse({
-          schedule: message.schedule,
-          status: message.status,
-        });
-      } catch {
-        return;
+    const stopPolling = () => {
+      if (pollTimer !== null) {
+        window.clearInterval(pollTimer);
+        pollTimer = null;
       }
     };
+    const startPolling = () => {
+      if (closed || pollTimer !== null) return;
+      void loadBackendSchedule();
+      pollTimer = window.setInterval(() => void loadBackendSchedule(), 5000);
+    };
+    const scheduleReconnect = () => {
+      if (closed || reconnectTimer !== null) return;
+      const delay = reconnectDelay;
+      reconnectDelay = nextAccountInspectionReconnectDelay(reconnectDelay);
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, delay);
+    };
+    const connect = () => {
+      if (closed) return;
+      try {
+        socket = new WebSocket(
+          buildAccountInspectionLogsWebSocketUrl(apiBase),
+          accountInspectionWebSocketProtocol(managementKey)
+        );
+      } catch {
+        startPolling();
+        scheduleReconnect();
+        return;
+      }
+
+      socket.onopen = () => {
+        if (closed) return;
+        reconnectDelay = 1000;
+        stopPolling();
+        void loadBackendSchedule();
+      };
+      socket.onmessage = (event) => {
+        if (closed || typeof event.data !== 'string') return;
+        try {
+          const message = JSON.parse(event.data) as AccountInspectionLogStreamMessage;
+          if (message.log) {
+            dispatchBackendState({
+              type: 'appendLog',
+              level: message.log.level,
+              message: message.log.message,
+              timestamp: message.log.time,
+            });
+            if (message.type === 'log') {
+              return;
+            }
+          }
+          applyBackendResponse({
+            schedule: message.schedule,
+            status: message.status,
+          });
+        } catch {
+          return;
+        }
+      };
+      socket.onerror = () => socket?.close();
+      socket.onclose = () => {
+        socket = null;
+        if (closed) return;
+        startPolling();
+        scheduleReconnect();
+      };
+    };
+
+    connect();
 
     return () => {
       closed = true;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      stopPolling();
       socket?.close();
     };
-  }, [apiBase, applyBackendResponse, connectionStatus, managementKey]);
+  }, [apiBase, applyBackendResponse, connectionStatus, loadBackendSchedule, managementKey]);
 
   useEffect(() => {
     if (connectionStatus !== 'connected') return;
