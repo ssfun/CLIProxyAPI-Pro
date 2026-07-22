@@ -100,6 +100,117 @@ jobs:
           echo "management_version=${management_version}" >> "${GITHUB_OUTPUT}"
           echo "should_release=${should_release}" >> "${GITHUB_OUTPUT}"
 
+  validate-repository:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout customizations
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Set up Go for actionlint
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Install actionlint
+        env:
+          GOBIN: ${{ runner.temp }}/validation-bin
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          echo "${GOBIN}" >> "${GITHUB_PATH}"
+
+      - name: Validate repository sources
+        env:
+          VALIDATION_REQUIRE_TOOLS: "1"
+        run: bash scripts/validation/repo.sh
+
+  validate-core:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout customizations
+        uses: actions/checkout@v5
+        with:
+          path: customizations-repo
+
+      - name: Checkout Core upstream release
+        uses: actions/checkout@v5
+        with:
+          repository: router-for-me/CLIProxyAPI
+          ref: ${{ needs.check-version.outputs.core_tag }}
+          path: upstream-core
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: upstream-core/go.mod
+          cache-dependency-path: upstream-core/go.sum
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Validate Core customization
+        run: bash customizations-repo/scripts/validation/core.sh upstream-core
+
+  validate-management:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout customizations
+        uses: actions/checkout@v5
+        with:
+          path: customizations-repo
+
+      - name: Checkout Management upstream release
+        uses: actions/checkout@v5
+        with:
+          repository: router-for-me/Cli-Proxy-API-Management-Center
+          ref: ${{ needs.check-version.outputs.management_tag }}
+          path: upstream-management
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('upstream-management/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Validate Management customization
+        env:
+          VERSION: v${{ needs.check-version.outputs.management_version }}-pro
+        run: bash customizations-repo/scripts/validation/management.sh upstream-management
+
   build-docker-image:
     needs:
       - check-version
@@ -184,7 +295,10 @@ jobs:
             ${{ secrets.DOCKER_USERNAME }}/cliproxyapi-pro:${{ needs.check-version.outputs.release_tag }}
 
   build-core-binaries:
-    needs: check-version
+    needs:
+      - check-version
+      - validate-repository
+      - validate-core
     if: needs.check-version.outputs.should_release == 'true'
     runs-on: ${{ matrix.runner }}
 
@@ -565,7 +679,10 @@ jobs:
           retention-days: 7
 
   build-management-html:
-    needs: check-version
+    needs:
+      - check-version
+      - validate-repository
+      - validate-management
     if: needs.check-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
 

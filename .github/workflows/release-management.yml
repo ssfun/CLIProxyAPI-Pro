@@ -98,8 +98,86 @@ jobs:
           echo "build_version=${build_version}" >> "${GITHUB_OUTPUT}"
           echo "should_release=${should_release}" >> "${GITHUB_OUTPUT}"
 
-  build-and-release:
+  validate-repository:
     needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout customizations
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Set up Go for actionlint
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Install actionlint
+        env:
+          GOBIN: ${{ runner.temp }}/validation-bin
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          echo "${GOBIN}" >> "${GITHUB_PATH}"
+
+      - name: Validate repository sources
+        env:
+          VALIDATION_REQUIRE_TOOLS: "1"
+        run: bash scripts/validation/repo.sh
+
+  validate-management:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout customizations
+        uses: actions/checkout@v5
+        with:
+          path: customizations-repo
+
+      - name: Checkout Management upstream release
+        uses: actions/checkout@v5
+        with:
+          repository: router-for-me/Cli-Proxy-API-Management-Center
+          ref: ${{ needs.check-version.outputs.upstream_tag }}
+          path: upstream
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('upstream/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Validate Management customization
+        env:
+          VERSION: ${{ needs.check-version.outputs.build_version }}
+        run: bash customizations-repo/scripts/validation/management.sh upstream
+
+  build-and-release:
+    needs:
+      - check-version
+      - validate-repository
+      - validate-management
     if: needs.check-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
 

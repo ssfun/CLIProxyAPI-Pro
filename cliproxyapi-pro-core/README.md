@@ -374,7 +374,6 @@ CLIPROXY_RENDER_DEPLOY_HOOKS
 cp -R /path/to/CLIProxyAPI /tmp/cliproxy-check
 rm -rf /tmp/cliproxy-check/internal/embeddedusage
 cp -R cliproxyapi-pro-core/embeddedusage /tmp/cliproxy-check/internal/embeddedusage
-cp cliproxyapi-pro-core/patches/account_inspection_scheduler.go /tmp/account_inspection_scheduler.go
 SRC_ROOT=/tmp/cliproxy-check python3 cliproxyapi-pro-core/patches/apply_upstream_patches.py
 go -C /tmp/cliproxy-check mod tidy
 go -C /tmp/cliproxy-check test ./internal/embeddedusage/...

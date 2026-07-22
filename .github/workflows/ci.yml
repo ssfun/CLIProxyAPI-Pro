@@ -1,0 +1,168 @@
+name: Validate CLIProxyAPI Pro
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      upstream_mode:
+        description: Upstream versions to validate
+        type: choice
+        options:
+          - pinned
+          - latest
+        default: pinned
+  schedule:
+    - cron: '30 21 * * *'
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  resolve-upstream:
+    runs-on: ubuntu-latest
+
+    outputs:
+      core_repo: ${{ steps.resolve.outputs.core_repo }}
+      core_tag: ${{ steps.resolve.outputs.core_tag }}
+      management_repo: ${{ steps.resolve.outputs.management_repo }}
+      management_tag: ${{ steps.resolve.outputs.management_tag }}
+      bun_version: ${{ steps.resolve.outputs.bun_version }}
+      mode: ${{ steps.resolve.outputs.mode }}
+
+    steps:
+      - name: Checkout customizations
+        uses: actions/checkout@v5
+
+      - name: Resolve upstream versions
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUESTED_MODE: ${{ github.event_name == 'schedule' && 'latest' || inputs.upstream_mode || 'pinned' }}
+        run: |
+          set -euo pipefail
+          source compatibility/upstream.env
+
+          mode="${REQUESTED_MODE:-pinned}"
+          core_tag="${CORE_UPSTREAM_TAG}"
+          management_tag="${MANAGEMENT_UPSTREAM_TAG}"
+          if [ "${mode}" = "latest" ]; then
+            core_tag="$(gh api "repos/${CORE_UPSTREAM_REPO}/releases/latest" --jq '.tag_name')"
+            management_tag="$(gh api "repos/${MANAGEMENT_UPSTREAM_REPO}/releases/latest" --jq '.tag_name')"
+          fi
+
+          echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
+          echo "core_repo=${CORE_UPSTREAM_REPO}" >> "${GITHUB_OUTPUT}"
+          echo "core_tag=${core_tag}" >> "${GITHUB_OUTPUT}"
+          echo "management_repo=${MANAGEMENT_UPSTREAM_REPO}" >> "${GITHUB_OUTPUT}"
+          echo "management_tag=${management_tag}" >> "${GITHUB_OUTPUT}"
+          echo "bun_version=${BUN_VERSION}" >> "${GITHUB_OUTPUT}"
+
+  repo-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout customizations
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Set up Go for actionlint
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Install actionlint
+        env:
+          GOBIN: ${{ runner.temp }}/validation-bin
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          echo "${GOBIN}" >> "${GITHUB_PATH}"
+
+      - name: Validate repository sources
+        env:
+          VALIDATION_REQUIRE_TOOLS: "1"
+        run: bash scripts/validation/repo.sh
+
+  core-baseline:
+    needs: resolve-upstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout customizations
+        uses: actions/checkout@v5
+        with:
+          path: customizations-repo
+
+      - name: Checkout Core upstream
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ needs.resolve-upstream.outputs.core_repo }}
+          ref: ${{ needs.resolve-upstream.outputs.core_tag }}
+          path: upstream-core
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: upstream-core/go.mod
+          cache-dependency-path: upstream-core/go.sum
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Validate Core customization
+        env:
+          VALIDATION_RACE: ${{ github.event_name == 'schedule' && '1' || '0' }}
+        run: bash customizations-repo/scripts/validation/core.sh upstream-core
+
+  management-baseline:
+    needs: resolve-upstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout customizations
+        uses: actions/checkout@v5
+        with:
+          path: customizations-repo
+
+      - name: Checkout Management upstream
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ needs.resolve-upstream.outputs.management_repo }}
+          ref: ${{ needs.resolve-upstream.outputs.management_tag }}
+          path: upstream-management
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ needs.resolve-upstream.outputs.bun_version }}
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('upstream-management/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Validate Management customization
+        env:
+          VERSION: ${{ needs.resolve-upstream.outputs.management_tag }}-pro-review
+        run: bash customizations-repo/scripts/validation/management.sh upstream-management

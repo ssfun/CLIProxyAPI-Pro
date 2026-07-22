@@ -59,17 +59,22 @@ func (p *usageQueuePlugin) HandleUsage(ctx context.Context, record coreusage.Rec
 	}
 	serviceTier := strings.TrimSpace(record.ServiceTier)
 	if serviceTier == "" {
+		serviceTier = strings.TrimSpace(record.RequestServiceTier)
+	}
+	if serviceTier == "" {
 		serviceTier = coreusage.ServiceTierFromContext(ctx)
 	}
+	responseServiceTier := strings.TrimSpace(record.ResponseServiceTier)
 
 	tokens := tokenStats{
-		InputTokens:         record.Detail.InputTokens,
-		OutputTokens:        record.Detail.OutputTokens,
-		ReasoningTokens:     record.Detail.ReasoningTokens,
-		CachedTokens:        record.Detail.CachedTokens,
-		CacheReadTokens:     record.Detail.CacheReadTokens,
-		CacheCreationTokens: record.Detail.CacheCreationTokens,
-		TotalTokens:         record.Detail.TotalTokens,
+		InputTokens:            record.Detail.InputTokens,
+		OutputTokens:           record.Detail.OutputTokens,
+		ReasoningTokens:        record.Detail.ReasoningTokens,
+		CachedTokens:           record.Detail.CachedTokens,
+		CacheReadTokens:        record.Detail.CacheReadTokens,
+		CacheReadTokensPresent: true,
+		CacheCreationTokens:    record.Detail.CacheCreationTokens,
+		TotalTokens:            record.Detail.TotalTokens,
 	}
 	if tokens.TotalTokens == 0 {
 		tokens.TotalTokens = tokens.InputTokens + tokens.OutputTokens + tokens.ReasoningTokens
@@ -92,23 +97,25 @@ func (p *usageQueuePlugin) HandleUsage(ctx context.Context, record coreusage.Rec
 		AuthIndex:       record.AuthIndex,
 		Tokens:          tokens,
 		Failed:          failed,
+		Generate:        coreusage.GenerateEnabled(record.Generate),
 		Fail:            fail,
 		ResponseHeaders: record.ResponseHeaders,
 	}
 
 	payload, err := json.Marshal(queuedUsageDetail{
-		requestDetail:   detail,
-		Provider:        provider,
-		ExecutorType:    executorType,
-		Model:           modelName,
-		Alias:           aliasName,
-		Endpoint:        resolveEndpoint(ctx),
-		AuthType:        authType,
-		APIKey:          apiKey,
-		RequestID:       requestID,
-		Stream:          stream,
-		ReasoningEffort: reasoningEffort,
-		ServiceTier:     serviceTier,
+		requestDetail:       detail,
+		Provider:            provider,
+		ExecutorType:        executorType,
+		Model:               modelName,
+		Alias:               aliasName,
+		Endpoint:            resolveEndpoint(ctx),
+		AuthType:            authType,
+		APIKey:              apiKey,
+		RequestID:           requestID,
+		Stream:              stream,
+		ReasoningEffort:     reasoningEffort,
+		ServiceTier:         serviceTier,
+		ResponseServiceTier: responseServiceTier,
 	})
 	if err != nil {
 		return
@@ -118,17 +125,18 @@ func (p *usageQueuePlugin) HandleUsage(ctx context.Context, record coreusage.Rec
 
 type queuedUsageDetail struct {
 	requestDetail
-	Provider        string `json:"provider"`
-	ExecutorType    string `json:"executor_type"`
-	Model           string `json:"model"`
-	Alias           string `json:"alias"`
-	Endpoint        string `json:"endpoint"`
-	AuthType        string `json:"auth_type"`
-	APIKey          string `json:"api_key"`
-	RequestID       string `json:"request_id"`
-	Stream          bool   `json:"stream"`
-	ReasoningEffort string `json:"reasoning_effort"`
-	ServiceTier     string `json:"service_tier"`
+	Provider            string `json:"provider"`
+	ExecutorType        string `json:"executor_type"`
+	Model               string `json:"model"`
+	Alias               string `json:"alias"`
+	Endpoint            string `json:"endpoint"`
+	AuthType            string `json:"auth_type"`
+	APIKey              string `json:"api_key"`
+	RequestID           string `json:"request_id"`
+	Stream              bool   `json:"stream"`
+	ReasoningEffort     string `json:"reasoning_effort"`
+	ServiceTier         string `json:"service_tier"`
+	ResponseServiceTier string `json:"response_service_tier,omitempty"`
 }
 
 type requestDetail struct {
@@ -139,18 +147,20 @@ type requestDetail struct {
 	AuthIndex       string      `json:"auth_index"`
 	Tokens          tokenStats  `json:"tokens"`
 	Failed          bool        `json:"failed"`
+	Generate        bool        `json:"generate"`
 	Fail            failDetail  `json:"fail"`
 	ResponseHeaders http.Header `json:"response_headers,omitempty"`
 }
 
 type tokenStats struct {
-	InputTokens         int64 `json:"input_tokens"`
-	OutputTokens        int64 `json:"output_tokens"`
-	ReasoningTokens     int64 `json:"reasoning_tokens"`
-	CachedTokens        int64 `json:"cached_tokens"`
-	CacheReadTokens     int64 `json:"cache_read_tokens"`
-	CacheCreationTokens int64 `json:"cache_creation_tokens"`
-	TotalTokens         int64 `json:"total_tokens"`
+	InputTokens            int64 `json:"input_tokens"`
+	OutputTokens           int64 `json:"output_tokens"`
+	ReasoningTokens        int64 `json:"reasoning_tokens"`
+	CachedTokens           int64 `json:"cached_tokens"`
+	CacheReadTokens        int64 `json:"cache_read_tokens"`
+	CacheReadTokensPresent bool  `json:"cache_read_tokens_present"`
+	CacheCreationTokens    int64 `json:"cache_creation_tokens"`
+	TotalTokens            int64 `json:"total_tokens"`
 }
 
 type failDetail struct {

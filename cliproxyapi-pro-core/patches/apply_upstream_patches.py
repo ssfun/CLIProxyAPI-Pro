@@ -1636,9 +1636,7 @@ management_scheduler = ROOT / 'internal/api/handlers/management/account_inspecti
 management_scheduler_test = ROOT / 'internal/api/handlers/management/account_inspection_scheduler_test.go'
 routing_policy = ROOT / 'internal/api/handlers/management/routing_policy.go'
 routing_policy_test = ROOT / 'internal/api/handlers/management/routing_policy_test.go'
-scheduler_source = Path('/tmp/account_inspection_scheduler.go')
-if not scheduler_source.is_file():
-    scheduler_source = Path(__file__).resolve().parent / 'account_inspection_scheduler.go'
+scheduler_source = Path(__file__).resolve().parent / 'account_inspection_scheduler.go'
 write_text(management_scheduler, re.sub(r'github\.com/router-for-me/CLIProxyAPI/v\d+', MODULE_PATH, read_text(scheduler_source)))
 scheduler_test_source = Path(__file__).resolve().parent / 'account_inspection_scheduler_test.go'
 if scheduler_test_source.is_file():
