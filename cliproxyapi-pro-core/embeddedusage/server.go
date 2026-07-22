@@ -26,18 +26,19 @@ const usageHistoryStartCursorValue = int64(1<<63 - 1)
 type usageStreamEvent = internalusage.Payload
 
 type usageHistoryCursor struct {
-	SnapshotMaxID   int64  `json:"snapshot_max_id"`
-	MatchedTotal    int64  `json:"matched_total"`
-	BeforeTimestamp int64  `json:"before_timestamp_ms"`
-	BeforeID        int64  `json:"before_id"`
-	FromMS          int64  `json:"from_ms,omitempty"`
-	ToMS            int64  `json:"to_ms,omitempty"`
-	Provider        string `json:"provider,omitempty"`
-	Model           string `json:"model,omitempty"`
-	AuthIndex       string `json:"auth_index,omitempty"`
-	APIKeyHash      string `json:"api_key_hash,omitempty"`
-	Status          string `json:"status,omitempty"`
-	Search          string `json:"search,omitempty"`
+	SnapshotMaxID     int64  `json:"snapshot_max_id"`
+	MatchedTotal      int64  `json:"matched_total"`
+	BeforeTimestamp   int64  `json:"before_timestamp_ms"`
+	BeforeID          int64  `json:"before_id"`
+	FromMS            int64  `json:"from_ms,omitempty"`
+	ToMS              int64  `json:"to_ms,omitempty"`
+	Provider          string `json:"provider,omitempty"`
+	Model             string `json:"model,omitempty"`
+	AuthIndex         string `json:"auth_index,omitempty"`
+	SearchAuthIndexes string `json:"search_auth_indexes,omitempty"`
+	APIKeyHash        string `json:"api_key_hash,omitempty"`
+	Status            string `json:"status,omitempty"`
+	Search            string `json:"search,omitempty"`
 }
 
 type accountInspectionScheduleExportRecord struct {
@@ -285,37 +286,39 @@ func usageStatusFilter(value string) (*bool, string) {
 func usageEventQueryOptionsFromCursor(cursor usageHistoryCursor, limit int) UsageEventQueryOptions {
 	failed, _ := usageStatusFilter(cursor.Status)
 	return UsageEventQueryOptions{
-		SnapshotMaxID:   cursor.SnapshotMaxID,
-		BeforeTimestamp: cursor.BeforeTimestamp,
-		BeforeID:        cursor.BeforeID,
-		FromMS:          cursor.FromMS,
-		ToMS:            cursor.ToMS,
-		Provider:        cursor.Provider,
-		Model:           cursor.Model,
-		AuthIndex:       cursor.AuthIndex,
-		APIKeyHash:      cursor.APIKeyHash,
-		Failed:          failed,
-		Search:          cursor.Search,
-		Limit:           limit,
-		MatchedTotal:    cursor.MatchedTotal,
-		SkipCount:       true,
+		SnapshotMaxID:     cursor.SnapshotMaxID,
+		BeforeTimestamp:   cursor.BeforeTimestamp,
+		BeforeID:          cursor.BeforeID,
+		FromMS:            cursor.FromMS,
+		ToMS:              cursor.ToMS,
+		Provider:          cursor.Provider,
+		Model:             cursor.Model,
+		AuthIndex:         cursor.AuthIndex,
+		SearchAuthIndexes: cursor.SearchAuthIndexes,
+		APIKeyHash:        cursor.APIKeyHash,
+		Failed:            failed,
+		Search:            cursor.Search,
+		Limit:             limit,
+		MatchedTotal:      cursor.MatchedTotal,
+		SkipCount:         true,
 	}
 }
 
 func usageHistoryCursorFromOptions(options UsageEventQueryOptions, status string, matchedTotal int64, event internalusage.Event) usageHistoryCursor {
 	return usageHistoryCursor{
-		SnapshotMaxID:   options.SnapshotMaxID,
-		MatchedTotal:    matchedTotal,
-		BeforeTimestamp: event.TimestampMS,
-		BeforeID:        event.ID,
-		FromMS:          options.FromMS,
-		ToMS:            options.ToMS,
-		Provider:        options.Provider,
-		Model:           options.Model,
-		AuthIndex:       options.AuthIndex,
-		APIKeyHash:      options.APIKeyHash,
-		Status:          status,
-		Search:          options.Search,
+		SnapshotMaxID:     options.SnapshotMaxID,
+		MatchedTotal:      matchedTotal,
+		BeforeTimestamp:   event.TimestampMS,
+		BeforeID:          event.ID,
+		FromMS:            options.FromMS,
+		ToMS:              options.ToMS,
+		Provider:          options.Provider,
+		Model:             options.Model,
+		AuthIndex:         options.AuthIndex,
+		SearchAuthIndexes: options.SearchAuthIndexes,
+		APIKeyHash:        options.APIKeyHash,
+		Status:            status,
+		Search:            options.Search,
 	}
 }
 
@@ -376,16 +379,17 @@ func (s *Server) handleUsageHistoryEvents(c *gin.Context) {
 		failed, normalizedStatus := usageStatusFilter(c.Query("status"))
 		status = normalizedStatus
 		options = UsageEventQueryOptions{
-			SnapshotMaxID: latestID,
-			FromMS:        parseQueryInt64(c, "from_ms", 0),
-			ToMS:          parseQueryInt64(c, "to_ms", 0),
-			Provider:      strings.TrimSpace(c.Query("provider")),
-			Model:         strings.TrimSpace(c.Query("model")),
-			AuthIndex:     strings.TrimSpace(c.Query("auth_index")),
-			APIKeyHash:    strings.TrimSpace(c.Query("api_key_hash")),
-			Failed:        failed,
-			Search:        strings.TrimSpace(c.Query("search")),
-			Limit:         limit,
+			SnapshotMaxID:     latestID,
+			FromMS:            parseQueryInt64(c, "from_ms", 0),
+			ToMS:              parseQueryInt64(c, "to_ms", 0),
+			Provider:          strings.TrimSpace(c.Query("provider")),
+			Model:             strings.TrimSpace(c.Query("model")),
+			AuthIndex:         strings.TrimSpace(c.Query("auth_index")),
+			SearchAuthIndexes: strings.TrimSpace(c.Query("search_auth_indexes")),
+			APIKeyHash:        strings.TrimSpace(c.Query("api_key_hash")),
+			Failed:            failed,
+			Search:            strings.TrimSpace(c.Query("search")),
+			Limit:             limit,
 		}
 	}
 

@@ -7,6 +7,10 @@ PAGE_PATH = (
     / 'overlay/src/pages/MonitoringCenterPage.tsx'
 )
 STYLE_PATH = PAGE_PATH.with_suffix('.module.scss')
+REALTIME_HOOK_PATH = (
+    Path(__file__).resolve().parents[1]
+    / 'overlay/src/features/monitoring/hooks/useRealtimeLogData.ts'
+)
 
 
 class MonitoringToolbarCustomizationTest(unittest.TestCase):
@@ -24,23 +28,25 @@ class MonitoringToolbarCustomizationTest(unittest.TestCase):
 
     def test_realtime_logs_pause_auto_refresh_during_browsing(self) -> None:
         source = PAGE_PATH.read_text()
+        hook_source = REALTIME_HOOK_PATH.read_text()
 
-        self.assertIn("const realtimeLogAutoRefreshPaused = realtimeLogPage !== 1", source)
-        self.assertIn("|| !realtimeLogFollowEnabled", source)
-        self.assertIn("|| !realtimeLogAtTop", source)
-        self.assertIn("|| Boolean(selectedRealtimeErrorRow)", source)
-        self.assertIn("&& realtimeLogPage === 1", source)
-        self.assertIn("&& !realtimeLogAutoRefreshPaused", source)
-        self.assertIn("void refreshRealtimeLogs('top');", source)
+        self.assertIn("const autoRefreshPaused = page !== 1", hook_source)
+        self.assertIn("|| !followEnabled", hook_source)
+        self.assertIn("|| !atTop", hook_source)
+        self.assertIn("|| detailsOpen", hook_source)
+        self.assertIn("&& page === 1", hook_source)
+        self.assertIn("&& !autoRefreshPaused", hook_source)
+        self.assertIn("void refresh('top');", hook_source)
         self.assertIn("onScroll={handleRealtimeLogScroll}", source)
 
     def test_realtime_logs_restore_the_internal_scroll_anchor(self) -> None:
         source = PAGE_PATH.read_text()
+        hook_source = REALTIME_HOOK_PATH.read_text()
         styles = STYLE_PATH.read_text()
 
         self.assertIn("data-realtime-row-id={row.id}", source)
-        self.assertIn("pendingRealtimeLogScrollSnapshotRef", source)
-        self.assertIn("anchor.getBoundingClientRect().top - wrapperRect.top - snapshot.anchorOffset", source)
+        self.assertIn("pendingScrollSnapshotRef", hook_source)
+        self.assertIn("anchor.getBoundingClientRect().top - wrapperRect.top - snapshot.anchorOffset", hook_source)
         self.assertIn("overflow-anchor: none;", styles)
 
     def test_realtime_follow_control_and_pending_update_action_are_present(self) -> None:

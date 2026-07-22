@@ -106,7 +106,7 @@ Core dependent routes:
 /v0/management/account-inspection/actions
 ```
 
-Request monitoring stores diagnostic fields such as TTFT, HTTP status code, structured error, reasoning effort, and service tier, and exposes the `/usage/aggregates` server-side aggregation API. The management UI deduplicates increments by event ID, receives SSE updates from SQLite commit notifications, catches up by cursor after disconnects, prefers server-side aggregates for trends and rankings, and pauses live rendering in background tabs. `/usage/status` returns recent dead-letter samples with sensitive fields redacted.
+Request monitoring stores diagnostic fields such as TTFT, HTTP status code, structured error, reasoning effort, and service tier, and exposes the `/usage/aggregates` server-side aggregation API. The management UI deduplicates increments by event ID, receives SSE updates from SQLite commit notifications, catches up by cursor after disconnects, prefers server-side aggregates for trends and rankings, uses stable server-side paging for log filters and combined raw-text/account-metadata search, and pauses live rendering in background tabs. `/usage/status` returns recent dead-letter samples with sensitive fields redacted.
 
 Account inspection is executed by the backend only. The management UI configures schedules, starts or controls runs, polls status/progress/results, streams logs and live status over WebSocket/WSS, and confirms manual actions. Backend automatic actions support consecutive-confirmation gating, and quota cache entries record parser version plus response-shape hashes to help diagnose upstream field changes.
 

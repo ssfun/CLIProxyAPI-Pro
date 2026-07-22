@@ -132,7 +132,7 @@ CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
 /v0/management/account-inspection/actions
 ```
 
-请求监控会保存 TTFT、HTTP 状态码、结构化错误、reasoning effort 和 service tier 等诊断字段，并提供 `/usage/aggregates` 服务端聚合接口。管理端使用事件 ID 进行增量去重，通过 SQLite 写入通知驱动 SSE，断线后按 cursor 追平；趋势和排行优先使用服务端聚合，后台标签页暂停实时渲染。`/usage/status` 会返回最近 dead letter 样本，样本会做敏感字段脱敏。
+请求监控会保存 TTFT、HTTP 状态码、结构化错误、reasoning effort 和 service tier 等诊断字段，并提供 `/usage/aggregates` 服务端聚合接口。管理端使用事件 ID 进行增量去重，通过 SQLite 写入通知驱动 SSE，断线后按 cursor 追平；趋势和排行优先使用服务端聚合，日志过滤及原始文本/账号元数据联合搜索使用稳定的服务端分页，并在后台标签页暂停实时渲染。`/usage/status` 会返回最近 dead letter 样本，样本会做敏感字段脱敏。
 
 账号巡检只由后端执行。管理端负责配置调度、启动和控制巡检、轮询状态/进度/结果，通过 WebSocket/WSS 接收日志和实时状态，并确认手动操作。后端自动动作支持连续确认门槛，quota cache 会记录解析器版本和返回结构 hash，便于上游字段变化时排查。
 

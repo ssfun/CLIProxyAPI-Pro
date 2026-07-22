@@ -38,20 +38,21 @@ type UsageResetResult struct {
 }
 
 type UsageEventQueryOptions struct {
-	SnapshotMaxID   int64
-	BeforeTimestamp int64
-	BeforeID        int64
-	FromMS          int64
-	ToMS            int64
-	Provider        string
-	Model           string
-	AuthIndex       string
-	APIKeyHash      string
-	Failed          *bool
-	Search          string
-	Limit           int
-	MatchedTotal    int64
-	SkipCount       bool
+	SnapshotMaxID     int64
+	BeforeTimestamp   int64
+	BeforeID          int64
+	FromMS            int64
+	ToMS              int64
+	Provider          string
+	Model             string
+	AuthIndex         string
+	SearchAuthIndexes string
+	APIKeyHash        string
+	Failed            *bool
+	Search            string
+	Limit             int
+	MatchedTotal      int64
+	SkipCount         bool
 }
 
 type UsageEventQueryPage struct {
@@ -908,12 +909,14 @@ func appendUsageEventQueryFilters(options UsageEventQueryOptions, includeCursor 
 		wheres = append(wheres, `failed = ?`)
 		args = append(args, failed)
 	}
+	searchPredicates := make([]string, 0, 2)
+	searchArgs := make([]any, 0, 101)
 	if value := strings.ToLower(strings.TrimSpace(options.Search)); value != "" {
 		searchRunes := []rune(value)
 		if len(searchRunes) > 200 {
 			value = string(searchRunes[:200])
 		}
-		wheres = append(wheres, `instr(lower(
+		searchPredicates = append(searchPredicates, `instr(lower(
 			coalesce(request_id, '') || char(10) || coalesce(provider, '') || char(10) ||
 			coalesce(executor_type, '') || char(10) || coalesce(model, '') || char(10) ||
 			coalesce(alias, '') || char(10) || coalesce(endpoint, '') || char(10) ||
@@ -923,7 +926,17 @@ func appendUsageEventQueryFilters(options UsageEventQueryOptions, includeCursor 
 			coalesce(api_key_hash, '') || char(10) || coalesce(error_code, '') || char(10) ||
 			coalesce(error_message, '') || char(10) || coalesce(upstream_request_id, '')
 		), ?) > 0`)
-		args = append(args, value)
+		searchArgs = append(searchArgs, value)
+	}
+	if values := splitUsageEventFilterValues(options.SearchAuthIndexes, 100); len(values) > 0 {
+		searchPredicates = append(searchPredicates, `auth_index in (`+strings.TrimRight(strings.Repeat("?,", len(values)), ",")+`)`)
+		for _, value := range values {
+			searchArgs = append(searchArgs, value)
+		}
+	}
+	if len(searchPredicates) > 0 {
+		wheres = append(wheres, `(`+strings.Join(searchPredicates, ` or `)+`)`)
+		args = append(args, searchArgs...)
 	}
 	return wheres, args
 }

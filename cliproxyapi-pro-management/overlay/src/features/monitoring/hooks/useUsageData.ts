@@ -56,6 +56,7 @@ export type UsageEventPageFilters = {
   provider?: string;
   model?: string;
   authIndex?: string;
+  searchAuthIndexes?: string;
   apiKeyHash?: string;
   status?: UsageEventStatusFilter;
   search?: string;
@@ -385,6 +386,7 @@ const loadUsageEventPage = async (filters: UsageEventPageFilters): Promise<Usage
           provider: filters.provider?.trim() || undefined,
           model: filters.model?.trim() || undefined,
           auth_index: filters.authIndex?.trim() || undefined,
+          search_auth_indexes: filters.searchAuthIndexes?.trim() || undefined,
           api_key_hash: filters.apiKeyHash?.trim() || undefined,
           status: filters.status && filters.status !== 'all' ? filters.status : undefined,
           search: filters.search?.trim() || undefined,

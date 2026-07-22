@@ -427,18 +427,34 @@ func TestHandleUsageHistoryEventsSupportsStructuredFilters(t *testing.T) {
 	third.Provider = "beta"
 	third.Model = "model-b"
 	third.APIKeyHash = "key-b"
-	insertTestUsageEvents(t, store, first, second, third)
+	fourth := testUsageEvent(3, true, 40)
+	fourth.Provider = "alpha"
+	fourth.Model = "model-a"
+	fourth.APIKeyHash = "key-a"
+	fourth.AuthIndex = "auth-meta"
+	insertTestUsageEvents(t, store, first, second, third, fourth)
 	router := testUsageRouter(store)
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/usage/events?direction=before&limit=10&provider=alpha&model=model-a&api_key_hash=key-a&status=failed&search=needle", nil)
+	request := httptest.NewRequest(http.MethodGet, "/usage/events?direction=before&limit=1&provider=alpha&model=model-a&api_key_hash=key-a&status=failed&search=needle&search_auth_indexes=auth-meta", nil)
 	router.ServeHTTP(recorder, request)
 	payload := decodeUsagePayload(t, recorder)
-	if got := usageDetailIDs(payload); len(got) != 1 || got[0] != 2 {
-		t.Fatalf("filtered ids = %v, want [2]", got)
+	if got := usageDetailIDs(payload); len(got) != 1 || got[0] != 4 {
+		t.Fatalf("first filtered page ids = %v, want [4]", got)
 	}
-	if payload.MatchedTotal != 1 || payload.HasMore {
-		t.Fatalf("filtered metadata = %+v, want matched=1 final page", payload)
+	if payload.MatchedTotal != 2 || !payload.HasMore || payload.NextCursor == "" {
+		t.Fatalf("first filtered page metadata = %+v, want matched=2 and next cursor", payload)
+	}
+
+	nextRecorder := httptest.NewRecorder()
+	nextRequest := httptest.NewRequest(http.MethodGet, "/usage/events?cursor="+payload.NextCursor+"&limit=1", nil)
+	router.ServeHTTP(nextRecorder, nextRequest)
+	nextPayload := decodeUsagePayload(t, nextRecorder)
+	if got := usageDetailIDs(nextPayload); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("second filtered page ids = %v, want [2]", got)
+	}
+	if nextPayload.MatchedTotal != 2 || nextPayload.HasMore {
+		t.Fatalf("second filtered page metadata = %+v, want matched=2 final page", nextPayload)
 	}
 }
 

@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type UIEvent } from 'react';
+import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -31,8 +31,10 @@ import {
   type MonitoringStatusTone,
   type MonitoringTimeRange,
 } from '@/features/monitoring/hooks/useMonitoringData';
+import { REALTIME_LOG_PAGE_SIZE, useRealtimeLogData } from '@/features/monitoring/hooks/useRealtimeLogData';
 import { useUsageData, type UsageEventPageFilters, type UsagePayload } from '@/features/monitoring/hooks/useUsageData';
 import { useUsageAggregates, type UsageAggregateBucket } from '@/features/monitoring/hooks/useUsageAggregates';
+import { findMonitoringAuthIndexes } from '@/features/monitoring/monitoringAuthSearch';
 import { hasUsageBackupManifest } from '@/features/monitoring/usageBackup';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { apiClient } from '@/services/api/client';
@@ -114,12 +116,10 @@ const ACCOUNT_SORT_OPTIONS: Array<{ value: AccountSortMetric; labelKey: string }
 const ACCOUNT_STATUS_BLOCK_COUNT = 20;
 const ACCOUNT_STATUS_BLOCK_DURATION_MS = 10 * 60 * 1000;
 const ACCOUNT_STATS_ANALYTICS_ROW_LIMIT = 6000;
-const REALTIME_LOG_PAGE_SIZE = 100;
 const REALTIME_LOG_ENRICH_LIMIT = REALTIME_LOG_PAGE_SIZE;
 const ACCOUNT_QUOTA_REQUEST_CONCURRENCY = 4;
 const REALTIME_LOG_COLUMNS_STORAGE_KEY = 'cli-proxy-realtime-log-columns-v2';
 const REALTIME_LOG_FOLLOW_STORAGE_KEY = 'cli-proxy-realtime-log-follow-v1';
-const REALTIME_LOG_TOP_THRESHOLD_PX = 8;
 const REALTIME_LOG_COLUMN_KEYS = [
   'type',
   'model',
@@ -151,14 +151,6 @@ type RealtimeLogColumnDefinition = {
   cellClassName?: (row: RealtimeLogRow) => string | undefined;
   render: (row: RealtimeLogRow) => ReactNode;
   width: number;
-};
-type RealtimeLogScrollMode = 'preserve' | 'top';
-type RealtimeLogScrollSnapshot = {
-  mode: RealtimeLogScrollMode;
-  top: number;
-  left: number;
-  anchorId: string;
-  anchorOffset: number;
 };
 const REALTIME_LOG_COLUMN_DEFAULT_WIDTHS: Record<RealtimeLogColumnKey, number> = {
   type: 170,
@@ -3911,25 +3903,14 @@ export function MonitoringCenterPage() {
   const [usageTrendApiKey, setUsageTrendApiKey] = useState('all');
   const [accountStatsMetric, setAccountStatsMetric] = useState<AccountSortMetric>('recent');
   const [isAccountStatsHidden, setIsAccountStatsHidden] = useState(false);
-  const [realtimeLogPage, setRealtimeLogPage] = useState(1);
   const [realtimeLogUsage, setRealtimeLogUsage] = useState<UsagePayload | null>(null);
-  const [realtimeLogMatchedTotal, setRealtimeLogMatchedTotal] = useState(0);
-  const [realtimeLogNextCursor, setRealtimeLogNextCursor] = useState('');
-  const [realtimeLogPageCursors, setRealtimeLogPageCursors] = useState<string[]>(['']);
-  const [realtimeLogSnapshotMaxId, setRealtimeLogSnapshotMaxId] = useState(0);
-  const [realtimeLogLoading, setRealtimeLogLoading] = useState(false);
-  const [realtimeLogError, setRealtimeLogError] = useState('');
   const [realtimeLogColumns, setRealtimeLogColumns] = useState<RealtimeLogColumnPreference[]>(loadRealtimeLogColumns);
   const [realtimeLogFollowEnabled, setRealtimeLogFollowEnabled] = useState(loadRealtimeLogFollowEnabled);
-  const [realtimeLogAtTop, setRealtimeLogAtTop] = useState(true);
   const [draggedRealtimeLogColumnKey, setDraggedRealtimeLogColumnKey] = useState<RealtimeLogColumnKey | null>(null);
   const [isRealtimeColumnsMenuOpen, setIsRealtimeColumnsMenuOpen] = useState(false);
   const accountQuotaStatesRef = useRef<Record<string, AccountQuotaState>>({});
   const accountQuotaRequestIdsRef = useRef<Record<string, number>>({});
   const realtimeColumnsMenuRef = useRef<HTMLDivElement | null>(null);
-  const realtimeLogWrapperRef = useRef<HTMLDivElement | null>(null);
-  const pendingRealtimeLogScrollSnapshotRef = useRef<RealtimeLogScrollSnapshot | null>(null);
-  const usageGenerationRef = useRef(0);
   const deferredSearchInput = useDeferredValue(searchInput);
   const [deferredSearch, setDeferredSearch] = useState(searchInput);
 
@@ -3979,44 +3960,8 @@ export function MonitoringCenterPage() {
   });
 
   const searchMatchedAuthIndexFilter = useMemo(() => {
-    const query = deferredSearch.trim().toLowerCase();
-    if (!query) return '';
-    const matches = new Set<string>();
-    allRows.forEach((row) => {
-      if (row.authIndex === '-') return;
-      const authText = [row.account, row.accountMasked, row.authLabel, row.source, row.sourceMasked]
-        .filter(Boolean)
-        .join('\n')
-        .toLowerCase();
-      if (authText.includes(query)) {
-        matches.add(row.authIndex);
-      }
-    });
-    return Array.from(matches).sort().join(',');
-  }, [allRows, deferredSearch]);
-
-  const realtimeLogRequestIdRef = useRef(0);
-  const realtimeLogAbortControllerRef = useRef<AbortController | null>(null);
-  const realtimeLogAutoRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const captureRealtimeLogScroll = useCallback((mode: RealtimeLogScrollMode): RealtimeLogScrollSnapshot | null => {
-    const wrapper = realtimeLogWrapperRef.current;
-    if (!wrapper) return null;
-    const wrapperRect = wrapper.getBoundingClientRect();
-    const rows = Array.from(wrapper.querySelectorAll<HTMLTableRowElement>('tbody tr[data-realtime-row-id]'));
-    const anchor = rows.find((row) => row.getBoundingClientRect().bottom > wrapperRect.top + 1);
-    return {
-      mode,
-      top: wrapper.scrollTop,
-      left: wrapper.scrollLeft,
-      anchorId: anchor?.dataset.realtimeRowId ?? '',
-      anchorOffset: anchor ? anchor.getBoundingClientRect().top - wrapperRect.top : 0,
-    };
-  }, []);
-
-  const handleRealtimeLogScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
-    setRealtimeLogAtTop(event.currentTarget.scrollTop <= REALTIME_LOG_TOP_THRESHOLD_PX);
-  }, []);
+    return findMonitoringAuthIndexes(authFiles, allRows, deferredSearch);
+  }, [allRows, authFiles, deferredSearch]);
 
   const buildRealtimeLogFilters = useCallback((): UsageEventPageFilters => {
     const nowMs = Date.now();
@@ -4026,77 +3971,45 @@ export function MonitoringCenterPage() {
       toMs: nowMs,
       provider: selectedProvider === 'all' ? undefined : selectedProvider,
       model: selectedModel === 'all' ? undefined : selectedModel,
-      authIndex: searchMatchedAuthIndexFilter || undefined,
+      searchAuthIndexes: searchMatchedAuthIndexFilter || undefined,
       apiKeyHash: selectedApiKey === 'all' ? undefined : selectedApiKey,
       status: selectedStatus,
-      search: searchMatchedAuthIndexFilter ? undefined : deferredSearch,
+      search: deferredSearch,
       limit: REALTIME_LOG_PAGE_SIZE,
     };
   }, [deferredSearch, searchMatchedAuthIndexFilter, selectedApiKey, selectedModel, selectedProvider, selectedStatus, timeRange]);
 
-  const fetchRealtimeLogPage = useCallback(async (
-    page: number,
-    cursor = '',
-    scrollMode: RealtimeLogScrollMode = 'preserve'
-  ) => {
-    if (connectionStatus !== 'connected') return false;
-    const requestId = realtimeLogRequestIdRef.current + 1;
-    const scrollSnapshot = captureRealtimeLogScroll(scrollMode);
-    realtimeLogRequestIdRef.current = requestId;
-    realtimeLogAbortControllerRef.current?.abort();
-    const controller = new AbortController();
-    realtimeLogAbortControllerRef.current = controller;
-    setRealtimeLogLoading(true);
-    setRealtimeLogError('');
-    try {
-      const result = await loadEventPage({ ...buildRealtimeLogFilters(), cursor, signal: controller.signal });
-      if (realtimeLogRequestIdRef.current !== requestId) return false;
-      pendingRealtimeLogScrollSnapshotRef.current = scrollSnapshot;
-      setRealtimeLogUsage(result.usage);
-      setRealtimeLogMatchedTotal(result.matchedTotal);
-      setRealtimeLogNextCursor(result.nextCursor);
-      setRealtimeLogSnapshotMaxId(result.snapshotMaxId);
-      setRealtimeLogPageCursors((current) => {
-        const next = current.slice(0, Math.max(page, 1));
-        next[page - 1] = result.pageCursor;
-        return next;
-      });
-      setRealtimeLogPage(page);
-      return true;
-    } catch (error) {
-      if (realtimeLogRequestIdRef.current !== requestId) return false;
-      if (controller.signal.aborted) return false;
-      setRealtimeLogError(error instanceof Error ? error.message : String(error));
-      return false;
-    } finally {
-      if (realtimeLogRequestIdRef.current === requestId) {
-        setRealtimeLogLoading(false);
-      }
-      if (realtimeLogAbortControllerRef.current === controller) {
-        realtimeLogAbortControllerRef.current = null;
-      }
-    }
-  }, [buildRealtimeLogFilters, captureRealtimeLogScroll, connectionStatus, loadEventPage]);
+  const handleRealtimeLogGenerationChange = useCallback(() => {
+    setSelectedRealtimeErrorRow(null);
+    void refreshAggregates();
+  }, [refreshAggregates]);
 
-  const refreshRealtimeLogs = useCallback(async (scrollMode: RealtimeLogScrollMode = 'preserve') => {
-    setRealtimeLogPageCursors(['']);
-    return fetchRealtimeLogPage(1, '', scrollMode);
-  }, [fetchRealtimeLogPage]);
-
-  const showPreviousRealtimeLogPage = useCallback(async () => {
-    if (realtimeLogLoading || realtimeLogPage <= 1) return;
-    const previousPage = realtimeLogPage - 1;
-    const cursor = realtimeLogPageCursors[previousPage - 1] ?? '';
-    await fetchRealtimeLogPage(previousPage, cursor, 'top');
-  }, [fetchRealtimeLogPage, realtimeLogLoading, realtimeLogPage, realtimeLogPageCursors]);
-
-  const showNextRealtimeLogPage = useCallback(async () => {
-    if (realtimeLogLoading || !realtimeLogNextCursor) return;
-    const nextPage = realtimeLogPage + 1;
-    const cursor = realtimeLogNextCursor;
-    const success = await fetchRealtimeLogPage(nextPage, cursor, 'top');
-    if (!success) return;
-  }, [fetchRealtimeLogPage, realtimeLogLoading, realtimeLogNextCursor, realtimeLogPage]);
+  const {
+    page: realtimeLogPage,
+    matchedTotal: realtimeLogMatchedTotal,
+    nextCursor: realtimeLogNextCursor,
+    loading: realtimeLogLoading,
+    error: realtimeLogError,
+    pendingEventCount: pendingRealtimeEventCount,
+    autoRefreshPaused: realtimeLogAutoRefreshPaused,
+    wrapperRef: realtimeLogWrapperRef,
+    handleScroll: handleRealtimeLogScroll,
+    refresh: refreshRealtimeLogs,
+    reset: resetRealtimeLogs,
+    showPreviousPage: showPreviousRealtimeLogPage,
+    showNextPage: showNextRealtimeLogPage,
+  } = useRealtimeLogData({
+    connectionStatus,
+    latestId,
+    generation: Number(usage?.generation) || 0,
+    usage: realtimeLogUsage,
+    setUsage: setRealtimeLogUsage,
+    loadEventPage,
+    buildFilters: buildRealtimeLogFilters,
+    followEnabled: realtimeLogFollowEnabled,
+    detailsOpen: Boolean(selectedRealtimeErrorRow),
+    onGenerationChange: handleRealtimeLogGenerationChange,
+  });
 
   const refreshAll = useCallback(async () => {
     await Promise.all([refreshUsage(), refreshMeta(false), refreshRealtimeLogs()]);
@@ -4150,9 +4063,7 @@ export function MonitoringCenterPage() {
     try {
       const result = await apiClient.post<UsageResetResult>('/usage/reset', { confirm: true });
       setSelectedRealtimeErrorRow(null);
-      setRealtimeLogUsage(null);
-      setRealtimeLogMatchedTotal(0);
-      setRealtimeLogPageCursors(['']);
+      resetRealtimeLogs();
       await Promise.all([refreshUsage(), refreshRealtimeLogs(), refreshAggregates()]);
       showNotification(t('usage_stats.monitoring_settings_reset_success', { count: result.deletedEvents }), 'success');
     } catch (error) {
@@ -4160,7 +4071,7 @@ export function MonitoringCenterPage() {
     } finally {
       setIsMonitoringStatisticsResetting(false);
     }
-  }, [refreshAggregates, refreshRealtimeLogs, refreshUsage, showNotification, t]);
+  }, [refreshAggregates, refreshRealtimeLogs, refreshUsage, resetRealtimeLogs, showNotification, t]);
 
   const handleMonitoringStatisticsReset = useCallback(() => {
     if (connectionStatus !== 'connected') {
@@ -4294,58 +4205,10 @@ export function MonitoringCenterPage() {
 
   const combinedError = [usageError, monitoringError, realtimeLogError].filter(Boolean).join('；');
   const hasPrices = Object.keys(modelPrices).length > 0;
-  const pendingRealtimeEventCount = realtimeLogSnapshotMaxId > 0 ? Math.max(latestId - realtimeLogSnapshotMaxId, 0) : 0;
-  const realtimeLogAutoRefreshPaused = realtimeLogPage !== 1
-    || !realtimeLogFollowEnabled
-    || !realtimeLogAtTop
-    || Boolean(selectedRealtimeErrorRow);
-  const realtimeLogCanAutoRefresh = connectionStatus === 'connected'
-    && realtimeLogPage === 1
-    && pendingRealtimeEventCount > 0
-    && !realtimeLogAutoRefreshPaused;
 
   useEffect(() => {
     saveRealtimeLogFollowEnabled(realtimeLogFollowEnabled);
   }, [realtimeLogFollowEnabled]);
-
-  useEffect(() => {
-    const nextGeneration = Number(usage?.generation) || 0;
-    const previousGeneration = usageGenerationRef.current;
-    usageGenerationRef.current = nextGeneration;
-    if (previousGeneration <= 0 || nextGeneration <= 0 || previousGeneration === nextGeneration) return;
-    setSelectedRealtimeErrorRow(null);
-    setRealtimeLogUsage(null);
-    setRealtimeLogMatchedTotal(0);
-    setRealtimeLogPageCursors(['']);
-    void refreshAggregates();
-    void refreshRealtimeLogs('top');
-  }, [refreshAggregates, refreshRealtimeLogs, usage?.generation]);
-
-  useEffect(() => {
-    if (!realtimeLogCanAutoRefresh) {
-      if (realtimeLogAutoRefreshTimerRef.current) {
-        clearTimeout(realtimeLogAutoRefreshTimerRef.current);
-        realtimeLogAutoRefreshTimerRef.current = null;
-      }
-    }
-  }, [realtimeLogCanAutoRefresh]);
-
-  useEffect(() => {
-    if (!realtimeLogCanAutoRefresh) return;
-    if (realtimeLogAutoRefreshTimerRef.current) return;
-    realtimeLogAutoRefreshTimerRef.current = setTimeout(() => {
-      realtimeLogAutoRefreshTimerRef.current = null;
-      void refreshRealtimeLogs('top');
-    }, 1000);
-  }, [pendingRealtimeEventCount, realtimeLogCanAutoRefresh, refreshRealtimeLogs]);
-
-  useEffect(() => () => {
-    realtimeLogAbortControllerRef.current?.abort();
-    if (realtimeLogAutoRefreshTimerRef.current) {
-      clearTimeout(realtimeLogAutoRefreshTimerRef.current);
-      realtimeLogAutoRefreshTimerRef.current = null;
-    }
-  }, []);
 
   useEffect(() => {
     accountQuotaStatesRef.current = accountQuotaStates;
@@ -4895,35 +4758,6 @@ export function MonitoringCenterPage() {
   );
   const realtimeLogVisibleColumnCount = Math.max(1, visibleRealtimeLogColumns.length);
   const realtimeLogVisiblePreferenceCount = realtimeLogColumns.filter((column) => column.visible).length;
-
-  useLayoutEffect(() => {
-    const snapshot = pendingRealtimeLogScrollSnapshotRef.current;
-    const wrapper = realtimeLogWrapperRef.current;
-    if (!snapshot || !wrapper) return;
-    pendingRealtimeLogScrollSnapshotRef.current = null;
-
-    wrapper.scrollLeft = snapshot.left;
-    if (snapshot.mode === 'top') {
-      wrapper.scrollTop = 0;
-      setRealtimeLogAtTop(true);
-      return;
-    }
-
-    const wrapperRect = wrapper.getBoundingClientRect();
-    const anchor = Array.from(wrapper.querySelectorAll<HTMLTableRowElement>('tbody tr[data-realtime-row-id]'))
-      .find((row) => row.dataset.realtimeRowId === snapshot.anchorId);
-    if (anchor) {
-      wrapper.scrollTop += anchor.getBoundingClientRect().top - wrapperRect.top - snapshot.anchorOffset;
-    } else {
-      wrapper.scrollTop = snapshot.top;
-    }
-    setRealtimeLogAtTop(wrapper.scrollTop <= REALTIME_LOG_TOP_THRESHOLD_PX);
-  }, [realtimeLogUsage]);
-
-  useEffect(() => {
-    if (connectionStatus !== 'connected') return;
-    void refreshRealtimeLogs('top');
-  }, [connectionStatus, refreshRealtimeLogs]);
 
   const accountQuotaTargetsByAccount = useMemo(
     () => {
