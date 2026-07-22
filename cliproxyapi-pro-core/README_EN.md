@@ -221,6 +221,7 @@ Build args:
 
 - `CLIPROXY_REPO` — upstream repository, default `router-for-me/CLIProxyAPI`.
 - `CLIPROXY_VERSION` — upstream release tag. If empty, the Dockerfile resolves the latest release.
+- `CLIPROXY_COMMIT` — optional upstream commit SHA; when set, source is downloaded from that commit while `CLIPROXY_VERSION` remains the version label.
 - `CLIPROXY_BUILD_VERSION` — optional runtime version. If empty, it uses the upstream version resolved from `CLIPROXY_VERSION`.
 - `GITHUB_TOKEN` — optional token for GitHub API requests.
 
@@ -357,9 +358,6 @@ Validate the embedded usage package against an upstream checkout:
 
 ```bash
 cp -R /path/to/CLIProxyAPI /tmp/cliproxy-check
-rm -rf /tmp/cliproxy-check/internal/embeddedusage
-cp -R cliproxyapi-pro-core/embeddedusage /tmp/cliproxy-check/internal/embeddedusage
-cp cliproxyapi-pro-core/patches/account_inspection_scheduler.go /tmp/account_inspection_scheduler.go
 SRC_ROOT=/tmp/cliproxy-check python3 cliproxyapi-pro-core/patches/apply_upstream_patches.py
 go -C /tmp/cliproxy-check mod tidy
 go -C /tmp/cliproxy-check test ./internal/embeddedusage/...

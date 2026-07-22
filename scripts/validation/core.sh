@@ -23,8 +23,50 @@ fi
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-${TMPDIR:-/tmp}/cliproxyapi-pro-pycache}"
 export SRC_ROOT="${upstream_root}"
 
+guarded_source='internal/logging/requestid.go'
+preflight_log="$(mktemp "${TMPDIR:-/tmp}/cliproxyapi-pro-preflight.XXXXXX")"
+printf '\n' >> "${upstream_root}/${guarded_source}"
+if python3 "${repo_root}/cliproxyapi-pro-core/patches/apply_upstream_patches.py" >"${preflight_log}" 2>&1; then
+  echo "Core customization unexpectedly accepted changed guarded upstream source" >&2
+  exit 1
+fi
+if ! grep -Fq 'upstream source changed before full-file replacement' "${preflight_log}"; then
+  cat "${preflight_log}" >&2
+  echo "Core customization did not fail with the expected upstream-drift error" >&2
+  exit 1
+fi
+if [[ -e "${upstream_root}/internal/embeddedusage" ]]; then
+  echo "Core customization wrote files before completing preflight" >&2
+  exit 1
+fi
+git -C "${upstream_root}" restore --worktree -- "${guarded_source}"
+rm -f "${preflight_log}"
+if [[ -n "$(git -C "${upstream_root}" status --porcelain)" ]]; then
+  echo "Core preflight regression did not restore a clean checkout" >&2
+  exit 1
+fi
+
 python3 "${repo_root}/cliproxyapi-pro-core/patches/apply_upstream_patches.py"
 git -C "${upstream_root}" diff --check
+
+git -C "${upstream_root}" add -N .
+patched_diff_hash="$(git -C "${upstream_root}" diff --binary | git hash-object --stdin)"
+reapply_log="$(mktemp "${TMPDIR:-/tmp}/cliproxyapi-pro-reapply.XXXXXX")"
+if python3 "${repo_root}/cliproxyapi-pro-core/patches/apply_upstream_patches.py" >"${reapply_log}" 2>&1; then
+  echo "Core customization unexpectedly allowed a second application" >&2
+  exit 1
+fi
+if ! grep -Fq 'target already contains CLIProxyAPI Pro customizations' "${reapply_log}"; then
+  cat "${reapply_log}" >&2
+  echo "Core customization did not fail with the expected already-applied error" >&2
+  exit 1
+fi
+rm -f "${reapply_log}"
+reapplied_diff_hash="$(git -C "${upstream_root}" diff --binary | git hash-object --stdin)"
+if [[ "${patched_diff_hash}" != "${reapplied_diff_hash}" ]]; then
+  echo "Core customization changed the source tree during rejected reapplication" >&2
+  exit 1
+fi
 
 test_flags=(-count=1)
 if [[ "${VALIDATION_RACE:-0}" == "1" ]]; then

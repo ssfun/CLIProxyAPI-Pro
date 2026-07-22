@@ -23,6 +23,15 @@ fi
 bash "${repo_root}/cliproxyapi-pro-management/apply.sh" "${upstream_root}"
 git -C "${upstream_root}" diff --check
 
+git -C "${upstream_root}" add -N .
+patched_diff_hash="$(git -C "${upstream_root}" diff --binary | git hash-object --stdin)"
+bash "${repo_root}/cliproxyapi-pro-management/apply.sh" "${upstream_root}"
+reapplied_diff_hash="$(git -C "${upstream_root}" diff --binary | git hash-object --stdin)"
+if [[ "${patched_diff_hash}" != "${reapplied_diff_hash}" ]]; then
+  echo "Management customization is not idempotent" >&2
+  exit 1
+fi
+
 (
   cd "${upstream_root}"
   bun install --frozen-lockfile

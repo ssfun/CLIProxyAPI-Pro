@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import hashlib
 import os
 import re
 import shutil
@@ -31,6 +32,12 @@ def write(path: Path, text: str) -> None:
     _writes[path] = text
 
 
+def require_source_hash(path: Path, allowed_hashes: set[str]) -> None:
+    digest = hashlib.sha256(read(path).encode('utf-8')).hexdigest()
+    if digest not in allowed_hashes:
+        raise SystemExit(f'upstream source changed before full-file replacement: {path} ({digest})')
+
+
 def module_path() -> str:
     match = re.search(r'^module\s+(\S+)', read_text(ROOT / 'go.mod'), re.MULTILINE)
     if not match:
@@ -57,8 +64,9 @@ def replace_once(path: Path, old: str, new: str, present=None) -> None:
     text = read(path)
     if (present or new) and (present or new) in text:
         return
-    if old not in text:
-        raise SystemExit(f'pattern not found in {path}: {old[:120]!r}')
+    match_count = text.count(old)
+    if match_count != 1:
+        raise SystemExit(f'expected one pattern in {path}, found {match_count}: {old[:120]!r}')
     write(path, text.replace(old, new, 1))
 
 
@@ -66,8 +74,9 @@ def insert_before(path: Path, marker: str, insertion: str, present: str) -> None
     text = read(path)
     if present in text:
         return
-    if marker not in text:
-        raise SystemExit(f'pattern not found in {path}: {marker[:120]!r}')
+    match_count = text.count(marker)
+    if match_count != 1:
+        raise SystemExit(f'expected one marker in {path}, found {match_count}: {marker[:120]!r}')
     write(path, text.replace(marker, insertion + marker, 1))
 
 
@@ -159,6 +168,45 @@ def replace_go_call_block(path: Path, call_start: str, new_block: str, present: 
 
 
 MODULE_PATH = module_path()
+customization_sentinel = ROOT / 'internal/embeddedusage'
+if customization_sentinel.exists():
+    raise SystemExit(f'target already contains CLIProxyAPI Pro customizations: {customization_sentinel}')
+
+new_customization_paths = (
+    'internal/api/handlers/management/account_inspection_scheduler.go',
+    'internal/api/handlers/management/account_inspection_scheduler_test.go',
+    'internal/api/handlers/management/plugin_quota.go',
+    'internal/api/handlers/management/plugin_quota_test.go',
+    'internal/api/handlers/management/routing_policy.go',
+    'internal/api/handlers/management/routing_policy_test.go',
+    'internal/config/routing_protection_config.go',
+    'internal/pluginhost/gemini_cli_quota_legacy.go',
+    'internal/pluginhost/gemini_cli_quota_legacy_test.go',
+    'internal/pluginhost/gemini_cli_storage_compat.go',
+    'internal/pluginhost/gemini_cli_storage_compat_test.go',
+    'internal/pluginhost/quota_provider.go',
+    'internal/pluginhost/quota_provider_test.go',
+    'internal/pluginstore/autoinstall.go',
+    'internal/pluginstore/autoinstall_test.go',
+    'internal/requestmeta/requestid.go',
+    'internal/requestmeta/response.go',
+    'sdk/cliproxy/auth/auth_runtime_state.go',
+    'sdk/cliproxy/auth/auth_runtime_state_test.go',
+    'sdk/cliproxy/auth/inspection_refresh.go',
+)
+for relative_path in new_customization_paths:
+    target_path = ROOT / relative_path
+    if target_path.exists():
+        raise SystemExit(f'upstream path collides with a Pro customization: {target_path}')
+
+require_source_hash(
+    ROOT / 'internal/logging/requestid.go',
+    {'69d256ca4c4a75759395f6ed6640e9d2673c777e111fcae80faa7b6eea5b15ac'},
+)
+require_source_hash(
+    ROOT / 'internal/logging/requestmeta.go',
+    {'aa13ac5136573dba6a4feb9243cad2663b300053288c3b0f6eeaaee26ca09c28'},
+)
 
 # Add the optional QuotaProvider capability without changing ABI/schema v1.
 pluginapi_types = ROOT / 'sdk/pluginapi/types.go'
@@ -2079,9 +2127,35 @@ write_text(
 )
 
 redisqueue_plugin = ROOT / 'internal/redisqueue/plugin.go'
-redisqueue_usage_toggle = ROOT / 'internal/redisqueue/usage_toggle.go'
-write_text(redisqueue_plugin, re.sub(r'github\.com/router-for-me/CLIProxyAPI/v\d+', MODULE_PATH, read_text(patch_dir / 'redisqueue_plugin.go')))
-write_text(redisqueue_usage_toggle, read_text(patch_dir / 'redisqueue_usage_toggle.go'))
+replace_once(
+    redisqueue_plugin,
+    f'\tinternallogging "{import_path("internal/logging")}"\n',
+    f'\t"{import_path("internal/requestmeta")}"\n',
+    f'"{import_path("internal/requestmeta")}"',
+)
+redisqueue_plugin_text = read(redisqueue_plugin)
+if 'internallogging.' in redisqueue_plugin_text:
+    write(redisqueue_plugin, redisqueue_plugin_text.replace('internallogging.', 'requestmeta.'))
+elif 'requestmeta.' not in redisqueue_plugin_text:
+    raise SystemExit(f'request metadata calls not found in {redisqueue_plugin}')
+replace_once(
+    redisqueue_plugin,
+    '\trequestID := strings.TrimSpace(requestmeta.GetRequestID(ctx))\n\treasoningEffort :=',
+    '\trequestID := strings.TrimSpace(requestmeta.GetRequestID(ctx))\n\tstream := coreusage.StreamFromContext(ctx)\n\treasoningEffort :=',
+    'stream := coreusage.StreamFromContext(ctx)',
+)
+replace_once(
+    redisqueue_plugin,
+    '\t\tRequestID:           requestID,\n\t\tReasoningEffort:',
+    '\t\tRequestID:           requestID,\n\t\tStream:              stream,\n\t\tReasoningEffort:',
+    'Stream:              stream',
+)
+replace_once(
+    redisqueue_plugin,
+    '\tRequestID           string `json:"request_id"`\n\tReasoningEffort',
+    '\tRequestID           string `json:"request_id"`\n\tStream              bool   `json:"stream"`\n\tReasoningEffort',
+    'Stream              bool   `json:"stream"`',
+)
 redisqueue_plugin_test = ROOT / 'internal/redisqueue/plugin_test.go'
 if redisqueue_plugin_test.exists():
     text = read_text(redisqueue_plugin_test)
@@ -2261,7 +2335,8 @@ func cloneHTTPHeader(src http.Header) http.Header {{
 }}
 ''')
 
-write_text(ROOT / 'internal/logging/requestid.go', f'''package logging
+logging_request_id = ROOT / 'internal/logging/requestid.go'
+write_text(logging_request_id, f'''package logging
 
 import (
 \t"context"
@@ -2309,7 +2384,8 @@ func GetGinRequestID(c *gin.Context) string {{
 }}
 ''')
 
-write_text(ROOT / 'internal/logging/requestmeta.go', f'''package logging
+logging_request_meta = ROOT / 'internal/logging/requestmeta.go'
+write_text(logging_request_meta, f'''package logging
 
 import (
 \t"context"

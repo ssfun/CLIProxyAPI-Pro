@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import hashlib
 import json
 import shutil
 import sys
@@ -223,6 +224,18 @@ CLAUDE_MODEL_ID_CLOAK_LOCALE_KEYS = {
     },
 }
 
+OVERLAY_REPLACEMENT_HASHES = {
+    'src/services/api/apiCall.ts': {
+        '52cbd98311904f87f588931114b7a708922e2c3d9049da39eb325be5902ee42b',
+    },
+    'src/utils/quota/resolvers.ts': {
+        '8fcded3c9edd03ac1f156abdfc37421df2bc0f6bba3717ca13664edd8f837b92',
+    },
+    'src/utils/quota/validators.ts': {
+        'aef0e8b377e569294d5d5f291ce6da10b7b12322516d40f851f2b84521b7840b',
+    },
+}
+
 
 _writes = {}
 
@@ -246,15 +259,21 @@ def replace_once(path: Path, old: str, new: str) -> None:
     text = read(path)
     if new in text:
         return
-    if old not in text:
-        raise RuntimeError(f'Pattern not found in {path}: {old[:120]!r}')
+    match_count = text.count(old)
+    if match_count != 1:
+        raise RuntimeError(f'Expected one pattern in {path}, found {match_count}: {old[:120]!r}')
     write(path, text.replace(old, new, 1))
 
 
 def replace_once_if_present(path: Path, old: str, new: str) -> None:
     text = read(path)
-    if new in text or old not in text:
+    if new in text:
         return
+    match_count = text.count(old)
+    if match_count == 0:
+        return
+    if match_count != 1:
+        raise RuntimeError(f'Expected at most one pattern in {path}, found {match_count}: {old[:120]!r}')
     write(path, text.replace(old, new, 1))
 
 
@@ -320,12 +339,33 @@ def insert_once(path: Path, marker: str, insertion: str, present: str) -> None:
     text = read(path)
     if present in text:
         return
-    if marker not in text:
-        raise RuntimeError(f'Pattern not found in {path}: {marker[:120]!r}')
+    match_count = text.count(marker)
+    if match_count != 1:
+        raise RuntimeError(f'Expected one marker in {path}, found {match_count}: {marker[:120]!r}')
     write(path, text.replace(marker, insertion, 1))
 
 
+def validate_overlay_collisions(target: Path) -> None:
+    for src in OVERLAY_DIR.rglob('*'):
+        if src.is_dir():
+            continue
+        rel = src.relative_to(OVERLAY_DIR)
+        dst = target / rel
+        if not dst.is_file():
+            continue
+        source_digest = hashlib.sha256(src.read_bytes()).hexdigest()
+        target_digest = hashlib.sha256(dst.read_bytes()).hexdigest()
+        if target_digest == source_digest:
+            continue
+        allowed_hashes = OVERLAY_REPLACEMENT_HASHES.get(rel.as_posix())
+        if allowed_hashes is None:
+            raise RuntimeError(f'Unexpected overlay collision with upstream file: {dst}')
+        if target_digest not in allowed_hashes:
+            raise RuntimeError(f'Upstream overlay replacement changed: {dst} ({target_digest})')
+
+
 def copy_overlay(target: Path) -> None:
+    validate_overlay_collisions(target)
     for src in OVERLAY_DIR.rglob('*'):
         rel = src.relative_to(OVERLAY_DIR)
         dst = target / rel
@@ -1587,8 +1627,21 @@ def patch_auth_files_gemini_quota(target: Path) -> None:
     )
     replace_once(
         constants_path,
-        "  'codex',\n  'kimi',",
-        "  'codex',\n  'gemini-cli',\n  'kimi',",
+        "export const QUOTA_PROVIDER_TYPES = new Set<QuotaProviderType>([\n"
+        "  'antigravity',\n"
+        "  'claude',\n"
+        "  'codex',\n"
+        "  'kimi',\n"
+        "  'xai',\n"
+        "]);",
+        "export const QUOTA_PROVIDER_TYPES = new Set<QuotaProviderType>([\n"
+        "  'antigravity',\n"
+        "  'claude',\n"
+        "  'codex',\n"
+        "  'gemini-cli',\n"
+        "  'kimi',\n"
+        "  'xai',\n"
+        "]);",
     )
 
     insert_once(

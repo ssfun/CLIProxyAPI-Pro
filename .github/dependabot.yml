@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - '*'
+  - package-ecosystem: docker
+    directory: /cliproxyapi-pro-core
+    schedule:
+      interval: weekly

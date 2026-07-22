@@ -236,6 +236,7 @@ docker build \
 
 - `CLIPROXY_REPO` — upstream 仓库，默认 `router-for-me/CLIProxyAPI`。
 - `CLIPROXY_VERSION` — upstream release tag。为空时 Dockerfile 自动解析 latest release。
+- `CLIPROXY_COMMIT` — 可选 upstream commit SHA；设置后按该提交下载源码，同时保留 `CLIPROXY_VERSION` 作为版本标识。
 - `CLIPROXY_BUILD_VERSION` — 可选 runtime 版本号。为空时使用 `CLIPROXY_VERSION` 解析到的 upstream 版本。
 - `GITHUB_TOKEN` — 可选 GitHub API token。
 
@@ -372,8 +373,6 @@ CLIPROXY_RENDER_DEPLOY_HOOKS
 
 ```bash
 cp -R /path/to/CLIProxyAPI /tmp/cliproxy-check
-rm -rf /tmp/cliproxy-check/internal/embeddedusage
-cp -R cliproxyapi-pro-core/embeddedusage /tmp/cliproxy-check/internal/embeddedusage
 SRC_ROOT=/tmp/cliproxy-check python3 cliproxyapi-pro-core/patches/apply_upstream_patches.py
 go -C /tmp/cliproxy-check mod tidy
 go -C /tmp/cliproxy-check test ./internal/embeddedusage/...
