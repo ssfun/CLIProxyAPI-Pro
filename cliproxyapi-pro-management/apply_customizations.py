@@ -521,7 +521,8 @@ def patch_api_client_connection_isolation(target: Path) -> None:
         client,
         "  private runtimeKind: ServerRuntimeKind = 'unknown';\n",
         "  private runtimeKind: ServerRuntimeKind = 'unknown';\n"
-        "  private connectionGeneration: number = 0;\n",
+        "  private connectionGeneration: number = 0;\n"
+        "  private connectionAbortController = new AbortController();\n",
     )
     replace_once(
         client,
@@ -529,6 +530,8 @@ def patch_api_client_connection_isolation(target: Path) -> None:
         "      this.runtimeKind = 'unknown';\n"
         "    }\n",
         "    if (connectionChanged) {\n"
+        "      this.connectionAbortController.abort();\n"
+        "      this.connectionAbortController = new AbortController();\n"
         "      this.connectionGeneration += 1;\n"
         "      this.runtimeKind = 'unknown';\n"
         "    }\n",
@@ -536,6 +539,24 @@ def patch_api_client_connection_isolation(target: Path) -> None:
     insert_once(
         client,
         "  /**\n   * 设置请求/响应拦截器\n   */\n",
+        "  private combineRequestSignal(requestSignal: AxiosRequestConfig['signal']): AbortSignal {\n"
+        "    const connectionSignal = this.connectionAbortController.signal;\n"
+        "    if (!requestSignal) return connectionSignal;\n"
+        "    const callerSignal = requestSignal as AbortSignal;\n"
+        "    if (callerSignal === connectionSignal) return connectionSignal;\n"
+        "    if (typeof AbortSignal.any === 'function') {\n"
+        "      return AbortSignal.any([callerSignal, connectionSignal]);\n"
+        "    }\n"
+        "    const controller = new AbortController();\n"
+        "    const abort = () => controller.abort();\n"
+        "    if (callerSignal.aborted || connectionSignal.aborted) {\n"
+        "      abort();\n"
+        "    } else {\n"
+        "      callerSignal.addEventListener('abort', abort, { once: true });\n"
+        "      connectionSignal.addEventListener('abort', abort, { once: true });\n"
+        "    }\n"
+        "    return controller.signal;\n"
+        "  }\n\n"
         "  private isStaleConnection(config: AxiosRequestConfig | undefined): boolean {\n"
         "    const generation = (config as AxiosRequestConfig & { __connectionGeneration?: number } | undefined)\n"
         "      ?.__connectionGeneration;\n"
@@ -555,6 +576,7 @@ def patch_api_client_connection_isolation(target: Path) -> None:
         "      (config) => {\n"
         "        (config as AxiosRequestConfig & { __connectionGeneration?: number })\n"
         "          .__connectionGeneration = this.connectionGeneration;\n"
+        "        config.signal = this.combineRequestSignal(config.signal);\n"
         "        // 设置 baseURL\n"
         "        config.baseURL = this.apiBase;\n",
     )

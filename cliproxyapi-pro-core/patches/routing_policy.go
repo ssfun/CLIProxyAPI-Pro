@@ -20,6 +20,7 @@ import (
 )
 
 const (
+	routingPolicyUsagePluginName = "pro-routing-request-protection"
 	routingProtectionOwner       = "request-protection"
 	routingProtectionMetadataKey = "request_protection"
 	routingProtectionModeObserve = "observe"
@@ -47,6 +48,9 @@ type routingPolicyController struct {
 	mu            sync.Mutex
 	confirmations map[string]routingProtectionConfirmation
 	events        []routingProtectionEvent
+	lifecycleMu   sync.Mutex
+	usageWG       sync.WaitGroup
+	stopped       bool
 }
 
 type routingProtectionConfirmation struct {
@@ -125,10 +129,55 @@ func startRoutingPolicyController(h *Handler) {
 	if controller == nil {
 		return
 	}
-	coreusage.RegisterNamedPlugin("pro-routing-request-protection", controller)
+	coreusage.RegisterNamedPlugin(routingPolicyUsagePluginName, controller)
 	if !loaded {
-		go controller.reconcileLoop()
+		if h.lifecycleContext == nil {
+			return
+		}
+		h.lifecycleWG.Add(1)
+		go func() {
+			defer h.lifecycleWG.Done()
+			controller.reconcileLoop(h.lifecycleContext)
+		}()
 	}
+}
+
+func stopRoutingPolicyController(h *Handler) {
+	if h == nil {
+		return
+	}
+	value, loaded := routingPolicyControllers.LoadAndDelete(h)
+	if !loaded {
+		return
+	}
+	controller, _ := value.(*routingPolicyController)
+	if controller != nil {
+		controller.stop()
+	}
+}
+
+func (c *routingPolicyController) beginUsage() bool {
+	if c == nil {
+		return false
+	}
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.stopped {
+		return false
+	}
+	c.usageWG.Add(1)
+	return true
+}
+
+func (c *routingPolicyController) stop() {
+	if c == nil {
+		return
+	}
+	c.lifecycleMu.Lock()
+	c.stopped = true
+	c.lifecycleMu.Unlock()
+	coreusage.UnregisterNamedPlugin(routingPolicyUsagePluginName, c)
+	c.usageWG.Wait()
 }
 
 func routingPolicyControllerForHandler(h *Handler) *routingPolicyController {
@@ -141,7 +190,11 @@ func routingPolicyControllerForHandler(h *Handler) *routingPolicyController {
 }
 
 func (c *routingPolicyController) HandleUsage(ctx context.Context, record coreusage.Record) {
-	if c == nil || c.h == nil {
+	if !c.beginUsage() {
+		return
+	}
+	defer c.usageWG.Done()
+	if c.h == nil {
 		return
 	}
 	provider := strings.ToLower(strings.TrimSpace(record.Provider))
@@ -329,11 +382,16 @@ func (c *routingPolicyController) updateAuth(ctx context.Context, authIndex stri
 	return err
 }
 
-func (c *routingPolicyController) reconcileLoop() {
+func (c *routingPolicyController) reconcileLoop(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
-		c.reconcile(time.Now())
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			c.reconcile(now)
+		}
 	}
 }
 

@@ -398,6 +398,7 @@ plugin_quota_management_test = ROOT / 'internal/api/handlers/management/plugin_q
 write_text(plugin_quota_management_test, read_text(Path(__file__).resolve().parent / 'plugin_quota_management_test.go'))
 
 usage_manager = ROOT / 'sdk/cliproxy/usage/manager.go'
+add_go_import(usage_manager, '"net/http"\n', '\t"reflect"\n')
 replace_once(
     usage_manager,
     'type serviceTierContextKey struct{}\n',
@@ -426,6 +427,115 @@ func StreamFromContext(ctx context.Context) bool {
 ''',
     'func WithStream(ctx context.Context, stream bool) context.Context',
 )
+replace_once(
+    usage_manager,
+    '''\tm.named[name] = len(m.plugins)
+\tm.plugins = append(m.plugins, plugin)
+\tm.pluginsMu.Unlock()
+''',
+    '''\tfor index, existing := range m.plugins {
+\t\tif existing == nil {
+\t\t\tm.named[name] = index
+\t\t\tm.plugins[index] = plugin
+\t\t\tm.pluginsMu.Unlock()
+\t\t\treturn
+\t\t}
+\t}
+\tm.named[name] = len(m.plugins)
+\tm.plugins = append(m.plugins, plugin)
+\tm.pluginsMu.Unlock()
+''',
+    'for index, existing := range m.plugins',
+)
+insert_before(
+    usage_manager,
+    '// Publish enqueues a usage record for processing. If no plugin is registered\n',
+    '''// UnregisterNamed removes a named plugin only when the current registration
+// still belongs to the supplied plugin. Passing nil removes it unconditionally.
+func (m *Manager) UnregisterNamed(name string, plugin Plugin) {
+\tif m == nil {
+\t\treturn
+\t}
+\tname = strings.TrimSpace(name)
+\tif name == "" {
+\t\treturn
+\t}
+\tm.pluginsMu.Lock()
+\tdefer m.pluginsMu.Unlock()
+\tindex, exists := m.named[name]
+\tif !exists || index < 0 || index >= len(m.plugins) {
+\t\treturn
+\t}
+\tcurrent := m.plugins[index]
+\tif plugin != nil && !samePlugin(current, plugin) {
+\t\treturn
+\t}
+\tm.plugins[index] = nil
+\tdelete(m.named, name)
+}
+
+func samePlugin(left, right Plugin) bool {
+\tif left == nil || right == nil {
+\t\treturn left == nil && right == nil
+\t}
+\tleftValue := reflect.ValueOf(left)
+\trightValue := reflect.ValueOf(right)
+\treturn leftValue.Type() == rightValue.Type() &&
+\t\tleftValue.Type().Comparable() &&
+\t\tleftValue.Interface() == rightValue.Interface()
+}
+
+''',
+    'func (m *Manager) UnregisterNamed(name string, plugin Plugin)',
+)
+insert_before(
+    usage_manager,
+    '// PublishRecord publishes a record using the default manager.\n',
+    '''// UnregisterNamedPlugin removes a matching named plugin from the default manager.
+func UnregisterNamedPlugin(name string, plugin Plugin) { DefaultManager().UnregisterNamed(name, plugin) }
+
+''',
+    'func UnregisterNamedPlugin(name string, plugin Plugin)',
+)
+
+usage_manager_test = ROOT / 'sdk/cliproxy/usage/manager_test.go'
+if 'func TestUnregisterNamedPreservesReplacement' not in read(usage_manager_test):
+    write(usage_manager_test, read(usage_manager_test).rstrip() + '''
+
+type namedLifecycleUsagePlugin struct {
+\tcalls int
+}
+
+func (p *namedLifecycleUsagePlugin) HandleUsage(context.Context, Record) {
+\tp.calls++
+}
+
+func TestUnregisterNamedPreservesReplacement(t *testing.T) {
+\tmanager := NewManager(1)
+\tfirst := &namedLifecycleUsagePlugin{}
+\treplacement := &namedLifecycleUsagePlugin{}
+\tmanager.RegisterNamed("lifecycle", first)
+\tmanager.RegisterNamed("lifecycle", replacement)
+
+\tmanager.UnregisterNamed("lifecycle", first)
+\tmanager.dispatch(queueItem{ctx: context.Background(), record: Record{}})
+\tif replacement.calls != 1 {
+\t\tt.Fatalf("replacement calls = %d, want 1", replacement.calls)
+\t}
+
+\tmanager.UnregisterNamed("lifecycle", replacement)
+\tmanager.dispatch(queueItem{ctx: context.Background(), record: Record{}})
+\tif replacement.calls != 1 {
+\t\tt.Fatalf("replacement calls after unregister = %d, want 1", replacement.calls)
+\t}
+
+\tmanager.RegisterNamed("lifecycle", first)
+\tmanager.dispatch(queueItem{ctx: context.Background(), record: Record{}})
+\tif first.calls != 1 {
+\t\tt.Fatalf("re-registered plugin calls = %d, want 1", first.calls)
+\t}
+}
+''')
 
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor.go'
 replace_once(
@@ -2459,6 +2569,71 @@ handler = ROOT / 'internal/api/handlers/management/handler.go'
 add_go_import(handler, '"net/http"\n', '\t"net/url"\n')
 replace_once(
     handler,
+    '''\tpluginReleaseCacheMu    sync.Mutex
+\tpluginReleaseCache      map[string]pluginReleaseCacheEntry
+}
+''',
+    '''\tpluginReleaseCacheMu    sync.Mutex
+\tpluginReleaseCache      map[string]pluginReleaseCacheEntry
+\tlifecycleContext        context.Context
+\tlifecycleCancel         context.CancelFunc
+\tlifecycleWG             sync.WaitGroup
+\tshutdownOnce            sync.Once
+}
+''',
+    'lifecycleContext        context.Context',
+)
+replace_once(
+    handler,
+    '''\th := &Handler{
+''',
+    '''\tlifecycleContext, lifecycleCancel := context.WithCancel(context.Background())
+
+\th := &Handler{
+''',
+    'lifecycleContext, lifecycleCancel := context.WithCancel(context.Background())',
+)
+replace_once(
+    handler,
+    '''\t\tallowRemoteOverride: envSecret != "",
+\t\tenvSecret:           envSecret,
+\t}
+''',
+    '''\t\tallowRemoteOverride: envSecret != "",
+\t\tenvSecret:           envSecret,
+\t\tlifecycleContext:    lifecycleContext,
+\t\tlifecycleCancel:     lifecycleCancel,
+\t}
+''',
+    'lifecycleContext:    lifecycleContext',
+)
+replace_go_function(
+    handler,
+    'func (h *Handler) startAttemptCleanup() {',
+    '''func (h *Handler) startAttemptCleanup() {
+\tif h == nil || h.lifecycleContext == nil {
+\t\treturn
+\t}
+\th.lifecycleWG.Add(1)
+\tgo func() {
+\t\tdefer h.lifecycleWG.Done()
+\t\tticker := time.NewTicker(attemptCleanupInterval)
+\t\tdefer ticker.Stop()
+\t\tfor {
+\t\t\tselect {
+\t\t\tcase <-h.lifecycleContext.Done():
+\t\t\t\treturn
+\t\t\tcase <-ticker.C:
+\t\t\t\th.purgeStaleAttempts()
+\t\t\t}
+\t\t}
+\t}()
+}
+''',
+    'case <-h.lifecycleContext.Done():',
+)
+replace_once(
+    handler,
     '''\t\tif provided == "" {
 \t\t\tprovided = c.GetHeader("X-Management-Key")
 \t\t}
@@ -2505,6 +2680,23 @@ replace_once(
 \th.startAttemptCleanup()
 \treturn h
 ''',
+)
+replace_once(
+    server,
+    '''\tlog.Debug("Stopping API server...")
+
+\tif s.keepAliveEnabled {
+''',
+    '''\tlog.Debug("Stopping API server...")
+\tdefer func() {
+\t\tif s.mgmt != nil {
+\t\t\ts.mgmt.Shutdown()
+\t\t}
+\t}()
+
+\tif s.keepAliveEnabled {
+''',
+    's.mgmt.Shutdown()',
 )
 
 run = ROOT / 'internal/cmd/run.go'
@@ -3269,7 +3461,10 @@ subprocess.run([
     'cmd/server/main.go',
     'internal/api/server.go',
     'internal/api/server_test.go',
+    'internal/api/handlers/management/account_inspection_scheduler.go',
+    'internal/api/handlers/management/account_inspection_scheduler_test.go',
     'internal/api/handlers/management/auth_files.go',
+    'internal/api/handlers/management/handler.go',
     'internal/api/handlers/management/plugin_quota.go',
     'internal/api/handlers/management/plugin_quota_test.go',
     'internal/config/sdk_config.go',
@@ -3303,6 +3498,8 @@ subprocess.run([
     'sdk/cliproxy/auth/conductor.go',
     'sdk/cliproxy/auth/scheduler.go',
     'sdk/cliproxy/auth/types.go',
+    'sdk/cliproxy/usage/manager.go',
+    'sdk/cliproxy/usage/manager_test.go',
     'sdk/pluginabi/types.go',
     'sdk/pluginapi/types.go',
 ], cwd=ROOT, check=True)

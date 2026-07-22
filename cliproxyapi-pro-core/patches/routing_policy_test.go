@@ -33,6 +33,48 @@ func TestRoutingProtectionProviders(t *testing.T) {
 	}
 }
 
+func TestRoutingPolicyControllerStopWaitsForInFlightUsage(t *testing.T) {
+	controller := &routingPolicyController{}
+	if !controller.beginUsage() {
+		t.Fatal("fresh controller rejected usage")
+	}
+	stopDone := make(chan struct{})
+	go func() {
+		controller.stop()
+		close(stopDone)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		controller.lifecycleMu.Lock()
+		stopped := controller.stopped
+		controller.lifecycleMu.Unlock()
+		if stopped {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("controller did not enter stopped state")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case <-stopDone:
+		t.Fatal("controller stopped before in-flight usage completed")
+	default:
+	}
+
+	controller.usageWG.Done()
+	select {
+	case <-stopDone:
+	case <-time.After(time.Second):
+		t.Fatal("controller did not stop after in-flight usage completed")
+	}
+	if controller.beginUsage() {
+		controller.usageWG.Done()
+		t.Fatal("stopped controller accepted new usage")
+	}
+}
+
 func TestNormalizeRoutingRequestProtectionConfig(t *testing.T) {
 	got := normalizeRoutingRequestProtectionConfig(config.RequestProtectionConfig{
 		Mode: "ENFORCE",

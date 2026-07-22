@@ -80,6 +80,36 @@ func testStatusCode(value int) *int {
 	return &value
 }
 
+func TestManagementHandlerShutdownReleasesBackgroundOwners(t *testing.T) {
+	t.Setenv("ACCOUNT_INSPECTION_SCHEDULE_PATH", filepath.Join(t.TempDir(), "schedule.json"))
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, nil)
+	scheduler := schedulerForHandler(h)
+	if scheduler == nil {
+		t.Fatal("scheduler was not registered")
+	}
+	if routingPolicyControllerForHandler(h) == nil {
+		t.Fatal("routing policy controller was not registered")
+	}
+
+	h.Shutdown()
+	h.Shutdown()
+
+	if schedulerForHandler(h) != nil {
+		t.Fatal("scheduler registration survived shutdown")
+	}
+	if routingPolicyControllerForHandler(h) != nil {
+		t.Fatal("routing policy controller registration survived shutdown")
+	}
+	select {
+	case <-h.lifecycleContext.Done():
+	default:
+		t.Fatal("handler lifecycle context was not canceled")
+	}
+	if err := scheduler.startRun(true); err == nil {
+		t.Fatal("shut down scheduler accepted a new run")
+	}
+}
+
 func TestPaginateAccountInspectionResultsReturnsRequestedPage(t *testing.T) {
 	results := []accountInspectionResult{
 		testInspectionResult("healthy-1", accountInspectionActionKeep, false, nil, false, ""),

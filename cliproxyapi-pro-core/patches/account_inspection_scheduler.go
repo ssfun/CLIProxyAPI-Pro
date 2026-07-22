@@ -307,6 +307,8 @@ type accountInspectionScheduler struct {
 	lastProgressBroadcastAt int64
 	xaiDeepProbeOnce        sync.Once
 	xaiDeepProbeGate        chan struct{}
+	runWG                   sync.WaitGroup
+	stopped                 bool
 }
 
 type accountInspectionAccount struct {
@@ -388,9 +390,37 @@ func (h *Handler) startAccountInspectionScheduler() {
 			embeddedusage.SetAuthRuntimeStateImportHandler(h.authManager.ApplyImportedRuntimeState)
 		}
 		scheduler.cleanupLegacyQuotaCaches(context.Background())
-		go scheduler.loop()
+		if h.lifecycleContext != nil {
+			h.lifecycleWG.Add(1)
+			go func() {
+				defer h.lifecycleWG.Done()
+				scheduler.loop(h.lifecycleContext)
+			}()
+		}
 	}
 	startRoutingPolicyController(h)
+}
+
+// Shutdown stops every background task owned by this management handler.
+// It is safe to call more than once.
+func (h *Handler) Shutdown() {
+	if h == nil {
+		return
+	}
+	h.shutdownOnce.Do(func() {
+		if h.lifecycleCancel != nil {
+			h.lifecycleCancel()
+		}
+		if scheduler := schedulerForHandler(h); scheduler != nil {
+			scheduler.shutdown()
+		}
+		h.lifecycleWG.Wait()
+		accountInspectionSchedulers.Delete(h)
+		stopRoutingPolicyController(h)
+		embeddedusage.SetAccountInspectionScheduleHandlers(nil, nil)
+		embeddedusage.SetAccountInspectionSnapshotHandlers(nil, nil)
+		embeddedusage.SetAuthRuntimeStateImportHandler(nil)
+	})
 }
 
 func schedulerForHandler(h *Handler) *accountInspectionScheduler {
@@ -1103,6 +1133,9 @@ func (s *accountInspectionScheduler) importSchedule(raw []byte) error {
 func (s *accountInspectionScheduler) update(schedule accountInspectionSchedule) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stopped {
+		return fmt.Errorf("account inspection scheduler is shut down")
+	}
 	previousNextRunAt := s.schedule.NextRunAt
 	s.schedule = normalizeAccountInspectionSchedule(schedule)
 	if s.schedule.Enabled && previousNextRunAt > 0 && schedule.NextRunAt == 0 {
@@ -1118,12 +1151,14 @@ func (s *accountInspectionScheduler) update(schedule accountInspectionSchedule) 
 	return nil
 }
 
-func (s *accountInspectionScheduler) loop() {
+func (s *accountInspectionScheduler) loop(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
 		s.maybeRunDue()
 		select {
+		case <-ctx.Done():
+			return
 		case <-ticker.C:
 		case <-s.trigger:
 		}
@@ -1134,16 +1169,26 @@ func (s *accountInspectionScheduler) maybeRunDue() {
 	s.mu.Lock()
 	schedule := s.schedule
 	running := s.isRunningLocked()
+	stopped := s.stopped
 	s.mu.Unlock()
-	if !schedule.Enabled || running || schedule.NextRunAt <= 0 || time.Now().UnixMilli() < schedule.NextRunAt {
+	if stopped || !schedule.Enabled || running || schedule.NextRunAt <= 0 || time.Now().UnixMilli() < schedule.NextRunAt {
 		return
 	}
 	go func() { _ = s.startRun(false) }()
 }
 
 func (s *accountInspectionScheduler) startRun(manual bool) error {
-	ctx, cancel := context.WithTimeout(context.Background(), accountInspectionMaxRunDuration)
+	baseContext := context.Background()
+	if s != nil && s.h != nil && s.h.lifecycleContext != nil {
+		baseContext = s.h.lifecycleContext
+	}
+	ctx, cancel := context.WithTimeout(baseContext, accountInspectionMaxRunDuration)
 	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		cancel()
+		return fmt.Errorf("account inspection scheduler is shut down")
+	}
 	if s.isRunningLocked() {
 		s.mu.Unlock()
 		cancel()
@@ -1162,16 +1207,36 @@ func (s *accountInspectionScheduler) startRun(manual bool) error {
 	s.status.Results = nil
 	s.healthCounts = accountInspectionHealthCounts{}
 	schedule := s.schedule
+	s.runWG.Add(2)
 	s.mu.Unlock()
 
 	go func() {
+		defer s.runWG.Done()
 		<-ctx.Done()
 		s.mu.Lock()
 		s.pause.Broadcast()
 		s.mu.Unlock()
 	}()
-	go s.run(ctx, cancel, schedule, manual)
+	go func() {
+		defer s.runWG.Done()
+		s.run(ctx, cancel, schedule, manual)
+	}()
 	return nil
+}
+
+func (s *accountInspectionScheduler) shutdown() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.stopped = true
+	cancel := s.cancel
+	s.pause.Broadcast()
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	s.runWG.Wait()
 }
 
 func (s *accountInspectionScheduler) appendLog(level string, message string) {

@@ -3,6 +3,7 @@ import {
   accountInspectionWebSocketProtocol,
   buildAccountInspectionLogsWebSocketUrl,
   nextAccountInspectionReconnectDelay,
+  refreshAccountInspectionAfterReconnect,
 } from '../src/services/api/accountInspection';
 
 describe('account inspection transport contract', () => {
@@ -20,5 +21,23 @@ describe('account inspection transport contract', () => {
     expect(nextAccountInspectionReconnectDelay(8000)).toBe(16000);
     expect(nextAccountInspectionReconnectDelay(20000)).toBe(30000);
     expect(nextAccountInspectionReconnectDelay(30000)).toBe(30000);
+  });
+
+  test('refreshes summary and current details after reconnect without discarding fallback state', async () => {
+    let summaryLoads = 0;
+    let detailLoads = 0;
+    await expect(
+      refreshAccountInspectionAfterReconnect(
+        async () => {
+          summaryLoads += 1;
+        },
+        async () => {
+          detailLoads += 1;
+          throw new Error('transient detail failure');
+        }
+      )
+    ).resolves.toBeUndefined();
+    expect(summaryLoads).toBe(1);
+    expect(detailLoads).toBe(1);
   });
 });
