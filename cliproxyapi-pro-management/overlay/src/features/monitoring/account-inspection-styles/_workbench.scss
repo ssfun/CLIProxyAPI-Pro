@@ -1,0 +1,890 @@
+.inspectionOperationGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.24fr) minmax(360px, 0.76fr);
+  align-items: stretch;
+  gap: 16px;
+  min-width: 0;
+}
+
+.operationMainColumn {
+  display: grid;
+  min-width: 0;
+}
+
+
+.cockpitHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  min-width: 0;
+}
+
+.cockpitHeader > div:first-child {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cockpitHeader h2 {
+  margin: 0;
+  color: var(--inspect-ink);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.cockpitHeader p {
+  margin: 0;
+  max-width: 760px;
+  color: var(--inspect-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.assetOverviewGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(360px, 0.92fr);
+  align-items: stretch;
+  gap: 16px;
+  min-width: 0;
+}
+
+.assetKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.professionalMetricCard {
+  --metric-accent: var(--inspect-accent);
+  --metric-accent-soft: rgba(37, 99, 235, 0.12);
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  min-height: 128px;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--metric-accent) 18%, var(--inspect-line));
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--metric-accent) 5%, var(--inspect-surface)), var(--inspect-surface));
+  box-shadow: var(--shadow);
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.professionalMetricCard:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--metric-accent) 32%, var(--inspect-line));
+  box-shadow: 0 16px 34px -28px var(--metric-accent);
+}
+
+.professionalMetricCard1,
+.professionalMetricCard4 {
+  --metric-accent: #2563eb;
+  --metric-accent-soft: rgba(37, 99, 235, 0.12);
+}
+
+.professionalMetricCard2,
+.professionalMetricCard5 {
+  --metric-accent: #16a34a;
+  --metric-accent-soft: rgba(22, 163, 74, 0.12);
+}
+
+.professionalMetricCard3,
+.professionalMetricCard6 {
+  --metric-accent: #d97706;
+  --metric-accent-soft: rgba(217, 119, 6, 0.12);
+}
+
+.professionalMetricHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.professionalMetricHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--inspect-ink);
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.professionalMetricIcon {
+  position: relative;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: var(--metric-accent-soft);
+  color: var(--metric-accent);
+}
+
+.professionalMetricIcon::before,
+.professionalMetricIcon::after {
+  content: '';
+  position: absolute;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.professionalMetricIcon::before {
+  left: 8px;
+  right: 8px;
+  bottom: 7px;
+  height: 4px;
+}
+
+.professionalMetricIcon::after {
+  width: 5px;
+  height: 12px;
+  right: 9px;
+  bottom: 10px;
+  box-shadow: -7px 4px 0 currentColor;
+}
+
+.professionalMetricBody {
+  display: grid;
+  gap: 8px;
+}
+
+.professionalMetricBody span {
+  color: var(--inspect-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.professionalMetricBody strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--inspect-ink);
+  font-size: 26px;
+  font-weight: 850;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.providerDistributionCard {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+  gap: 16px;
+  min-width: 0;
+  height: 360px;
+  padding: 20px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 12px;
+  background: var(--inspect-surface);
+  box-shadow: var(--shadow);
+}
+
+.providerDistributionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.providerDistributionHeader > div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.providerDistributionHeader h3 {
+  margin: 0;
+  color: var(--inspect-ink);
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.providerDistributionHeader p {
+  margin: 0;
+  color: var(--inspect-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.providerDistributionSelection:global(.btn) {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: 34px;
+  max-width: 220px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--inspect-accent) 18%, var(--inspect-line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--inspect-accent) 7%, var(--inspect-surface));
+  color: var(--inspect-accent);
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.providerDistributionSelection:global(.btn) > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.providerDistributionSelection:global(.btn) svg {
+  flex: 0 0 auto;
+}
+
+.providerDistributionSelection:global(.btn):hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--inspect-accent) 38%, var(--inspect-line));
+  background: color-mix(in srgb, var(--inspect-accent) 12%, var(--inspect-surface));
+  box-shadow: none;
+}
+
+.providerSelectorList {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.providerSelectorRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 0.45fr);
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--inspect-line) 78%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--inspect-surface-muted) 45%, var(--inspect-surface));
+  color: var(--inspect-ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.providerSelectorRow:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--inspect-accent) 28%, var(--inspect-line));
+  background: color-mix(in srgb, var(--inspect-accent) 5%, var(--inspect-surface));
+}
+
+.providerSelectorRowActive {
+  border-color: color-mix(in srgb, var(--inspect-accent) 44%, var(--inspect-line));
+  background: color-mix(in srgb, var(--inspect-accent) 9%, var(--inspect-surface));
+  box-shadow: 0 14px 28px -26px var(--inspect-accent);
+}
+
+.providerSelectorRow div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.providerSelectorRow strong,
+.providerSelectorRow span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.providerSelectorTitle {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.providerSelectorTitle img,
+.providerLogoFallback {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+}
+
+.providerSelectorTitle img {
+  display: block;
+  object-fit: contain;
+}
+
+.providerLogoFallback {
+  display: inline-grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--inspect-accent) 12%, var(--inspect-surface));
+  color: var(--inspect-accent);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.providerSelectorTitle strong {
+  color: var(--inspect-ink);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+
+.providerSelectorRow > span {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--inspect-line) 62%, transparent);
+}
+
+.providerSelectorRow > span i {
+  display: block;
+  width: var(--bar-width, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--bar-color, var(--inspect-accent));
+  transition: width 0.24s ease, background-color 0.24s ease;
+}
+
+.assetWorkbenchGrid,
+.actionWorkbenchGrid,
+.cockpitGrid,
+.workbenchGrid {
+  display: grid;
+  align-items: stretch;
+  gap: 16px;
+  min-width: 0;
+}
+
+.assetWorkbenchGrid,
+.actionWorkbenchGrid {
+  grid-template-columns: 1fr;
+}
+
+.cockpitGrid {
+  grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
+}
+
+.workbenchGrid {
+  grid-template-columns: minmax(0, 1.18fr) minmax(360px, 0.82fr);
+}
+
+.assetIntelligenceCard,
+.inspectionStatusCard,
+.inspectionControlCard,
+.actionStudioCard {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--inspect-line) 82%, transparent);
+  border-radius: 14px;
+  background: var(--inspect-surface);
+  box-shadow: 0 14px 32px -30px rgba(15, 23, 42, 0.55);
+}
+
+.operationMainStack,
+.actionStudioCard {
+  display: grid;
+  align-content: stretch;
+  gap: 12px;
+  min-width: 0;
+  min-height: 100%;
+}
+
+.operationMainStack {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.inspectionStatusCard {
+  gap: 14px;
+  border-color: color-mix(in srgb, var(--inspect-accent) 14%, var(--inspect-line));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--inspect-accent) 3%, var(--inspect-surface)), var(--inspect-surface));
+}
+
+.inspectionProgressHero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.progressRing {
+  --ring-track: color-mix(in srgb, var(--inspect-green) 14%, var(--inspect-line));
+  --ring-value: var(--inspect-green);
+  display: grid;
+  place-items: center;
+  width: 104px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: conic-gradient(var(--ring-value) var(--progress, 0%), var(--ring-track) 0);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--inspect-green) 14%, transparent);
+}
+
+.progressRing::before {
+  content: '';
+  grid-area: 1 / 1;
+  width: 74%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--inspect-surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--inspect-line) 70%, transparent);
+}
+
+.progressRing strong {
+  grid-area: 1 / 1;
+  z-index: 1;
+  color: var(--inspect-ink);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.inspectionStatusCopy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.inspectionStatusCopy strong {
+  color: var(--inspect-ink);
+  font-size: 20px;
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+.inspectionStatusCopy span,
+.inspectionStatusCopy small {
+  color: var(--inspect-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.inspectionConfigGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.inspectionConfigGrid span {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  min-height: 68px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--inspect-line) 66%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--inspect-surface-muted) 28%, var(--inspect-surface));
+}
+
+.inspectionConfigGrid small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--inspect-muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspectionConfigGrid strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--inspect-ink);
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+}
+
+.inspectionNextRunText {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  color: var(--inspect-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.inspectionNextRunText strong {
+  color: var(--inspect-ink);
+  font-weight: 750;
+}
+
+.inspectionControlCard {
+  gap: 12px;
+  border-color: color-mix(in srgb, var(--inspect-line-strong) 84%, transparent);
+  background: var(--inspect-surface);
+}
+
+.inspectionControlCard h3,
+.resultOverviewSection h3,
+.strategySectionHeader h3,
+.manualPendingSection h3 {
+  margin: 0;
+  color: var(--inspect-ink);
+  font-size: 15px;
+  font-weight: 750;
+  letter-spacing: 0;
+  line-height: 1.3;
+}
+
+.inspectionControlActions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.inspectionControlActions :global(.btn) {
+  min-height: 40px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 750;
+  box-shadow: none;
+}
+
+.inspectionControlActions :global(.btn:nth-child(1)) {
+  border-color: color-mix(in srgb, var(--inspect-green) 54%, var(--inspect-line-strong));
+  background: color-mix(in srgb, var(--inspect-green) 14%, var(--inspect-surface));
+  color: var(--inspect-green);
+}
+
+.inspectionControlActions :global(.btn:nth-child(1):hover:not(:disabled)) {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--inspect-green) 68%, var(--inspect-line-strong));
+  background: color-mix(in srgb, var(--inspect-green) 20%, var(--inspect-surface));
+}
+
+.inspectionControlActions :global(.btn:nth-child(2)) {
+  border-color: color-mix(in srgb, var(--inspect-amber) 48%, var(--inspect-line-strong));
+  background: color-mix(in srgb, var(--inspect-amber) 12%, var(--inspect-surface));
+  color: var(--inspect-amber);
+}
+
+.inspectionControlActions :global(.btn:nth-child(2):hover:not(:disabled)) {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--inspect-amber) 64%, var(--inspect-line-strong));
+  background: color-mix(in srgb, var(--inspect-amber) 18%, var(--inspect-surface));
+}
+
+.inspectionControlActions :global(.btn:nth-child(3)) {
+  border-color: color-mix(in srgb, var(--inspect-red) 46%, var(--inspect-line-strong));
+  background: color-mix(in srgb, var(--inspect-red) 11%, var(--inspect-surface));
+  color: var(--inspect-red);
+}
+
+.inspectionControlActions :global(.btn:nth-child(3):hover:not(:disabled)) {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--inspect-red) 62%, var(--inspect-line-strong));
+  background: color-mix(in srgb, var(--inspect-red) 17%, var(--inspect-surface));
+}
+
+.actionStudioCard {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.resultOverviewSection,
+.strategyResultSection,
+.manualPendingSection {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--inspect-line) 70%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--inspect-surface-muted) 22%, var(--inspect-surface));
+}
+
+.resultOverviewGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.resultOverviewGrid span {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  min-height: 68px;
+  padding: 12px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--inspect-accent) 14%, var(--inspect-line));
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--inspect-accent) 4%, var(--inspect-surface)), var(--inspect-surface));
+}
+
+.resultOverviewGrid span::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--inspect-accent);
+  opacity: 0.58;
+}
+
+.resultOverviewGrid small {
+  color: var(--inspect-muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.resultOverviewGrid strong {
+  color: var(--inspect-ink);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.resultOverviewGood {
+  border-color: color-mix(in srgb, var(--inspect-green) 38%, var(--inspect-line-strong)) !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--inspect-green) 9%, var(--inspect-surface)), var(--inspect-surface)) !important;
+}
+
+.resultOverviewGood::before {
+  background: var(--inspect-green) !important;
+}
+
+.resultOverviewGood strong {
+  color: var(--inspect-green) !important;
+}
+
+.resultOverviewWarn {
+  border-color: color-mix(in srgb, var(--inspect-amber) 38%, var(--inspect-line-strong)) !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--inspect-amber) 9%, var(--inspect-surface)), var(--inspect-surface)) !important;
+}
+
+.resultOverviewWarn::before {
+  background: var(--inspect-amber) !important;
+}
+
+.resultOverviewWarn strong {
+  color: var(--inspect-amber) !important;
+}
+
+.resultOverviewBad {
+  border-color: color-mix(in srgb, var(--inspect-red) 38%, var(--inspect-line-strong)) !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--inspect-red) 9%, var(--inspect-surface)), var(--inspect-surface)) !important;
+}
+
+.resultOverviewBad::before {
+  background: var(--inspect-red) !important;
+}
+
+.resultOverviewBad strong {
+  color: var(--inspect-red) !important;
+}
+
+.strategySectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.strategySectionHeader button,
+.strategyActivityRow button {
+  border: 0;
+  background: transparent;
+  color: var(--inspect-accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.strategyTotalsRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--inspect-line) 70%, transparent);
+}
+
+.strategyTotalsRow span {
+  min-width: 0;
+  overflow: hidden;
+  padding: 7px 6px;
+  border-radius: 8px;
+  background: var(--inspect-surface);
+  color: var(--inspect-muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.strategyActivityRow {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--inspect-line) 66%, transparent);
+  border-radius: 10px;
+  background: var(--inspect-surface);
+}
+
+.strategyActivityIcon {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--inspect-green);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--inspect-green) 12%, transparent);
+}
+
+.strategyActivityRow span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.strategyActivityRow strong {
+  min-width: 0;
+}
+
+.strategyActivityRow span {
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.strategyActivityRow strong {
+  color: var(--inspect-ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.manualPendingSection {
+  align-content: start;
+}
+
+.manualPendingList {
+  display: grid;
+  gap: 8px;
+}
+
+.manualPendingList span {
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--inspect-line) 62%, transparent);
+  border-radius: 9px;
+  background: var(--inspect-surface);
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.manualPendingActions {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+  padding: 14px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--inspect-line-strong) 14%, transparent);
+}
+
+.manualPendingActions :global(.btn) {
+  min-height: 36px;
+  border-radius: 9px;
+  padding-inline: 18px;
+}
+
+.manualPendingEmpty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  min-height: 136px;
+  padding: 16px;
+  border: 1px dashed color-mix(in srgb, var(--inspect-line-strong) 46%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--inspect-surface) 78%, var(--inspect-surface-muted));
+  color: var(--inspect-muted);
+  text-align: center;
+}
+
+.manualPendingEmpty span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--inspect-green) 10%, var(--inspect-surface));
+  color: var(--inspect-green);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.manualPendingEmpty strong {
+  color: var(--inspect-ink);
+  font-size: 13px;
+}
+
+.manualPendingEmpty small {
+  max-width: 260px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+
+.cockpitCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.cockpitCardHeader > div:first-child {
+  min-width: 0;
+}
+
+.cockpitCardHeader h3 {
+  margin: 0;
+  color: var(--inspect-ink);
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.cockpitCardHeader p {
+  margin: 6px 0 0;
+  color: var(--inspect-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}

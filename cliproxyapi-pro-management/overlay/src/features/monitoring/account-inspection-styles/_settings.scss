@@ -1,0 +1,381 @@
+.settingsWorkbenchHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--inspect-line) 72%, transparent);
+}
+
+.settingsWorkbenchHeader small {
+  width: fit-content;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--inspect-accent) 10%, transparent);
+  color: var(--inspect-accent);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.2;
+}
+
+.settingsWorkbenchHeader strong {
+  color: var(--inspect-ink);
+  font-size: 15px;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.settingsWorkbenchHeader span {
+  color: var(--inspect-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.settingsSplitGrid,
+.settingsThreeGrid,
+.settingsMatrixGrid,
+.settingsFocusGrid,
+.settingsAutomationGrid {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.settingsSplitGrid {
+  grid-template-columns: minmax(0, 1.35fr) minmax(220px, 0.65fr);
+}
+
+.settingsThreeGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.settingsMatrixGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.settingsFocusGrid,
+.settingsAutomationGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settingsFormPanel,
+.settingsFocusCard,
+.settingsAutomationCard,
+.settingsRiskPanel,
+.settingsInsightPanel {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--inspect-line) 72%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--inspect-surface-muted) 44%, var(--inspect-surface));
+}
+
+.settingsInsightPanel {
+  align-content: center;
+  background: color-mix(in srgb, var(--inspect-accent) 6%, var(--inspect-surface));
+}
+
+.settingsInsightPanel small,
+.settingsFocusCard span,
+.settingsAutomationCard span,
+.settingsRiskPanel span {
+  color: var(--inspect-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.settingsInsightPanel strong,
+.settingsFocusCard strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--inspect-ink);
+  font-size: 15px;
+  font-weight: 760;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+
+.settingsInsightPanel span {
+  color: var(--inspect-accent);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.settingsAutomationStack {
+  display: grid;
+  gap: 12px;
+}
+
+.settingsRiskPanel {
+  border-color: color-mix(in srgb, var(--inspect-amber) 22%, var(--inspect-line));
+  background: color-mix(in srgb, var(--inspect-amber) 4%, var(--inspect-surface));
+}
+
+.settingsPolicyControl {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+}
+
+.settingsLabel {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--inspect-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.settingsHint {
+  color: var(--inspect-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settingsDangerNote {
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--inspect-red) 32%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--inspect-red) 8%, transparent);
+  color: var(--inspect-red);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.settingsMutedField {
+  opacity: 0.58;
+}
+
+.settingsFormPanel :global(.form-group),
+.settingsFocusCard :global(.form-group),
+.settingsRiskPanel :global(.form-group),
+.settingsMatrixGrid :global(.form-group) {
+  margin-bottom: 0;
+}
+
+.settingsFormPanel :global(.input),
+.settingsFocusCard :global(.input),
+.settingsRiskPanel :global(.input),
+.settingsMatrixGrid :global(.input),
+.settingsFormPanel input,
+.settingsFocusCard input,
+.settingsRiskPanel input,
+.settingsMatrixGrid input {
+  min-height: 42px;
+}
+
+.settingsActionsBar {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 18px;
+  border: 1px solid color-mix(in srgb, var(--inspect-line) 74%, transparent);
+  border-top: 0;
+  border-radius: 0 0 18px 18px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--inspect-surface-elevated) 78%, transparent),
+      var(--inspect-surface-elevated) 38%
+    );
+}
+
+.settingsActionsRight {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.resultsHeaderActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.panelTitle {
+  font-size: 20px;
+}
+
+.panelSubtitle {
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.logList {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.logRow {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 16px;
+  background: var(--inspect-surface-muted);
+  font-size: 12px;
+}
+
+.logInfo {
+  color: var(--inspect-ink);
+}
+
+.logSuccess {
+  color: var(--inspect-green);
+}
+
+.logWarning {
+  color: var(--inspect-amber);
+  background: color-mix(in srgb, var(--inspect-amber) 10%, transparent);
+}
+
+.logError {
+  color: var(--inspect-red);
+  background: color-mix(in srgb, var(--inspect-red) 10%, transparent);
+}
+
+.logTime {
+  font-size: 12px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.logMessage {
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+.logCollapsedBar {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--inspect-surface-muted);
+  color: var(--inspect-muted);
+}
+
+.renderLimitHint {
+  padding: 10px 12px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 8px;
+  background: var(--inspect-surface-muted);
+  color: var(--inspect-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.previewSection {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--inspect-accent) 4%, var(--inspect-surface-muted));
+  border: 1px solid var(--inspect-line);
+}
+
+.previewHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.previewHeader strong {
+  font-size: 15px;
+}
+
+.previewHint {
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.previewList {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.previewList li {
+  line-height: 1.6;
+}
+
+.healthCell {
+  display: inline-flex;
+  align-items: flex-start;
+  max-width: 100%;
+}
+
+.healthBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.healthErrorButton {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.healthErrorButton:hover {
+  filter: brightness(0.97);
+}
+
+.healthErrorButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--inspect-red) 42%, var(--inspect-line));
+  outline-offset: 2px;
+}
+
+.healthHealthy {
+  background: color-mix(in srgb, var(--inspect-green) 12%, var(--inspect-surface));
+  color: var(--inspect-green);
+}
+
+.healthDisabled,
+.healthQuota {
+  background: color-mix(in srgb, var(--inspect-amber) 12%, var(--inspect-surface));
+  color: var(--inspect-amber);
+}
+
+.healthAuthInvalid,
+.healthError {
+  background: color-mix(in srgb, var(--inspect-red) 12%, var(--inspect-surface));
+  color: var(--inspect-red);
+}
+
+.healthRecoverable,
+.healthProcessed {
+  background: color-mix(in srgb, var(--inspect-accent) 12%, var(--inspect-surface));
+  color: var(--inspect-accent);
+}

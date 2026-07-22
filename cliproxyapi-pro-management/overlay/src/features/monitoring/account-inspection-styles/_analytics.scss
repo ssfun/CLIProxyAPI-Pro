@@ -1,0 +1,716 @@
+.assetIntelligenceLayout,
+.actionStudioLayout {
+  display: grid;
+  align-items: stretch;
+  gap: 16px;
+  min-width: 0;
+}
+
+.assetIntelligenceLayout {
+  grid-template-columns: minmax(260px, 0.82fr) minmax(0, 1.18fr);
+}
+
+.actionStudioLayout {
+  grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
+}
+
+.providerRankingPanel,
+.actionMetricStack {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--inspect-line) 76%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--inspect-surface-muted) 58%, var(--inspect-surface));
+}
+
+.providerRankingPanel .chartBarList {
+  max-height: 260px;
+  overflow: auto;
+}
+
+.actionMetricStack {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+.summaryGrid,
+.summaryGridCompact,
+.riskGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.assetOverviewLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.8fr);
+  gap: 16px;
+}
+
+.assetInsightsMain,
+.inspectionStatsMain {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.assetMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.assetMetricCard {
+  min-height: 112px;
+}
+
+.assetMetricCard strong {
+  font-size: 26px;
+}
+
+.chartGrid,
+.inspectionStatsLayout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.inspectionStatsLayout {
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.42fr);
+  align-items: stretch;
+}
+
+.chartPanel {
+  display: grid;
+  min-width: 0;
+  min-height: 260px;
+  padding: 20px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 12px;
+  background: var(--inspect-surface);
+  box-shadow: var(--shadow);
+  overflow: visible;
+}
+
+.chartDonutPanel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.chartDonutHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.chartDonutHeader strong {
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.chartDonutHeader span {
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.chartDonutLayout {
+  display: grid;
+  grid-template-columns: minmax(128px, 0.8fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+
+.donutChart {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(168px, 100%);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--donut-bg);
+}
+
+.donutChart::after {
+  content: '';
+  position: absolute;
+  inset: 22%;
+  border-radius: 50%;
+  background: var(--inspect-surface);
+  box-shadow: inset 0 0 0 1px var(--inspect-line);
+}
+
+.donutCenter {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 5px;
+  justify-items: center;
+  max-width: 78%;
+  text-align: center;
+}
+
+.donutCenter span {
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.donutCenter strong {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.donutTooltip {
+  position: absolute;
+  left: calc(100% + 14px);
+  top: 50%;
+  z-index: 5;
+  width: min(300px, calc(100vw - 48px));
+  max-height: 260px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--inspect-line);
+  background: color-mix(in srgb, var(--inspect-surface-elevated) 96%, var(--inspect-bg));
+  box-shadow: 0 18px 42px -26px rgba(15, 23, 42, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(0, -50%);
+  transition: opacity 0.16s ease;
+}
+
+.donutChart:hover .donutTooltip,
+.donutChart:focus-within .donutTooltip {
+  opacity: 1;
+}
+
+.donutTooltip strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--inspect-ink);
+  font-size: 12px;
+}
+
+.donutTooltip div {
+  display: grid;
+  gap: 7px;
+}
+
+.donutTooltip span {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.donutTooltip i,
+.chartLegendDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.donutTooltip em {
+  min-width: 0;
+  overflow: hidden;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.donutTooltip b {
+  color: var(--inspect-ink);
+  font-size: 12px;
+}
+
+.chartLegend,
+.chartBarList {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chartLegendItem {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.chartLegendDot {
+  background: var(--legend-color, var(--inspect-accent));
+}
+
+.chartLegendItem span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chartLegendItem strong {
+  color: var(--inspect-ink);
+  font-size: 12px;
+}
+
+.chartBarRow {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--inspect-line) 58%, transparent);
+}
+
+.chartBarRow:last-child {
+  border-bottom: 0;
+}
+
+.chartBarRow div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.chartBarRow div span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--inspect-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chartBarRow div strong {
+  color: var(--inspect-ink);
+  font-size: 13px;
+}
+
+.chartBarRow > span {
+  display: block;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--inspect-line) 58%, transparent);
+}
+
+.chartBarRow > span::before {
+  content: '';
+  display: block;
+  width: var(--bar-width, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--bar-color, var(--inspect-accent));
+}
+
+.providerPanel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 12px;
+  background: var(--inspect-surface);
+}
+
+.providerPanelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.providerPanelHeader strong {
+  font-size: 15px;
+}
+
+.providerPanelHeader span {
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.providerList {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.providerRow {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.2fr);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--inspect-line) 70%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--inspect-surface-muted) 50%, transparent);
+}
+
+.providerNameCell {
+  display: grid;
+  gap: 4px;
+}
+
+.providerNameCell strong {
+  font-size: 14px;
+}
+
+.providerNameCell span {
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.providerStatusGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  align-content: center;
+}
+
+.providerStatusGrid span {
+  color: var(--inspect-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.actionBreakdownGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.actionBreakdownCard {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--inspect-surface-muted) 58%, var(--inspect-surface));
+}
+
+.actionBreakdownCard strong {
+  font-size: 14px;
+}
+
+.actionBreakdownCard div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.actionBreakdownCard span {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--inspect-surface);
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.riskGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.summaryGrid {
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+}
+
+.summaryGridCompact {
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+}
+
+
+.summaryCard {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  border-radius: 8px;
+}
+
+.summaryCard span {
+  color: var(--inspect-muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.summaryCard strong {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: 0;
+}
+
+.summaryGood {
+  border-color: color-mix(in srgb, var(--inspect-green) 28%, var(--inspect-line));
+  background: color-mix(in srgb, var(--inspect-green) 7%, var(--inspect-surface));
+}
+
+.summaryWarn {
+  border-color: color-mix(in srgb, var(--inspect-amber) 30%, var(--inspect-line));
+  background: color-mix(in srgb, var(--inspect-amber) 7%, var(--inspect-surface));
+}
+
+.summaryBad {
+  border-color: color-mix(in srgb, var(--inspect-red) 30%, var(--inspect-line));
+  background: color-mix(in srgb, var(--inspect-red) 7%, var(--inspect-surface));
+}
+
+.riskCard {
+  min-height: 112px;
+}
+
+.riskCard strong {
+  font-size: 24px;
+}
+
+.controlPanel {
+  border-color: color-mix(in srgb, var(--inspect-accent) 16%, var(--inspect-line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--inspect-accent) 3%, var(--inspect-surface)),
+      var(--inspect-surface)
+    );
+}
+
+.policyBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--inspect-accent) 18%, var(--inspect-line));
+  background: color-mix(in srgb, var(--inspect-accent) 7%, var(--inspect-surface-muted));
+}
+
+.policyBanner strong {
+  color: var(--inspect-ink);
+  font-size: 14px;
+}
+
+.policyBanner span {
+  color: var(--inspect-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.panel {
+  display: grid;
+  gap: 16px;
+}
+
+.settingsModal :global(.modal-body) {
+  display: grid;
+  gap: 0;
+  max-height: min(78vh, 820px);
+  overflow: hidden;
+  padding: 0;
+}
+
+.settingsWorkbench {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-height: 620px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--inspect-line) 74%, transparent);
+  border-radius: 18px;
+  background: var(--inspect-surface);
+}
+
+.settingsSidebar {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  min-width: 0;
+  padding: 18px;
+  border-right: 1px solid color-mix(in srgb, var(--inspect-line) 74%, transparent);
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--inspect-accent) 12%, transparent), transparent 34%),
+    color-mix(in srgb, var(--inspect-surface-muted) 64%, var(--inspect-surface));
+}
+
+.settingsSidebarIntro {
+  display: grid;
+  gap: 8px;
+}
+
+.settingsSidebarIntro strong {
+  color: var(--inspect-ink);
+  font-size: 16px;
+  font-weight: 780;
+  line-height: 1.35;
+}
+
+.settingsSidebarIntro span {
+  color: var(--inspect-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.settingsSidebarNav {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.settingsSidebarNav button {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+}
+
+.settingsSidebarNav button:hover {
+  border-color: color-mix(in srgb, var(--inspect-accent) 18%, var(--inspect-line));
+  background: color-mix(in srgb, var(--inspect-accent) 7%, var(--inspect-surface));
+  transform: translateX(2px);
+}
+
+.settingsSidebarNav strong {
+  color: var(--inspect-ink);
+  font-size: 13px;
+  font-weight: 730;
+  line-height: 1.35;
+}
+
+.settingsSidebarNav span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--inspect-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settingsSidebarStatus {
+  display: grid;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--inspect-line) 72%, transparent);
+}
+
+.settingsSidebarStatus span,
+.settingsSummaryGrid span {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--inspect-line) 72%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--inspect-surface) 86%, var(--inspect-surface-muted));
+}
+
+.settingsSidebarStatus small,
+.settingsSummaryGrid small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--inspect-muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settingsSidebarStatus strong,
+.settingsSummaryGrid strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--inspect-ink);
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+
+.settingsWorkbenchMain {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+  max-height: 620px;
+  overflow: auto;
+  padding: 18px;
+  scroll-behavior: smooth;
+}
+
+.settingsHeroPanel,
+.settingsWorkbenchSection {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--inspect-line) 78%, transparent);
+  border-radius: 16px;
+  background: var(--inspect-surface-elevated);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--inspect-shadow) 6%, transparent);
+}
+
+.settingsHeroPanel {
+  padding: 16px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--inspect-accent) 8%, var(--inspect-surface-elevated)), var(--inspect-surface-elevated) 52%),
+    var(--inspect-surface-elevated);
+}
+
+.settingsHeroPanel > div:first-child,
+.settingsWorkbenchHeader > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.settingsHeroPanel > div:first-child strong {
+  color: var(--inspect-ink);
+  font-size: 17px;
+  font-weight: 780;
+  line-height: 1.35;
+}
+
+.settingsHeroPanel > div:first-child span {
+  color: var(--inspect-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.settingsSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settingsWorkbenchSection {
+  scroll-margin-top: 14px;
+  padding: 16px;
+}

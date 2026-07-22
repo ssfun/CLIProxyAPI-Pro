@@ -1,0 +1,379 @@
+@media (max-width: 1280px) {
+  .assetOverviewLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .assetMetricGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .assetOverviewGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .providerDistributionCard {
+    order: -1;
+  }
+
+  .assetKpiGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .cockpitGrid,
+  .workbenchGrid,
+  .inspectionOperationGrid,
+  .runControlCard,
+  .assetIntelligenceLayout,
+  .actionStudioLayout,
+  .chartGrid,
+  .inspectionStatsLayout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .heroHeader,
+  .panelHeader,
+  .cockpitHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .heroHeader,
+  .operationModuleHeader {
+    grid-template-columns: 1fr;
+  }
+
+  .operationModuleHeader > .foldButton {
+    justify-self: start;
+    width: fit-content;
+  }
+
+  .heroActions {
+    justify-content: flex-start;
+    width: fit-content;
+  }
+
+  .resultsHeaderActions {
+    width: fit-content;
+    max-width: 100%;
+  }
+
+  .resultFilterControl {
+    width: fit-content;
+    max-width: 100%;
+  }
+
+  .resultToolbar {
+    justify-content: flex-start;
+  }
+
+  .resultProviderSelect {
+    flex-basis: 160px;
+    width: 160px;
+  }
+
+  .heroActions,
+  .panelActions,
+  .resultsHeaderActions,
+  .logHeaderActions {
+    justify-content: flex-start;
+  }
+
+  .progressFooter {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .progressActions {
+    justify-content: flex-start;
+  }
+
+  .runControlCard .cockpitCardHeader {
+    grid-row: auto;
+  }
+
+  .providerDistributionHeader {
+    display: flex;
+    align-items: flex-start;
+    grid-template-columns: none;
+  }
+
+  .providerDistributionSelection:global(.btn) {
+    max-width: min(58%, 220px);
+  }
+
+  .providerSelectorRow {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .providerSelectorRow > span {
+    width: 100%;
+  }
+
+  .runStatusGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .runStatusPrimary {
+    grid-column: 1 / -1;
+  }
+
+  .runExecutionGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .summaryGrid,
+  .summaryGridCompact,
+  .riskGrid,
+  .assetMetricGrid,
+  .assetKpiGrid,
+  .actionBreakdownGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .chartGrid,
+  .inspectionStatsLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .policyBanner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .policyBanner span {
+    text-align: left;
+  }
+
+  .logRow {
+    grid-template-columns: 1fr;
+  }
+
+  .settingsWorkbench {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .settingsSidebar {
+    grid-template-rows: auto auto auto;
+    border-right: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--inspect-line) 74%, transparent);
+  }
+
+  .settingsSidebarNav {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .settingsSidebarNav button {
+    min-width: 170px;
+  }
+
+  .settingsSidebarStatus,
+  .settingsSummaryGrid,
+  .settingsThreeGrid,
+  .settingsMatrixGrid,
+  .settingsFocusGrid,
+  .settingsAutomationGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settingsSplitGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .panel,
+  .assetIntelligenceCard,
+  .runControlCard,
+  .actionStudioCard,
+  .executionTaskCard,
+  .providerPanel,
+  .providerDistributionCard {
+    padding: 16px;
+    border-radius: 12px;
+  }
+
+  .professionalMetricCard {
+    min-height: 112px;
+    padding: 16px;
+  }
+
+  .cockpitHeader h2 {
+    font-size: 20px;
+  }
+
+  .cockpitCardHeader {
+    flex-direction: column;
+  }
+
+  .inspectionConfigGrid,
+  .resultOverviewGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .inspectionControlActions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .inspectionControlActions :global(.btn:first-child) {
+    grid-column: 1 / -1;
+  }
+
+  .strategyTotalsRow {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .strategyTotalsRow::-webkit-scrollbar {
+    display: none;
+  }
+
+  .strategyActivityRow,
+  .inspectionOperationGrid .actionBreakdownCard div {
+    grid-template-columns: 1fr;
+  }
+
+  .strategyActivityRow {
+    justify-items: start;
+  }
+
+  .executionTaskGrid,
+  .runStatusGrid,
+  .summaryGrid,
+  .summaryGridCompact,
+  .riskGrid,
+  .assetMetricGrid,
+  .actionBreakdownGrid,
+  .runControlCard,
+  .chartGrid,
+  .inspectionStatsLayout,
+  .providerRow,
+  .providerStatusGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .assetKpiGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .chartPanel {
+    padding: 16px;
+  }
+
+  .heroTitle {
+    font-size: 28px;
+  }
+
+  .progressActions :global(.btn) {
+    flex: 1 1 140px;
+  }
+
+  .heroActionButton:global(.btn) {
+    flex: 0 0 auto;
+  }
+
+  .table {
+    min-width: 980px;
+  }
+
+  .confirmationStats,
+  .confirmationPreviewRow {
+    grid-template-columns: 1fr;
+  }
+
+  .confirmationStats span,
+  .confirmationPreviewRow strong {
+    text-align: left;
+  }
+
+  .emptyState {
+    padding: 22px 16px;
+  }
+
+  .settingsSummaryGrid,
+  .settingsSidebarStatus,
+  .settingsThreeGrid,
+  .settingsMatrixGrid,
+  .settingsFocusGrid,
+  .settingsAutomationGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .settingsModal :global(.modal-body) {
+    display: block;
+    max-height: min(72vh, calc(100vh - 132px));
+    overflow-y: auto;
+    padding: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  @supports (height: 100dvh) {
+    .settingsModal :global(.modal-body) {
+      max-height: min(72dvh, calc(100dvh - 132px));
+    }
+  }
+
+  .settingsWorkbench {
+    display: block;
+    max-height: none;
+    min-height: 0;
+    overflow: visible;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .settingsSidebar {
+    display: none;
+  }
+
+  .settingsWorkbenchMain {
+    display: grid;
+    max-height: none;
+    overflow: visible;
+    padding: 14px;
+  }
+
+  .settingsWorkbenchSection,
+  .settingsHeroPanel {
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .settingsWorkbenchHeader {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .settingsActionsBar {
+    position: sticky;
+    bottom: 0;
+    display: grid;
+    grid-template-columns: minmax(96px, auto) minmax(0, 1fr);
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px 14px 14px;
+    border-radius: 0 0 14px 14px;
+    background: var(--inspect-surface-elevated);
+  }
+
+  .settingsActionsBar > :global(button) {
+    width: auto;
+    min-width: 96px;
+  }
+
+  .settingsActionsRight {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    width: auto;
+    gap: 8px;
+  }
+
+  .settingsActionsRight :global(button) {
+    width: 100%;
+  }
+}
