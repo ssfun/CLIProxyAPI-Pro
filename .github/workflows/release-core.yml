@@ -608,13 +608,15 @@ jobs:
       - name: Build FreeBSD plugin-capable binary
         if: matrix.kind == 'freebsd-plugin'
         uses: go-cross/cgo-actions@d0b8f2f2d67923ce9a42d92a7ef0ed1ebd905f0a # v1
+        env:
+          GOFLAGS: -buildvcs=false -trimpath
         with:
           dir: upstream-core
           packages: ./cmd/server/
           targets: ${{ matrix.goos }}-${{ matrix.goarch }}
           out-dir: upstream-core/dist/${{ matrix.target }}/bin
           output: cli-proxy-api
-          flags: -buildvcs=false -trimpath -ldflags=-s -w
+          flags: -ldflags=-s -w
           x-flags: |
             main.Version=${{ needs.check-version.outputs.release_tag }}
             main.Commit=release-${{ needs.check-version.outputs.core_tag }}
