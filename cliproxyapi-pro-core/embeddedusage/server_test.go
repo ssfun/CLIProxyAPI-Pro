@@ -131,7 +131,7 @@ func TestUsageImportDoesNotWriteBeforeRequestIsFullyRead(t *testing.T) {
 func TestUsageImportDoesNotTreatUnknownRecordAsEvent(t *testing.T) {
 	store := openTestStore(t)
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/usage/import", strings.NewReader(`{"record_type":"future_record","model":"must-not-import"}`))
+	request := httptest.NewRequest(http.MethodPost, "/usage/import?allow_legacy=1", strings.NewReader(`{"record_type":"future_record","model":"must-not-import"}`))
 	testUsageRouter(store).ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 legacy-compatible response; body=%s", recorder.Code, recorder.Body.String())
@@ -145,6 +145,38 @@ func TestUsageImportDoesNotTreatUnknownRecordAsEvent(t *testing.T) {
 	events, _, err := store.Counts(context.Background())
 	if err != nil || events != 0 {
 		t.Fatalf("Counts() = %d, _, %v; unknown record must not become an event", events, err)
+	}
+}
+
+func TestUsageImportRequiresManifestUnlessLegacyIsExplicitlyAllowed(t *testing.T) {
+	event, err := json.Marshal(testUsageEvent(0, false, 10))
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	store := openTestStore(t)
+	router := testUsageRouter(store)
+
+	rejected := httptest.NewRecorder()
+	router.ServeHTTP(rejected, httptest.NewRequest(http.MethodPost, "/usage/import", bytes.NewReader(event)))
+	if rejected.Code != http.StatusBadRequest || !strings.Contains(rejected.Body.String(), "backup manifest is required") {
+		t.Fatalf("default import status = %d, body=%s", rejected.Code, rejected.Body.String())
+	}
+	events, _, err := store.Counts(context.Background())
+	if err != nil || events != 0 {
+		t.Fatalf("Counts() after rejected legacy import = %d, _, %v", events, err)
+	}
+
+	allowed := httptest.NewRecorder()
+	router.ServeHTTP(allowed, httptest.NewRequest(http.MethodPost, "/usage/import?allow_legacy=1", bytes.NewReader(event)))
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("explicit legacy import status = %d, body=%s", allowed.Code, allowed.Body.String())
+	}
+	var result struct {
+		LegacyBackup bool `json:"legacyBackup"`
+		Added        int  `json:"added"`
+	}
+	if err := json.Unmarshal(allowed.Body.Bytes(), &result); err != nil || !result.LegacyBackup || result.Added != 1 {
+		t.Fatalf("legacy import result = %+v, %v", result, err)
 	}
 }
 
@@ -702,7 +734,7 @@ func TestUsageImportFlushesQueuedRuntimeStateBeforeExplicitRestore(t *testing.T)
 
 	router := testUsageRouter(targetStore)
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/usage/import", bytes.NewReader(exported))
+	request := httptest.NewRequest(http.MethodPost, "/usage/import?allow_legacy=1", bytes.NewReader(exported))
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())

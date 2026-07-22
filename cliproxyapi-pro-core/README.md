@@ -77,7 +77,7 @@ internal/embeddedusage
 - `account_inspection_schedule` — 后端账号巡检调度设置。
 - `account_inspection_snapshot` — 最近一次已结束的账号巡检结果，包含运行设置、汇总、健康统计、完整结果和原始错误详情，不包含巡检日志。
 
-`/usage/import` 接受同样的 JSONL 格式。导入时会先完整读取和校验请求，再导入 usage events，恢复模型价格、quota cache entries、运行时路由状态、监控设置、账号巡检调度和最近一次巡检结果快照。路由游标与账号运行统计在同一个 SQLite 事务中恢复。恢复的结果快照为只读；发起新的完整巡检后才允许重检、刷新令牌或执行账号变更。旧版无 manifest 的 event-only 或混合 JSONL 仍可导入，但无法获得文件级完整性校验。
+`/usage/import` 接受同样的 JSONL 格式。导入时会先完整读取和校验请求，再导入 usage events，恢复模型价格、quota cache entries、运行时路由状态、监控设置、账号巡检调度和最近一次巡检结果快照。路由游标与账号运行统计在同一个 SQLite 事务中恢复。恢复的结果快照为只读；发起新的完整巡检后才允许重检、刷新令牌或执行账号变更。无 manifest 的旧版 event-only 或混合 JSONL 默认拒绝，因为它们无法获得文件级完整性校验；可信旧备份可显式使用 `?allow_legacy=1` 或 `X-CLIProxy-Allow-Legacy-Backup: true` 请求头导入，管理端会在启用兼容模式前要求确认。
 
 导入响应示例字段：
 
@@ -96,7 +96,8 @@ internal/embeddedusage
   "accountInspectionSnapshot": true,
   "accountInspectionSnapshotRecords": 1,
   "monitoringSettings": true,
-  "monitoringSettingsRecords": 1
+  "monitoringSettingsRecords": 1,
+  "legacyBackup": false
 }
 ```
 
@@ -267,6 +268,7 @@ docker build \
 - `WEBDAV_USERNAME`
 - `WEBDAV_PASSWORD`
 - `MANAGEMENT_PASSWORD`
+- `USAGE_ALLOW_LEGACY_RESTORE` — 可选，默认 `false`；仅在需要自动导入可信的无 manifest 旧备份时设为 `true`。
 
 恢复文件查找同时支持：
 
@@ -274,6 +276,8 @@ docker build \
 usage-export-YYYYMMDD_HHMMSS.json
 usage-export-YYYYMMDD_HHMMSS.jsonl
 ```
+
+自动恢复默认只导入带 manifest 的备份。无 manifest 文件会被跳过；只有设置 `USAGE_ALLOW_LEGACY_RESTORE=true` 时，entrypoint 才会调用 `/usage/import?allow_legacy=1`，并在日志中明确记录正在使用未经完整性校验的兼容路径。
 
 导入请求使用：
 

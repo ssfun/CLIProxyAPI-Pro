@@ -268,6 +268,8 @@ It stores:
 
 Usage export/import uses NDJSON metadata records for model prices, quota cache, monitoring settings, the account-inspection schedule, and the latest finished inspection-result snapshot, so WebDAV backup restore can recover the monitoring-related state together with usage events. Restored inspection snapshots are read-only for migration and troubleshooting; a new full inspection must run before rechecking accounts, refreshing tokens, or changing account state. Inspection logs are not included. Monitoring log retention runs daily at 02:00 server local time and also runs once immediately when settings are saved; WebDAV backups can use separate retention days, deleting expired `usage-export-*.jsonl` files after successful backups.
 
+New exports include an integrity manifest. Import and automatic WebDAV restore reject manifest-free legacy backups by default; set `USAGE_ALLOW_LEGACY_RESTORE=true` only when one trusted legacy backup must be restored automatically.
+
 Configure a persistent volume for this directory in production.
 
 ## Key environment variables
@@ -290,6 +292,7 @@ WEBDAV_URL
 WEBDAV_USERNAME
 WEBDAV_PASSWORD
 MANAGEMENT_PASSWORD
+USAGE_ALLOW_LEGACY_RESTORE
 ```
 
 ### Account inspection

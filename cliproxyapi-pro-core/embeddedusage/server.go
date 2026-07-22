@@ -202,6 +202,14 @@ func parseQueryIntSigned(c *gin.Context, key string, fallback int) int {
 	return parsed
 }
 
+func allowLegacyUsageImport(c *gin.Context) bool {
+	value := strings.ToLower(strings.TrimSpace(c.Query("allow_legacy")))
+	if value == "" {
+		value = strings.ToLower(strings.TrimSpace(c.GetHeader("X-CLIProxy-Allow-Legacy-Backup")))
+	}
+	return value == "1" || value == "true" || value == "yes" || value == "on"
+}
+
 func usageEventPageLimit(requestedLimit int) int {
 	if requestedLimit <= 0 || requestedLimit > usageEventsPageLimit {
 		return usageEventsPageLimit
@@ -854,6 +862,12 @@ func (s *Server) handleUsageImport(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if manifest == nil && !allowLegacyUsageImport(c) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "backup manifest is required; retry with allow_legacy=1 only for a trusted legacy backup",
+		})
+		return
+	}
 	if manifest != nil {
 		actualHash := fmt.Sprintf("%x", hasher.Sum(nil))
 		if failed > 0 || hashedRecords != manifest.Records || actualHash != manifest.SHA256 {
@@ -996,6 +1010,7 @@ func (s *Server) handleUsageImport(c *gin.Context) {
 		"accountInspectionSnapshotRecords": accountInspectionSnapshotRecords,
 		"monitoringSettings":               monitoringSettings != nil,
 		"monitoringSettingsRecords":        monitoringSettingsRecords,
+		"legacyBackup":                     manifest == nil,
 	})
 }
 

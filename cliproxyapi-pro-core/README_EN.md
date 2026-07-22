@@ -77,7 +77,7 @@ The export contains usage events and may also include metadata records:
 - `account_inspection_schedule` — persisted backend account-inspection schedule.
 - `account_inspection_snapshot` — the latest finished inspection result, including run settings, summary, health counts, complete results, and raw error details, but excluding inspection logs.
 
-`/usage/import` accepts the same JSONL format. It reads and verifies the complete request before writing, then imports usage events and restores model prices, quota cache entries, routing runtime state, monitoring settings, the account-inspection schedule, and the latest inspection-result snapshot when present. Routing cursors and account runtime statistics are restored in one SQLite transaction. A restored result snapshot is read-only until a new full inspection runs. Older manifest-free event-only and mixed JSONL files remain compatible, but cannot receive file-level integrity verification.
+`/usage/import` accepts the same JSONL format. It reads and verifies the complete request before writing, then imports usage events and restores model prices, quota cache entries, routing runtime state, monitoring settings, the account-inspection schedule, and the latest inspection-result snapshot when present. Routing cursors and account runtime statistics are restored in one SQLite transaction. A restored result snapshot is read-only until a new full inspection runs. Manifest-free event-only and mixed JSONL files are rejected by default because they cannot receive file-level integrity verification. A trusted legacy backup can be imported explicitly with `?allow_legacy=1` or the `X-CLIProxy-Allow-Legacy-Backup: true` header; the management UI asks for confirmation before using this compatibility mode.
 
 Example import response fields:
 
@@ -96,7 +96,8 @@ Example import response fields:
   "accountInspectionSnapshot": true,
   "accountInspectionSnapshotRecords": 1,
   "monitoringSettings": true,
-  "monitoringSettingsRecords": 1
+  "monitoringSettingsRecords": 1,
+  "legacyBackup": false
 }
 ```
 
@@ -252,6 +253,7 @@ When all variables below are configured, `entrypoint.sh` waits for the local API
 - `WEBDAV_USERNAME`
 - `WEBDAV_PASSWORD`
 - `MANAGEMENT_PASSWORD`
+- `USAGE_ALLOW_LEGACY_RESTORE` — optional, default `false`; set to `true` only to automatically import a trusted manifest-free legacy backup.
 
 Restore lookup supports both backup names:
 
@@ -259,6 +261,8 @@ Restore lookup supports both backup names:
 usage-export-YYYYMMDD_HHMMSS.json
 usage-export-YYYYMMDD_HHMMSS.jsonl
 ```
+
+Automatic restore imports manifest-backed backups by default. A manifest-free backup is skipped unless `USAGE_ALLOW_LEGACY_RESTORE=true`; when enabled, the entrypoint calls `/usage/import?allow_legacy=1` and logs that the unverified compatibility path is in use.
 
 The import request uses:
 

@@ -215,7 +215,11 @@ func maxPricingInt64(left, right int64) int64 {
 }
 
 func (s *Store) activeModelPriceRules(ctx context.Context, preserveProvider bool) ([]ModelPriceRule, error) {
-	rows, err := s.db.QueryContext(ctx, `select v.id, a.provider, a.model, v.rule_json, a.source, a.source_provider, a.source_model,
+	return activeModelPriceRulesFrom(ctx, s.db, preserveProvider)
+}
+
+func activeModelPriceRulesFrom(ctx context.Context, queryer sqlQueryer, preserveProvider bool) ([]ModelPriceRule, error) {
+	rows, err := queryer.QueryContext(ctx, `select v.id, a.provider, a.model, v.rule_json, a.source, a.source_provider, a.source_model,
 		a.locked, a.active_version, v.effective_from_ms, a.fetched_at_ms, a.upstream_updated, a.updated_at_ms
 		from model_price_rules a join model_price_rule_versions v
 		on v.provider = a.provider and v.model = a.model and v.version = a.active_version

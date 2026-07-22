@@ -714,6 +714,61 @@ func TestRoutingCursorAndAuthRuntimeStatsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestUsageExportSnapshotKeepsAdjacentWritesOutOfEveryRecordType(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	initial := defaultMonitoringSettings()
+	initial.RetentionDays = 7
+	if err := store.SetMonitoringSettings(ctx, initial); err != nil {
+		t.Fatalf("SetMonitoringSettings(initial) error = %v", err)
+	}
+
+	eventsRead := make(chan struct{})
+	continueExport := make(chan struct{})
+	snapshotResult := make(chan usageExportSnapshot, 1)
+	snapshotError := make(chan error, 1)
+	go func() {
+		snapshot, err := store.readUsageExportSnapshot(ctx, func() {
+			close(eventsRead)
+			<-continueExport
+		})
+		snapshotResult <- snapshot
+		snapshotError <- err
+	}()
+	<-eventsRead
+
+	updated := initial
+	updated.RetentionDays = 30
+	writeStarted := make(chan struct{})
+	writeDone := make(chan error, 1)
+	go func() {
+		close(writeStarted)
+		writeDone <- store.SetMonitoringSettings(ctx, updated)
+	}()
+	<-writeStarted
+	select {
+	case err := <-writeDone:
+		t.Fatalf("adjacent write completed inside export transaction: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(continueExport)
+
+	snapshot := <-snapshotResult
+	if err := <-snapshotError; err != nil {
+		t.Fatalf("readUsageExportSnapshot() error = %v", err)
+	}
+	if snapshot.Settings.RetentionDays != initial.RetentionDays {
+		t.Fatalf("snapshot retention = %d, want %d", snapshot.Settings.RetentionDays, initial.RetentionDays)
+	}
+	if err := <-writeDone; err != nil {
+		t.Fatalf("SetMonitoringSettings(updated) error = %v", err)
+	}
+	current, err := store.GetMonitoringSettings(ctx)
+	if err != nil || current.RetentionDays != updated.RetentionDays {
+		t.Fatalf("current settings = %+v, %v; want updated retention", current, err)
+	}
+}
+
 func TestQueuedAuthRuntimeDeleteCannotBeOverwrittenByPendingSnapshot(t *testing.T) {
 	store := openTestStore(t)
 	ctx, cancel := context.WithCancel(context.Background())

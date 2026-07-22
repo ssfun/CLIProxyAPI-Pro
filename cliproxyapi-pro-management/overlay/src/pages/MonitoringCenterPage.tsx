@@ -33,6 +33,7 @@ import {
 } from '@/features/monitoring/hooks/useMonitoringData';
 import { useUsageData, type UsageEventPageFilters, type UsagePayload } from '@/features/monitoring/hooks/useUsageData';
 import { useUsageAggregates, type UsageAggregateBucket } from '@/features/monitoring/hooks/useUsageAggregates';
+import { hasUsageBackupManifest } from '@/features/monitoring/usageBackup';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { apiClient } from '@/services/api/client';
 import { useAuthStore, useConfigStore, useNotificationStore, useQuotaStore } from '@/stores';
@@ -917,8 +918,8 @@ type UsageImportResult = {
   total?: number;
   failed?: number;
   modelPrices?: number;
-	modelPriceRecords?: number;
-	modelPriceRules?: number;
+  modelPriceRecords?: number;
+  modelPriceRules?: number;
   quotaCache?: number;
   quotaCacheRecords?: number;
   routingCursors?: number;
@@ -931,6 +932,7 @@ type UsageImportResult = {
   accountInspectionSnapshotRecords?: number;
   monitoringSettings?: boolean;
   monitoringSettingsRecords?: number;
+  legacyBackup?: boolean;
 };
 
 type UsageResetResult = {
@@ -4208,54 +4210,73 @@ export function MonitoringCenterPage() {
     importInputRef.current?.click();
   }, [connectionStatus, showNotification, t]);
 
+  const executeUsageImport = useCallback(async (content: string, allowLegacy: boolean) => {
+    setIsImportingUsage(true);
+    try {
+      const result = await apiClient.post<UsageImportResult>('/usage/import', content, {
+        headers: { 'Content-Type': 'application/x-ndjson' },
+        params: allowLegacy ? { allow_legacy: 1 } : undefined,
+      });
+      const importedExtras = [
+        (result.modelPriceRecords ?? 0) > 0 ? t('usage_stats.import_model_prices_restored', { count: Math.max(result.modelPrices ?? 0, result.modelPriceRules ?? 0) }) : '',
+        (result.quotaCacheRecords ?? 0) > 0 ? t('usage_stats.import_quota_cache_restored', { count: result.quotaCache ?? 0 }) : '',
+        (result.routingCursorRecords ?? 0) > 0 ? t('usage_stats.import_routing_cursors_restored', { count: result.routingCursors ?? 0 }) : '',
+        (result.authRuntimeStatsRecords ?? 0) > 0 ? t('usage_stats.import_auth_runtime_stats_restored', { count: result.authRuntimeStats ?? 0 }) : '',
+        result.accountInspectionSchedule ? t('usage_stats.import_account_inspection_schedule_restored') : '',
+        result.accountInspectionSnapshot ? t('usage_stats.import_account_inspection_snapshot_restored') : '',
+        result.monitoringSettings ? t('usage_stats.import_monitoring_settings_restored') : '',
+      ].filter(Boolean).join(' · ');
+      showNotification(
+        [
+          t('usage_stats.import_success', {
+            added: result.added ?? 0,
+            skipped: result.skipped ?? 0,
+            total: result.total ?? 0,
+            failed: result.failed ?? 0,
+          }),
+          importedExtras,
+        ].filter(Boolean).join(' · '),
+        (result.failed ?? 0) > 0 ? 'warning' : 'success'
+      );
+      quotaPersistenceMiddleware.markStale();
+      await quotaPersistenceMiddleware.ensureFresh();
+      await refreshAll();
+    } catch (error) {
+      showNotification(error instanceof Error ? error.message : String(error || t('common.unknown_error')), 'error');
+    } finally {
+      setIsImportingUsage(false);
+    }
+  }, [refreshAll, showNotification, t]);
+
   const handleImportUsageFile = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       event.target.value = '';
       if (!file) return;
 
-      setIsImportingUsage(true);
       try {
         const content = await file.text();
         if (!content.trim()) {
           showNotification(t('usage_stats.import_invalid'), 'error');
           return;
         }
-
-        const result = await apiClient.post<UsageImportResult>('/usage/import', content, {
-          headers: { 'Content-Type': 'application/x-ndjson' },
-        });
-        const importedExtras = [
-		  (result.modelPriceRecords ?? 0) > 0 ? t('usage_stats.import_model_prices_restored', { count: Math.max(result.modelPrices ?? 0, result.modelPriceRules ?? 0) }) : '',
-          (result.quotaCacheRecords ?? 0) > 0 ? t('usage_stats.import_quota_cache_restored', { count: result.quotaCache ?? 0 }) : '',
-          (result.routingCursorRecords ?? 0) > 0 ? t('usage_stats.import_routing_cursors_restored', { count: result.routingCursors ?? 0 }) : '',
-          (result.authRuntimeStatsRecords ?? 0) > 0 ? t('usage_stats.import_auth_runtime_stats_restored', { count: result.authRuntimeStats ?? 0 }) : '',
-          result.accountInspectionSchedule ? t('usage_stats.import_account_inspection_schedule_restored') : '',
-          result.accountInspectionSnapshot ? t('usage_stats.import_account_inspection_snapshot_restored') : '',
-          result.monitoringSettings ? t('usage_stats.import_monitoring_settings_restored') : '',
-        ].filter(Boolean).join(' · ');
-        showNotification(
-          [
-            t('usage_stats.import_success', {
-              added: result.added ?? 0,
-              skipped: result.skipped ?? 0,
-              total: result.total ?? 0,
-              failed: result.failed ?? 0,
-            }),
-            importedExtras,
-          ].filter(Boolean).join(' · '),
-          (result.failed ?? 0) > 0 ? 'warning' : 'success'
-        );
-        quotaPersistenceMiddleware.markStale();
-        await quotaPersistenceMiddleware.ensureFresh();
-        await refreshAll();
+        if (!hasUsageBackupManifest(content)) {
+          showConfirmation({
+            title: t('usage_stats.import_legacy_confirm_title'),
+            message: t('usage_stats.import_legacy_confirm_message'),
+            confirmText: t('usage_stats.import_legacy_confirm_button'),
+            cancelText: t('common.cancel'),
+            variant: 'danger',
+            onConfirm: () => executeUsageImport(content, true),
+          });
+          return;
+        }
+        await executeUsageImport(content, false);
       } catch (error) {
         showNotification(error instanceof Error ? error.message : String(error || t('common.unknown_error')), 'error');
-      } finally {
-        setIsImportingUsage(false);
       }
     },
-    [refreshAll, showNotification, t]
+    [executeUsageImport, showConfirmation, showNotification, t]
   );
 
   const handleCopyRealtimeDiagnostic = useCallback((row: RealtimeLogRow) => {
