@@ -4691,17 +4691,13 @@ func buildGeminiCLIQuotaBuckets(body string) ([]map[string]any, *float64, error)
 		return nil, nil, fmt.Errorf("empty Gemini CLI quota buckets")
 	}
 	type geminiBucketGroup struct {
-		ID                       string
-		Label                    string
-		TokenType                string
-		ModelIDs                 []string
-		PreferredModelID         string
-		PreferredRemaining       *float64
-		PreferredRemainingAmount any
-		PreferredResetTime       string
-		FallbackRemaining        *float64
-		FallbackRemainingAmount  any
-		FallbackResetTime        string
+		ID              string
+		Label           string
+		TokenType       string
+		ModelIDs        []string
+		Remaining       *float64
+		RemainingAmount *float64
+		ResetTime       string
 	}
 	groups := make(map[string]*geminiBucketGroup)
 	for _, rawBucket := range rawBuckets {
@@ -4714,47 +4710,35 @@ func buildGeminiCLIQuotaBuckets(body string) ([]map[string]any, *float64, error)
 			continue
 		}
 		tokenType := stringFromAny(firstAny(bucket, "tokenType", "token_type"))
-		groupID, label, preferredModelID := geminiCLIQuotaGroupMeta(modelID)
+		groupID, label := geminiCLIQuotaGroupMeta(modelID)
 		mapKey := groupID + "::" + tokenType
 		group := groups[mapKey]
 		if group == nil {
-			group = &geminiBucketGroup{ID: groupID, Label: label, TokenType: tokenType, PreferredModelID: preferredModelID}
+			group = &geminiBucketGroup{ID: groupID, Label: label, TokenType: tokenType}
 			groups[mapKey] = group
 		}
 		group.ModelIDs = append(group.ModelIDs, modelID)
 		remaining := geminiCLIRemainingFraction(bucket)
-		remainingAmount := firstAny(bucket, "remainingAmount", "remaining_amount")
+		var remainingAmount *float64
+		if value, ok := floatFromAny(firstAny(bucket, "remainingAmount", "remaining_amount")); ok {
+			remainingAmount = &value
+		}
 		resetTime := stringFromAny(firstAny(bucket, "resetTime", "reset_time"))
-		group.FallbackRemaining = minFloatPtr(group.FallbackRemaining, remaining)
-		group.FallbackResetTime = pickEarlierResetTime(group.FallbackResetTime, resetTime)
-		if group.FallbackRemainingAmount == nil {
-			group.FallbackRemainingAmount = remainingAmount
-		}
-		if preferredModelID != "" && modelID == preferredModelID {
-			group.PreferredRemaining = remaining
-			group.PreferredRemainingAmount = remainingAmount
-			group.PreferredResetTime = resetTime
-		}
+		group.Remaining = minFloatPtr(group.Remaining, remaining)
+		group.RemainingAmount = minFloatPtr(group.RemainingAmount, remainingAmount)
+		group.ResetTime = pickEarlierResetTime(group.ResetTime, resetTime)
 	}
 	if len(groups) == 0 {
 		return nil, nil, fmt.Errorf("empty Gemini CLI quota buckets")
 	}
 	out := make([]map[string]any, 0, len(groups))
 	for _, group := range groups {
-		remaining := group.FallbackRemaining
-		remainingAmount := group.FallbackRemainingAmount
-		resetTime := group.FallbackResetTime
-		if group.PreferredRemaining != nil {
-			remaining = group.PreferredRemaining
-			remainingAmount = group.PreferredRemainingAmount
-			resetTime = group.PreferredResetTime
-		}
 		item := map[string]any{
 			"id":                geminiCLIQuotaBucketID(group.ID, group.TokenType),
 			"label":             group.Label,
-			"remainingFraction": floatPtrAny(remaining),
-			"remainingAmount":   normalizeGeminiCLIRemainingAmount(remainingAmount),
-			"resetTime":         emptyStringAsNil(resetTime),
+			"remainingFraction": floatPtrAny(group.Remaining),
+			"remainingAmount":   floatPtrAny(group.RemainingAmount),
+			"resetTime":         emptyStringAsNil(group.ResetTime),
 			"tokenType":         emptyStringAsNil(group.TokenType),
 			"modelIds":          uniqueStrings(group.ModelIDs),
 		}
@@ -4786,17 +4770,19 @@ func isIgnoredGeminiCLIModel(modelID string) bool {
 	return modelID == "gemini-2.0-flash" || strings.HasPrefix(modelID, "gemini-2.0-flash-")
 }
 
-func geminiCLIQuotaGroupMeta(modelID string) (string, string, string) {
-	switch modelID {
-	case "gemini-2.5-flash-lite":
-		return "gemini-flash-lite-series", "Gemini Flash Lite Series", "gemini-2.5-flash-lite"
-	case "gemini-3-flash-preview", "gemini-2.5-flash":
-		return "gemini-flash-series", "Gemini Flash Series", "gemini-3-flash-preview"
-	case "gemini-3.1-pro-preview", "gemini-3-pro-preview", "gemini-2.5-pro":
-		return "gemini-pro-series", "Gemini Pro Series", "gemini-3.1-pro-preview"
-	default:
-		return modelID, modelID, modelID
+func geminiCLIQuotaGroupMeta(modelID string) (string, string) {
+	normalized := strings.ToLower(strings.TrimSpace(modelID))
+	if strings.HasPrefix(normalized, "gemini-") {
+		switch {
+		case strings.Contains(normalized, "-flash-lite"):
+			return "gemini-flash-lite-series", "Gemini Flash Lite Series"
+		case strings.Contains(normalized, "-flash"):
+			return "gemini-flash-series", "Gemini Flash Series"
+		case strings.Contains(normalized, "-pro"):
+			return "gemini-pro-series", "Gemini Pro Series"
+		}
 	}
+	return modelID, modelID
 }
 
 func geminiCLIQuotaBucketID(groupID string, tokenType string) string {
@@ -4832,19 +4818,6 @@ func geminiCLIRemainingFraction(bucket map[string]any) *float64 {
 	if resetTime := stringFromAny(firstAny(bucket, "resetTime", "reset_time")); resetTime != "" {
 		zero := 0.0
 		return &zero
-	}
-	return nil
-}
-
-func normalizeGeminiCLIRemainingAmount(value any) any {
-	if value == nil {
-		return nil
-	}
-	if number, ok := floatFromAny(value); ok {
-		return number
-	}
-	if text := stringFromAny(value); text != "" {
-		return text
 	}
 	return nil
 }

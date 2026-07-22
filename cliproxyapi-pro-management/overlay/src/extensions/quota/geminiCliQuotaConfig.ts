@@ -63,8 +63,6 @@ type GeminiCliQuotaData = {
 type GeminiCliQuotaGroupDefinition = {
   id: string;
   label: string;
-  preferredModelId?: string;
-  modelIds: string[];
 };
 
 const resolveGeminiCliTierDisplay = (
@@ -106,20 +104,14 @@ const GEMINI_CLI_QUOTA_GROUPS: GeminiCliQuotaGroupDefinition[] = [
   {
     id: 'gemini-flash-lite-series',
     label: 'Gemini Flash Lite Series',
-    preferredModelId: 'gemini-2.5-flash-lite',
-    modelIds: ['gemini-2.5-flash-lite'],
   },
   {
     id: 'gemini-flash-series',
     label: 'Gemini Flash Series',
-    preferredModelId: 'gemini-3-flash-preview',
-    modelIds: ['gemini-3-flash-preview', 'gemini-2.5-flash'],
   },
   {
     id: 'gemini-pro-series',
     label: 'Gemini Pro Series',
-    preferredModelId: 'gemini-3.1-pro-preview',
-    modelIds: ['gemini-3.1-pro-preview', 'gemini-3-pro-preview', 'gemini-2.5-pro'],
   },
 ];
 
@@ -127,11 +119,16 @@ const GEMINI_CLI_GROUP_ORDER = new Map(
   GEMINI_CLI_QUOTA_GROUPS.map((group, index) => [group.id, index] as const)
 );
 
-const GEMINI_CLI_GROUP_LOOKUP = new Map(
-  GEMINI_CLI_QUOTA_GROUPS.flatMap((group) =>
-    group.modelIds.map((modelId) => [modelId, group] as const)
-  )
-);
+const resolveGeminiCliQuotaGroup = (
+  modelId: string
+): GeminiCliQuotaGroupDefinition | undefined => {
+  const normalized = modelId.toLowerCase();
+  if (!normalized.startsWith('gemini-')) return undefined;
+  if (normalized.includes('-flash-lite')) return GEMINI_CLI_QUOTA_GROUPS[0];
+  if (normalized.includes('-flash')) return GEMINI_CLI_QUOTA_GROUPS[1];
+  if (normalized.includes('-pro')) return GEMINI_CLI_QUOTA_GROUPS[2];
+  return undefined;
+};
 
 const PREMIUM_GEMINI_CLI_TIER_IDS = new Set(['g1-pro-tier', 'g1-ultra-tier']);
 
@@ -207,7 +204,7 @@ const minNullableNumber = (current: number | null, next: number | null): number 
   return Math.min(current, next);
 };
 
-const buildGeminiCliQuotaBuckets = (
+export const buildGeminiCliQuotaBuckets = (
   buckets: GeminiCliParsedBucket[]
 ): GeminiCliQuotaBucketState[] => {
   if (buckets.length === 0) return [];
@@ -217,18 +214,16 @@ const buildGeminiCliQuotaBuckets = (
     label: string;
     tokenType: string | null;
     modelIds: string[];
-    preferredModelId?: string;
-    preferredBucket?: GeminiCliParsedBucket;
-    fallbackRemainingFraction: number | null;
-    fallbackRemainingAmount: number | null;
-    fallbackResetTime: string | undefined;
+    remainingFraction: number | null;
+    remainingAmount: number | null;
+    resetTime: string | undefined;
   };
 
   const grouped = new Map<string, BucketGroup>();
 
   buckets.forEach((bucket) => {
     if (isIgnoredGeminiCliModel(bucket.modelId)) return;
-    const group = GEMINI_CLI_GROUP_LOOKUP.get(bucket.modelId);
+    const group = resolveGeminiCliQuotaGroup(bucket.modelId);
     const groupId = group?.id ?? bucket.modelId;
     const label = group?.label ?? bucket.modelId;
     const tokenKey = bucket.tokenType ?? '';
@@ -236,36 +231,28 @@ const buildGeminiCliQuotaBuckets = (
     const existing = grouped.get(mapKey);
 
     if (!existing) {
-      const preferredModelId = group?.preferredModelId;
       grouped.set(mapKey, {
         id: `${groupId}${tokenKey ? `-${tokenKey}` : ''}`,
         label,
         tokenType: bucket.tokenType,
         modelIds: [bucket.modelId],
-        preferredModelId,
-        preferredBucket:
-          preferredModelId && bucket.modelId === preferredModelId ? bucket : undefined,
-        fallbackRemainingFraction: bucket.remainingFraction,
-        fallbackRemainingAmount: bucket.remainingAmount,
-        fallbackResetTime: bucket.resetTime,
+        remainingFraction: bucket.remainingFraction,
+        remainingAmount: bucket.remainingAmount,
+        resetTime: bucket.resetTime,
       });
       return;
     }
 
-    existing.fallbackRemainingFraction = minNullableNumber(
-      existing.fallbackRemainingFraction,
+    existing.remainingFraction = minNullableNumber(
+      existing.remainingFraction,
       bucket.remainingFraction
     );
-    existing.fallbackRemainingAmount = minNullableNumber(
-      existing.fallbackRemainingAmount,
+    existing.remainingAmount = minNullableNumber(
+      existing.remainingAmount,
       bucket.remainingAmount
     );
-    existing.fallbackResetTime = pickEarlierResetTime(existing.fallbackResetTime, bucket.resetTime);
+    existing.resetTime = pickEarlierResetTime(existing.resetTime, bucket.resetTime);
     existing.modelIds.push(bucket.modelId);
-
-    if (existing.preferredModelId && bucket.modelId === existing.preferredModelId) {
-      existing.preferredBucket = bucket;
-    }
   });
 
   const toGroupOrder = (bucket: BucketGroup): number => {
@@ -282,20 +269,15 @@ const buildGeminiCliQuotaBuckets = (
       if (orderDiff !== 0) return orderDiff;
       return (a.tokenType ?? '').localeCompare(b.tokenType ?? '');
     })
-    .map((bucket) => {
-      const preferred = bucket.preferredBucket;
-      return {
-        id: bucket.id,
-        label: bucket.label,
-        remainingFraction: preferred
-          ? preferred.remainingFraction
-          : bucket.fallbackRemainingFraction,
-        remainingAmount: preferred ? preferred.remainingAmount : bucket.fallbackRemainingAmount,
-        resetTime: preferred ? preferred.resetTime : bucket.fallbackResetTime,
-        tokenType: bucket.tokenType,
-        modelIds: Array.from(new Set(bucket.modelIds)),
-      };
-    });
+    .map((bucket) => ({
+      id: bucket.id,
+      label: bucket.label,
+      remainingFraction: bucket.remainingFraction,
+      remainingAmount: bucket.remainingAmount,
+      resetTime: bucket.resetTime,
+      tokenType: bucket.tokenType,
+      modelIds: Array.from(new Set(bucket.modelIds)),
+    }));
 };
 
 const resolveGeminiCliRemainingFraction = (bucket: GeminiCliQuotaBucket): number | null => {

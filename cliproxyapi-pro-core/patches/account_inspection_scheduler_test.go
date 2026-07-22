@@ -1053,13 +1053,13 @@ func TestBuildAntigravityGroupsCanonicalizesLatestGroups(t *testing.T) {
 	}
 }
 
-func TestBuildGeminiCLIQuotaBucketsGroupsLatestModels(t *testing.T) {
+func TestBuildGeminiCLIQuotaBucketsGroupsModelFamiliesConservatively(t *testing.T) {
 	body := `{
 		"buckets": [
 			{"modelId": "gemini-2.5-flash-lite_vertex", "tokenType": "input", "remainingFraction": 0.8, "remainingAmount": "80", "resetTime": "2026-06-22T01:00:00Z"},
-			{"model_id": "gemini-3-flash-preview", "token_type": "input", "remaining_fraction": 0.6, "remaining_amount": 60, "reset_time": "2026-06-22T02:00:00Z"},
+			{"model_id": "gemini-4-flash-preview", "token_type": "input", "remaining_fraction": 0.6, "remaining_amount": 60, "reset_time": "2026-06-22T02:00:00Z"},
 			{"modelId": "gemini-2.5-flash", "tokenType": "input", "remainingFraction": 0.4, "remainingAmount": 40, "resetTime": "2026-06-22T03:00:00Z"},
-			{"modelId": "gemini-3.1-pro-preview", "tokenType": "output", "remainingFraction": 0.2, "remainingAmount": 20, "resetTime": "2026-06-22T04:00:00Z"},
+			{"modelId": "gemini-4-pro-preview", "tokenType": "output", "remainingFraction": 0.2, "remainingAmount": 20, "resetTime": "2026-06-22T04:00:00Z"},
 			{"modelId": "gemini-2.0-flash", "tokenType": "input", "remainingFraction": 0}
 		]
 	}`
@@ -1074,11 +1074,11 @@ func TestBuildGeminiCLIQuotaBucketsGroupsLatestModels(t *testing.T) {
 	if buckets[0]["id"] != "gemini-flash-lite-series-input" || buckets[1]["id"] != "gemini-flash-series-input" || buckets[2]["id"] != "gemini-pro-series-output" {
 		t.Fatalf("bucket order/ids = %#v", buckets)
 	}
-	if buckets[1]["remainingFraction"] != 0.6 {
-		t.Fatalf("flash series remaining = %#v, want preferred 0.6", buckets[1]["remainingFraction"])
+	if buckets[1]["remainingFraction"] != 0.4 || buckets[1]["remainingAmount"] != 40.0 {
+		t.Fatalf("flash series remaining = %#v/%#v, want conservative 0.4/40", buckets[1]["remainingFraction"], buckets[1]["remainingAmount"])
 	}
 	modelIDs, ok := buckets[1]["modelIds"].([]string)
-	if !ok || len(modelIDs) != 2 || modelIDs[0] != "gemini-3-flash-preview" || modelIDs[1] != "gemini-2.5-flash" {
+	if !ok || len(modelIDs) != 2 || modelIDs[0] != "gemini-4-flash-preview" || modelIDs[1] != "gemini-2.5-flash" {
 		t.Fatalf("flash series modelIds = %#v", buckets[1]["modelIds"])
 	}
 	if used == nil || math.Abs(*used-80) > 0.000001 {

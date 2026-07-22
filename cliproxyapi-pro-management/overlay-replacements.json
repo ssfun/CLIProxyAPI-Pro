@@ -1,9 +1,5 @@
 {
   "schemaVersion": 1,
-  "upstream": {
-    "repository": "router-for-me/Cli-Proxy-API-Management-Center",
-    "tag": "v1.18.5"
-  },
   "replacements": [
     {
       "path": "src/services/api/apiCall.ts",

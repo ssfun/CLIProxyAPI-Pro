@@ -40,7 +40,8 @@ func (e *legacyGeminiCLIQuotaTestExecutor) HttpRequest(_ context.Context, _ *cor
 			Header:     make(http.Header),
 			Body: io.NopCloser(bytes.NewBufferString(`{"buckets":[
 				{"modelId":"gemini-2.0-flash","remainingFraction":0.9},
-				{"modelId":"gemini-3.1-pro-preview","remainingFraction":0.75,"remainingAmount":42}
+				{"modelId":"gemini-4-pro-preview","remainingFraction":0.75,"remainingAmount":42},
+				{"modelId":"gemini-3.1-pro-preview","remainingFraction":0.25,"remainingAmount":21}
 			]}`)),
 		}, nil
 	}
@@ -86,6 +87,9 @@ func TestLegacyGeminiCLIQuotaAdapterUsesRegisteredExecutorAndRetainsPlan(t *test
 	}
 	if len(result.Snapshot.Items) != 1 || result.Snapshot.Items[0].ID != "gemini-pro-series" {
 		t.Fatalf("quota items = %#v", result.Snapshot.Items)
+	}
+	if remaining := result.Snapshot.Items[0].RemainingFraction; remaining == nil || *remaining != 0.25 {
+		t.Fatalf("remaining fraction = %v, want conservative 0.25", remaining)
 	}
 	if result.Snapshot.Plan == nil || result.Snapshot.Plan.ID != "g1-pro-tier" || !result.Snapshot.Plan.Stale {
 		t.Fatalf("retained plan = %#v", result.Snapshot.Plan)
