@@ -273,7 +273,6 @@ Release workflow 会从 Core、models 和定制层三个不可变提交中取最
 - `WEBDAV_USERNAME`
 - `WEBDAV_PASSWORD`
 - `MANAGEMENT_PASSWORD`
-- `USAGE_ALLOW_LEGACY_RESTORE` — 可选，默认 `false`；仅在需要自动导入可信的无 manifest 旧备份时设为 `true`。
 
 恢复文件查找同时支持：
 
@@ -282,7 +281,7 @@ usage-export-YYYYMMDD_HHMMSS.json
 usage-export-YYYYMMDD_HHMMSS.jsonl
 ```
 
-自动恢复默认只导入带 manifest 的备份。无 manifest 文件会被跳过；只有设置 `USAGE_ALLOW_LEGACY_RESTORE=true` 时，entrypoint 才会调用 `/usage/import?allow_legacy=1`，并在日志中明确记录正在使用未经完整性校验的兼容路径。
+Docker WebDAV 自动恢复在过渡阶段固定调用 `/usage/import?allow_legacy=1`。带 manifest 的新备份仍会严格校验完整性；无 manifest 的旧版备份会强制导入，并在日志中明确记录正在使用未经完整性校验的兼容路径。管理 API 的普通导入仍默认拒绝无 manifest 文件。
 
 导入请求使用：
 

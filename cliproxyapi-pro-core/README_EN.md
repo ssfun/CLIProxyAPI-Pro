@@ -258,7 +258,6 @@ When all variables below are configured, `entrypoint.sh` waits for the local API
 - `WEBDAV_USERNAME`
 - `WEBDAV_PASSWORD`
 - `MANAGEMENT_PASSWORD`
-- `USAGE_ALLOW_LEGACY_RESTORE` — optional, default `false`; set to `true` only to automatically import a trusted manifest-free legacy backup.
 
 Restore lookup supports both backup names:
 
@@ -267,7 +266,7 @@ usage-export-YYYYMMDD_HHMMSS.json
 usage-export-YYYYMMDD_HHMMSS.jsonl
 ```
 
-Automatic restore imports manifest-backed backups by default. A manifest-free backup is skipped unless `USAGE_ALLOW_LEGACY_RESTORE=true`; when enabled, the entrypoint calls `/usage/import?allow_legacy=1` and logs that the unverified compatibility path is in use.
+During the compatibility transition, Docker WebDAV restore always calls `/usage/import?allow_legacy=1`. Manifest-backed backups are still verified strictly; manifest-free legacy backups are imported with an explicit warning that integrity cannot be verified. Normal management API imports still reject manifest-free files by default.
 
 The import request uses:
 
