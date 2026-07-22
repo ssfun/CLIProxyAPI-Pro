@@ -9,13 +9,11 @@ def require(text: str, needle: str, source: Path) -> None:
         raise SystemExit(f'{source}: missing reproducible-build guard: {needle}')
 
 
-def check_dockerfile(path: Path, expected_stages: int, snapshot: str) -> None:
+def check_dockerfile_maintenance_policy(path: Path) -> None:
     text = path.read_text()
-    if text.count(f'ARG DEBIAN_SNAPSHOT={snapshot}') != expected_stages:
-        raise SystemExit(f'{path}: expected {expected_stages} pinned Debian snapshot stage(s)')
-    require(text, 'http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}', path)
-    require(text, 'http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}', path)
-    require(text, 'Acquire::Check-Valid-Until=false', path)
+    for forbidden in ('DEBIAN_SNAPSHOT', 'snapshot.debian.org', 'komari-agent:latest@sha256:'):
+        if forbidden in text:
+            raise SystemExit(f'{path}: retired high-maintenance Docker pin remains: {forbidden}')
 
 
 def main() -> None:
@@ -27,15 +25,12 @@ def main() -> None:
         for line in (root / 'compatibility/upstream.env').read_text().splitlines()
         if line and not line.startswith('#') and '=' in line
     )
-    snapshot = compatibility.get('DEBIAN_SNAPSHOT', '')
-    if not snapshot:
-        raise SystemExit('compatibility/upstream.env: DEBIAN_SNAPSHOT is required')
     overlay_manifest_path = root / 'cliproxyapi-pro-management/overlay-replacements.json'
     overlay_manifest = json.loads(overlay_manifest_path.read_text())
     if overlay_manifest.get('upstream', {}).get('tag') != compatibility.get('MANAGEMENT_UPSTREAM_TAG'):
         raise SystemExit(f'{overlay_manifest_path}: upstream tag must match compatibility/upstream.env')
-    check_dockerfile(root / 'cliproxyapi-pro-core/Dockerfile', 2, snapshot)
-    check_dockerfile(root / 'cliproxyapi-pro-core/Dockerfile.runtime', 1, snapshot)
+    check_dockerfile_maintenance_policy(root / 'cliproxyapi-pro-core/Dockerfile')
+    check_dockerfile_maintenance_policy(root / 'cliproxyapi-pro-core/Dockerfile.runtime')
 
     ci_path = root / '.github/workflows/ci.yml'
     ci = ci_path.read_text()

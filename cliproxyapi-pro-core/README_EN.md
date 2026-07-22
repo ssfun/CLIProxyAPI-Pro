@@ -230,7 +230,6 @@ Build args:
 - `CLIPROXY_COMMIT` — optional upstream commit SHA; when set, source is downloaded from that commit while `CLIPROXY_VERSION` remains the version label.
 - `CLIPROXY_BUILD_VERSION` — optional runtime version. If empty, it uses the upstream version resolved from `CLIPROXY_VERSION`.
 - `SOURCE_DATE_EPOCH` — optional Unix timestamp used for the embedded build date. Set it together with an immutable upstream commit for a deterministic source binary.
-- `DEBIAN_SNAPSHOT` — Debian snapshot timestamp used by builder and runtime apt sources; defaults to the reviewed `20260715T000000Z` snapshot.
 - `GITHUB_TOKEN` — optional token for GitHub API requests.
 
 Release workflows derive `SOURCE_DATE_EPOCH` from the newest immutable Core, models, and customization commit. Core archives use normalized ordering, timestamps, ownership, and permissions; Go builds also use `-trimpath`.

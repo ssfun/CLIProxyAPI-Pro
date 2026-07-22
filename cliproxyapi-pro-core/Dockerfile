@@ -1,12 +1,7 @@
 FROM golang:1.26-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651 AS builder
 
-ARG DEBIAN_SNAPSHOT=20260715T000000Z
 RUN set -eux; \
-    sed -ri \
-      -e "s#https?://deb.debian.org/debian-security#http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}#g" \
-      -e "s#https?://deb.debian.org/debian#http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}#g" \
-      /etc/apt/sources.list.d/debian.sources; \
-    apt-get -o Acquire::Check-Valid-Until=false update; \
+    apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl jq python3 build-essential git; \
     rm -rf /var/lib/apt/lists/*
 
@@ -59,18 +54,12 @@ RUN set -eux; \
 
 FROM debian:bookworm@sha256:9344f8b8992482f80cba753f323adeaf17690076c095ccff6cc9536be98185dc
 
-ARG DEBIAN_SNAPSHOT=20260715T000000Z
-
 RUN mkdir -p /CLIProxyAPI/usage
 
-COPY --from=ghcr.io/komari-monitor/komari-agent:latest@sha256:48815bdfce540d83c60b92809858d9aea3635d07abf78581486e0433ca97d676 /app/komari-agent /CLIProxyAPI/komari-agent
+COPY --from=ghcr.io/komari-monitor/komari-agent:latest /app/komari-agent /CLIProxyAPI/komari-agent
 
 RUN set -eux; \
-    sed -ri \
-      -e "s#https?://deb.debian.org/debian-security#http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}#g" \
-      -e "s#https?://deb.debian.org/debian#http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}#g" \
-      /etc/apt/sources.list.d/debian.sources; \
-    apt-get -o Acquire::Check-Valid-Until=false update; \
+    apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl tzdata; \
     rm -rf /var/lib/apt/lists/*
 
