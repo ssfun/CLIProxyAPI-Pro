@@ -7,13 +7,6 @@ log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] [$2] $3"
 }
 
-is_truthy() {
-    case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
-        1|true|yes|on) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
 # ==========================================
 # 环境变量配置
 # ==========================================
@@ -26,7 +19,6 @@ WEBDAV_URL="${WEBDAV_URL:-}"
 WEBDAV_USERNAME="${WEBDAV_USERNAME:-}"
 WEBDAV_PASSWORD="${WEBDAV_PASSWORD:-}"
 MANAGEMENT_PASSWORD="${MANAGEMENT_PASSWORD:-}"
-USAGE_ALLOW_LEGACY_RESTORE="${USAGE_ALLOW_LEGACY_RESTORE:-false}"
 
 # ==========================================
 # 1. 启动 komari-agent
@@ -75,26 +67,18 @@ if [ -n "$WEBDAV_URL" ] && [ -n "$WEBDAV_USERNAME" ] && [ -n "$WEBDAV_PASSWORD" 
                 "$WEBDAV_URL/$LATEST_FILE" -o /tmp/usage-restore.jsonl
 
             if [ -f /tmp/usage-restore.jsonl ]; then
-                IMPORT_URL="http://127.0.0.1:8317/v0/management/usage/import"
+                IMPORT_URL="http://127.0.0.1:8317/v0/management/usage/import?allow_legacy=1"
                 if ! awk 'NF { print; exit }' /tmp/usage-restore.jsonl | \
                     grep -Eq '"record_type"[[:space:]]*:[[:space:]]*"backup_manifest"'; then
-                    if is_truthy "$USAGE_ALLOW_LEGACY_RESTORE"; then
-                        IMPORT_URL="$IMPORT_URL?allow_legacy=1"
-                        log "UsageRestore" "WARN" "Importing manifest-free legacy backup because USAGE_ALLOW_LEGACY_RESTORE is enabled."
-                    else
-                        IMPORT_URL=""
-                        log "UsageRestore" "WARN" "Backup has no integrity manifest; skipping automatic restore. Set USAGE_ALLOW_LEGACY_RESTORE=true only for a trusted legacy backup."
-                    fi
+                    log "UsageRestore" "WARN" "Importing manifest-free legacy backup without integrity verification during the compatibility transition."
                 fi
-                if [ -n "$IMPORT_URL" ]; then
-                    log "UsageRestore" "INFO" "Importing usage data..."
-                    RESULT=$(curl -s -X POST \
-                        -H "Content-Type: application/x-ndjson" \
-                        -H "Authorization: Bearer $MANAGEMENT_PASSWORD" \
-                        --data-binary @/tmp/usage-restore.jsonl \
-                        "$IMPORT_URL")
-                    log "UsageRestore" "INFO" "Import result: $RESULT"
-                fi
+                log "UsageRestore" "INFO" "Importing usage data..."
+                RESULT=$(curl -s -X POST \
+                    -H "Content-Type: application/x-ndjson" \
+                    -H "Authorization: Bearer $MANAGEMENT_PASSWORD" \
+                    --data-binary @/tmp/usage-restore.jsonl \
+                    "$IMPORT_URL")
+                log "UsageRestore" "INFO" "Import result: $RESULT"
                 rm -f /tmp/usage-restore.jsonl
             else
                 log "UsageRestore" "WARN" "Download failed."

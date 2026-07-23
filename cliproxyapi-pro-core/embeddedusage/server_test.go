@@ -208,6 +208,44 @@ func TestUsageImportRejectsTamperedManifestBackupBeforeWriting(t *testing.T) {
 	}
 }
 
+func TestUsageImportRestoresModelPriceRuleWhenOnlyNewerHistoryRemains(t *testing.T) {
+	ctx := context.Background()
+	sourceStore := openTestStore(t)
+	sourceRule := testGPT56PriceRule()
+	sourceRule.Base.Input = 1.25
+	if _, changed, err := sourceStore.UpsertModelPriceRule(ctx, sourceRule, true); err != nil || !changed {
+		t.Fatalf("source UpsertModelPriceRule() = changed:%v err:%v", changed, err)
+	}
+	exportRecorder := httptest.NewRecorder()
+	testUsageRouter(sourceStore).ServeHTTP(exportRecorder, httptest.NewRequest(http.MethodGet, "/usage/export", nil))
+	if exportRecorder.Code != http.StatusOK {
+		t.Fatalf("export status = %d; body=%s", exportRecorder.Code, exportRecorder.Body.String())
+	}
+
+	targetStore := openTestStore(t)
+	targetRule := testGPT56PriceRule()
+	if _, changed, err := targetStore.UpsertModelPriceRule(ctx, targetRule, true); err != nil || !changed {
+		t.Fatalf("target first UpsertModelPriceRule() = changed:%v err:%v", changed, err)
+	}
+	targetRule.Base.Input = 9.99
+	if _, changed, err := targetStore.UpsertModelPriceRule(ctx, targetRule, true); err != nil || !changed {
+		t.Fatalf("target second UpsertModelPriceRule() = changed:%v err:%v", changed, err)
+	}
+	if err := targetStore.DeleteModelPriceRule(ctx, "", targetRule.Model); err != nil {
+		t.Fatalf("DeleteModelPriceRule() error = %v", err)
+	}
+
+	importRecorder := httptest.NewRecorder()
+	testUsageRouter(targetStore).ServeHTTP(importRecorder, httptest.NewRequest(http.MethodPost, "/usage/import", bytes.NewReader(exportRecorder.Body.Bytes())))
+	if importRecorder.Code != http.StatusOK {
+		t.Fatalf("import status = %d, want 200; body=%s", importRecorder.Code, importRecorder.Body.String())
+	}
+	rules, err := targetStore.ActiveModelPriceRules(ctx)
+	if err != nil || len(rules) != 1 || rules[0].Model != sourceRule.Model || rules[0].Base.Input != sourceRule.Base.Input || rules[0].Version <= 2 {
+		t.Fatalf("restored rules = %+v err:%v; want imported rule newer than retained version 2", rules, err)
+	}
+}
+
 func TestHandleUsageResetClearsStatisticsAndReturnsGeneration(t *testing.T) {
 	store := openTestStore(t)
 	insertTestUsageEvents(t, store,
