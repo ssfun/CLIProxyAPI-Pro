@@ -103,6 +103,10 @@ func (s *Store) GetProSetting(ctx context.Context, namespace string) (ProSetting
 	return getProSettingFrom(ctx, s.db, namespace)
 }
 
+func (s *Store) ListProSettings(ctx context.Context) ([]ProSetting, error) {
+	return listProSettingsFrom(ctx, s.db)
+}
+
 func (s *Store) SetProSetting(ctx context.Context, item ProSetting) error {
 	return setProSettingWith(ctx, s.db, item)
 }

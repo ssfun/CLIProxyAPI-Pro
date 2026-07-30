@@ -9,9 +9,12 @@ import (
 )
 
 var globalService *Service
+var accountInspectionScheduleExporter func() (jsonBytes []byte, ok bool, err error)
+var accountInspectionScheduleImporter func(jsonBytes []byte) error
+var accountInspectionSnapshotExporter func() (jsonBytes []byte, ok bool, err error)
+var accountInspectionSnapshotImporter func(jsonBytes []byte) error
 var authRuntimeStateImporter func(cursors []RoutingCursorState, stats []AuthRuntimeStats) error
 var proSettingsImporter func(settings []ProSetting) error
-var hostBackupHandlersMu sync.RWMutex
 var globalStateMu sync.RWMutex
 var globalStateWriterCancel context.CancelFunc
 var globalStateWriterDone chan struct{}
@@ -19,15 +22,6 @@ var globalStateQueue chan runtimeStateMutation
 var globalStateOverflowMu sync.Mutex
 var globalStateOverflowCursors map[string]RoutingCursorState
 var globalStateOverflowStats map[string]AuthRuntimeStats
-
-// legacyCompatibilityServiceAvailable is only reachable by direct package
-// consumers that explicitly install a Service. Pro startup never does so: the
-// legacy Start entrypoint fails closed and runtime ownership stays in the plugin.
-func legacyCompatibilityServiceAvailable() bool {
-	globalStateMu.RLock()
-	defer globalStateMu.RUnlock()
-	return globalService != nil && globalService.store != nil
-}
 
 type runtimeStateMutation struct {
 	cursor *RoutingCursorState
@@ -287,36 +281,22 @@ func flushRuntimeStateWrites(ctx context.Context, store *Store) error {
 	}
 }
 
+func SetAccountInspectionScheduleHandlers(exporter func() ([]byte, bool, error), importer func([]byte) error) {
+	accountInspectionScheduleExporter = exporter
+	accountInspectionScheduleImporter = importer
+}
+
+func SetAccountInspectionSnapshotHandlers(exporter func() ([]byte, bool, error), importer func([]byte) error) {
+	accountInspectionSnapshotExporter = exporter
+	accountInspectionSnapshotImporter = importer
+}
+
 func SetAuthRuntimeStateImportHandler(importer func([]RoutingCursorState, []AuthRuntimeStats) error) {
-	hostBackupHandlersMu.Lock()
-	defer hostBackupHandlersMu.Unlock()
 	authRuntimeStateImporter = importer
 }
 
 func SetProSettingsImportHandler(importer func([]ProSetting) error) {
-	hostBackupHandlersMu.Lock()
-	defer hostBackupHandlersMu.Unlock()
 	proSettingsImporter = importer
-}
-
-func ApplyImportedAuthRuntimeState(cursors []RoutingCursorState, stats []AuthRuntimeStats) error {
-	hostBackupHandlersMu.RLock()
-	importer := authRuntimeStateImporter
-	hostBackupHandlersMu.RUnlock()
-	if importer == nil {
-		return nil
-	}
-	return importer(cursors, stats)
-}
-
-func ApplyImportedProSettings(settings []ProSetting) error {
-	hostBackupHandlersMu.RLock()
-	importer := proSettingsImporter
-	hostBackupHandlersMu.RUnlock()
-	if importer == nil {
-		return nil
-	}
-	return importer(settings)
 }
 
 func defaultServer() *Server {
@@ -328,10 +308,25 @@ func defaultServer() *Server {
 	return globalService.Server()
 }
 
-func GetProSetting(ctx context.Context, namespace string) (ProSetting, bool, error) {
-	if !legacyCompatibilityServiceAvailable() {
-		return getPluginProSetting(ctx, namespace)
+func SetQuotaCache(ctx context.Context, entry QuotaCacheEntry) error {
+	globalStateMu.RLock()
+	defer globalStateMu.RUnlock()
+	if globalService == nil || globalService.store == nil {
+		return fmt.Errorf("usage service is not available")
 	}
+	return globalService.store.SetQuotaCache(ctx, entry)
+}
+
+func GetQuotaCache(ctx context.Context, provider, fileName string) ([]QuotaCacheEntry, error) {
+	globalStateMu.RLock()
+	defer globalStateMu.RUnlock()
+	if globalService == nil || globalService.store == nil {
+		return nil, fmt.Errorf("usage service is not available")
+	}
+	return globalService.store.GetQuotaCache(ctx, provider, fileName)
+}
+
+func GetProSetting(ctx context.Context, namespace string) (ProSetting, bool, error) {
 	globalStateMu.RLock()
 	defer globalStateMu.RUnlock()
 	if globalService == nil || globalService.store == nil {
@@ -341,9 +336,6 @@ func GetProSetting(ctx context.Context, namespace string) (ProSetting, bool, err
 }
 
 func SetProSetting(ctx context.Context, item ProSetting) error {
-	if !legacyCompatibilityServiceAvailable() {
-		return putPluginProSetting(ctx, item)
-	}
 	globalStateMu.RLock()
 	defer globalStateMu.RUnlock()
 	if globalService == nil || globalService.store == nil {
@@ -380,4 +372,51 @@ func ListRoutingCursorStates(ctx context.Context) ([]RoutingCursorState, error) 
 		return nil, nil
 	}
 	return globalService.store.ListRoutingCursorStates(ctx)
+}
+
+func QueueAuthRuntimeStats(item AuthRuntimeStats) {
+	if item.AuthIndex == "" || item.AuthID == "" {
+		return
+	}
+	if item.UpdatedAtMS <= 0 {
+		item.UpdatedAtMS = time.Now().UnixMilli()
+	}
+	enqueueRuntimeState(runtimeStateMutation{stats: &item})
+}
+
+func GetAuthRuntimeStats(ctx context.Context, authIndex, authID string) (AuthRuntimeStats, bool, error) {
+	globalStateMu.RLock()
+	defer globalStateMu.RUnlock()
+	if globalService == nil || globalService.store == nil {
+		return AuthRuntimeStats{}, false, nil
+	}
+	return globalService.store.GetAuthRuntimeStats(ctx, authIndex, authID)
+}
+
+func DeleteAuthRuntimeState(ctx context.Context, authID, authIndex, fileName string) error {
+	globalStateMu.RLock()
+	defer globalStateMu.RUnlock()
+	service := globalService
+	queue := globalStateQueue
+	if service == nil || service.store == nil {
+		return nil
+	}
+	if queue == nil {
+		return service.store.DeleteAuthRuntimeState(ctx, authID, authIndex, fileName)
+	}
+	deletion := &runtimeStateDelete{
+		authID: authID, authIndex: authIndex, fileName: fileName,
+		updatedAt: time.Now().UnixMilli(), done: make(chan error, 1),
+	}
+	select {
+	case queue <- runtimeStateMutation{delete: deletion}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-deletion.done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

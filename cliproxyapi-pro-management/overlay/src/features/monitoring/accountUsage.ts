@@ -29,7 +29,7 @@ export function buildAccountUsageLogPath(authIndex: string, fromMs: number, toMs
     from_ms: String(Math.max(0, Math.round(fromMs))),
     to_ms: String(Math.max(0, Math.round(toMs))),
   });
-  return `/plugin-pages/pro-observability/0?${params.toString()}#request-events`;
+  return `/monitoring?${params.toString()}#request-events`;
 }
 
 export function ratio(numerator: number, denominator: number): number {

@@ -1,0 +1,731 @@
+.page {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 2px 2px 24px;
+}
+
+.pageWithSave {
+  padding-bottom: calc(
+    var(--oauth-model-policy-action-bar-height, 46px) + 38px
+  );
+}
+
+.header,
+.headerIdentity,
+.titleLine,
+.sectionHeading,
+.policyHeader,
+.ruleHeader,
+.ruleTitleLine,
+.patternInputRow,
+.inheritedRule,
+.behaviorNote,
+.noticeCard {
+  display: flex;
+  align-items: center;
+}
+
+.header {
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-secondary);
+}
+
+.headerIdentity {
+  min-width: 0;
+  gap: 12px;
+}
+
+.headerIcon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--text-secondary);
+  background: var(--muted-bg, rgba(148, 163, 184, 0.12));
+}
+
+.headerIconActive {
+  color: #15803d;
+  background: rgba(34, 197, 94, 0.13);
+}
+
+.titleLine {
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.titleLine h1 {
+  margin: 0;
+  font-size: clamp(22px, 3vw, 27px);
+  line-height: 1.25;
+}
+
+.titleLine code,
+.ruleTitleLine code,
+.flowBadge {
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: var(--muted-bg, rgba(148, 163, 184, 0.12));
+  font-family: var(--font-mono, monospace);
+}
+
+.titleLine code {
+  padding: 3px 7px;
+  font-size: 11px;
+}
+
+.headerIdentity p,
+.sectionHeading p,
+.policyHeader p,
+.ruleHeader p,
+.behaviorNote p,
+.noticeCard p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.headerIdentity > div > p {
+  margin-top: 3px;
+  font-size: 13px;
+}
+
+.errorBanner,
+.warningBanner {
+  padding: 10px 13px;
+  border: 1px solid;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.errorBanner {
+  border-color: rgba(239, 68, 68, 0.28);
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.warningBanner {
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #a16207;
+  background: rgba(245, 158, 11, 0.09);
+}
+
+.noticeCard {
+  justify-content: center;
+  gap: 11px;
+  min-height: 150px;
+  padding: 22px;
+  border: 1px dashed var(--border-color);
+  border-radius: 14px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+}
+
+.noticeCard strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text-primary);
+}
+
+.statusGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-secondary);
+}
+
+.statusGrid > div {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  padding: 13px 15px;
+  border-right: 1px solid var(--border-color);
+}
+
+.statusGrid > div:last-child {
+  border-right: 0;
+}
+
+.statusGrid > div > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  grid-row: 1 / 3;
+  place-items: center;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.statusGrid small {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusGrid strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusGood {
+  color: #15803d;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.statusAccent {
+  color: var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+}
+
+.statusMuted {
+  color: var(--text-secondary);
+  background: var(--muted-bg, rgba(148, 163, 184, 0.12));
+}
+
+.settingsPanel,
+.policyPanel {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-secondary);
+}
+
+.settingsPanel {
+  padding: 16px;
+}
+
+.sectionHeading {
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.sectionHeading > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 11%, transparent);
+}
+
+.sectionHeading h2,
+.policyHeader h2 {
+  margin: 0 0 3px;
+  font-size: 16px;
+}
+
+.settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.settingsGrid :global(.form-group) {
+  margin: 0;
+}
+
+.durationControl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.durationControl input {
+  min-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.durationControl > span {
+  display: inline-flex;
+  min-width: 64px;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0 11px;
+  border: 1px solid var(--border-color);
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  color: var(--text-secondary);
+  background: var(--muted-bg, rgba(148, 163, 184, 0.1));
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.policyPanel {
+  padding: 16px;
+}
+
+.providerTabs {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--muted-bg, rgba(148, 163, 184, 0.08));
+}
+
+.providerTabs button {
+  display: flex;
+  min-width: 0;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.providerTabs button:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
+}
+
+.providerTabs button.providerTabActive {
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+.providerTabs button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.providerTabs button small {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+  font-size: 9px;
+}
+
+.policyHeader {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.flowBadge {
+  max-width: 420px;
+  flex: 0 1 auto;
+  padding: 5px 9px;
+  font-size: 10px;
+  line-height: 1.45;
+  text-align: right;
+  white-space: normal;
+}
+
+.customPlanRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+}
+
+.customPlanRow > div:first-child {
+  min-width: 0;
+}
+
+.customPlanRow strong,
+.customPlanRow span {
+  display: block;
+}
+
+.customPlanRow strong {
+  font-size: 12px;
+}
+
+.customPlanRow span {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.customPlanRow > div:last-child {
+  display: flex;
+  width: min(100%, 360px);
+  flex: 0 1 360px;
+  align-items: stretch;
+  gap: 7px;
+}
+
+.customPlanRow input {
+  min-width: 0;
+  min-height: 34px;
+  flex: 1 1 auto;
+  padding: 7px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  outline: none;
+  color: var(--text-primary);
+  background: var(--input-bg, var(--bg-primary));
+  font: inherit;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+
+.customPlanRow input:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--primary-color) 14%, transparent);
+}
+
+.ruleGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ruleCard {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.ruleCardActive {
+  border-color: color-mix(
+    in srgb,
+    var(--primary-color) 44%,
+    var(--border-color)
+  );
+  box-shadow: inset 3px 0 0
+    color-mix(in srgb, var(--primary-color) 70%, transparent);
+}
+
+.ruleHeader {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.ruleHeader > div {
+  min-width: 0;
+}
+
+.ruleTitleLine {
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.ruleTitleLine h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.ruleTitleLine code {
+  padding: 2px 6px;
+  font-size: 10px;
+}
+
+.removeCustomPlan {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  place-items: center;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.removeCustomPlan:hover:not(:disabled) {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.ruleHeader small {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-size: 10px;
+}
+
+.patternEditor {
+  display: grid;
+  gap: 8px;
+  margin-top: 13px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.patternList {
+  display: flex;
+  min-height: 28px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.patternChip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 5px 4px 8px;
+  border: 1px solid
+    color-mix(in srgb, var(--primary-color) 28%, var(--border-color));
+  border-radius: 999px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--primary-color) 8%, transparent);
+}
+
+.patternChip code {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.patternChip button {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  place-items: center;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.patternChip button:hover:not(:disabled) {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.patternInvalid {
+  border-color: rgba(239, 68, 68, 0.42);
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.patternEmpty {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.patternInputRow {
+  align-items: stretch;
+  gap: 7px;
+}
+
+.patternInputRow input {
+  min-width: 0;
+  min-height: 34px;
+  flex: 1 1 auto;
+  padding: 7px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  outline: none;
+  color: var(--text-primary);
+  background: var(--input-bg, var(--bg-secondary));
+  font: inherit;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+
+.patternInputRow input:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--primary-color) 14%, transparent);
+}
+
+.header > button > span,
+.customPlanRow button > span,
+.patternInputRow button > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.patternHint {
+  margin: 0;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.inheritedRule {
+  gap: 6px;
+  margin-top: 13px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: var(--muted-bg, rgba(148, 163, 184, 0.08));
+  font-size: 11px;
+}
+
+.behaviorNote {
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--primary-color) 6%, transparent);
+}
+
+.behaviorNote svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--primary-color);
+}
+
+@media (max-width: 980px) {
+  .statusGrid,
+  .settingsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .statusGrid > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .statusGrid > div:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .providerTabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .page {
+    gap: 11px;
+    padding: 0 0 20px;
+  }
+
+  .pageWithSave {
+    padding-bottom: calc(
+      var(--oauth-model-policy-action-bar-height, 46px) + 28px
+    );
+  }
+
+  .header {
+    align-items: flex-start;
+    padding: 13px;
+  }
+
+  .headerIdentity {
+    align-items: flex-start;
+  }
+
+  .headerIcon {
+    width: 36px;
+    height: 36px;
+    flex-basis: 36px;
+  }
+
+  .header > button {
+    flex: 0 0 auto;
+  }
+
+  .statusGrid,
+  .ruleGrid,
+  .settingsGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .statusGrid > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .statusGrid > div:last-child {
+    border-bottom: 0;
+  }
+
+  .settingsPanel,
+  .policyPanel {
+    padding: 13px;
+  }
+
+  .policyHeader {
+    flex-direction: column;
+  }
+
+  .providerTabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .customPlanRow {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .customPlanRow > div:last-child {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .flowBadge {
+    max-width: none;
+    text-align: left;
+  }
+
+  .patternInputRow {
+    flex-direction: column;
+  }
+
+  .patternInputRow button {
+    width: 100%;
+  }
+
+}

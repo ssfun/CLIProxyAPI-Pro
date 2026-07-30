@@ -388,7 +388,7 @@ func (c *routingPolicyController) disableAuth(ctx context.Context, auth *coreaut
 		if updated == nil || (updated.Disabled && !routingProtectionOwned(updated)) {
 			return
 		}
-		setRoutingProtectionDisabledState(updated, true)
+		setAuthInspectionDisabledState(updated, true)
 		updated.StatusMessage = fmt.Sprintf("disabled by routing policy after HTTP %d", event.StatusCode)
 		if updated.Metadata == nil {
 			updated.Metadata = make(map[string]any)
@@ -412,7 +412,7 @@ func (c *routingPolicyController) releaseAuth(ctx context.Context, auth *coreaut
 		if updated == nil || !routingProtectionOwned(updated) {
 			return
 		}
-		setRoutingProtectionDisabledState(updated, false)
+		setAuthInspectionDisabledState(updated, false)
 		clearRoutingProtectionOwnership(updated)
 	})
 }
@@ -420,6 +420,9 @@ func (c *routingPolicyController) releaseAuth(ctx context.Context, auth *coreaut
 func (c *routingPolicyController) updateAuth(ctx context.Context, authIndex string, mutate func(*coreauth.Auth)) error {
 	if c == nil || c.h == nil || c.h.authManager == nil {
 		return fmt.Errorf("core auth manager unavailable")
+	}
+	if scheduler := schedulerForHandler(c.h); scheduler != nil {
+		return scheduler.updateInspectionAuth(ctx, authIndex, mutate)
 	}
 	auth := c.h.authByIndex(authIndex)
 	if auth == nil {
@@ -642,48 +645,6 @@ func clearRoutingProtectionOwnership(auth *coreauth.Auth) {
 		return
 	}
 	delete(auth.Metadata, routingProtectionMetadataKey)
-}
-
-func setRoutingProtectionDisabledState(auth *coreauth.Auth, disabled bool) {
-	if auth == nil {
-		return
-	}
-	auth.Disabled = disabled
-	if auth.Metadata == nil {
-		auth.Metadata = make(map[string]any)
-	}
-	auth.Metadata["disabled"] = disabled
-	if disabled {
-		auth.Status = coreauth.StatusDisabled
-		auth.StatusMessage = "disabled by routing policy"
-	} else {
-		lastError, _ := auth.Metadata["last_error"].(map[string]any)
-		if auth.LastError != nil || lastError != nil {
-			auth.Status = coreauth.StatusError
-			auth.Unavailable = true
-			if auth.LastError != nil {
-				auth.StatusMessage = strings.TrimSpace(auth.LastError.Message)
-			} else {
-				auth.StatusMessage = stringFromAny(lastError["message"])
-			}
-		} else {
-			auth.Status = coreauth.StatusActive
-			auth.StatusMessage = ""
-			auth.Unavailable = false
-		}
-	}
-	auth.UpdatedAt = time.Now()
-}
-
-func stringFromAny(value any) string {
-	switch typed := value.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	case fmt.Stringer:
-		return strings.TrimSpace(typed.String())
-	default:
-		return ""
-	}
 }
 
 func routingProtectionMetadataInt64(metadata map[string]any, key string) int64 {

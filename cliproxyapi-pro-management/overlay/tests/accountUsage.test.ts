@@ -27,7 +27,7 @@ describe('account usage helpers', () => {
 
   test('builds an exact, encoded request-log scope', () => {
     expect(buildAccountUsageLogPath('codex:user+one@example.com', 100.4, 200.6)).toBe(
-      '/plugin-pages/pro-observability/0?auth_index=codex%3Auser%2Bone%40example.com&from_ms=100&to_ms=201#request-events'
+      '/monitoring?auth_index=codex%3Auser%2Bone%40example.com&from_ms=100&to_ms=201#request-events'
     );
   });
 

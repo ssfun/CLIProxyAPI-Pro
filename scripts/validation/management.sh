@@ -20,21 +20,6 @@ if [[ -d "${upstream_root}/.git" ]] && [[ -n "$(git -C "${upstream_root}" status
   exit 1
 fi
 
-observability_webapp="${repo_root}/cliproxyapi-pro-plugins/pro-observability/webapp"
-observability_page="${repo_root}/cliproxyapi-pro-plugins/pro-observability/web/index.html"
-observability_page_hash="$(git -C "${repo_root}" hash-object "${observability_page}")"
-(
-  cd "${observability_webapp}"
-  bun install --frozen-lockfile
-  bun run test
-  bun run build
-)
-rebuilt_observability_page_hash="$(git -C "${repo_root}" hash-object "${observability_page}")"
-if [[ "${observability_page_hash}" != "${rebuilt_observability_page_hash}" ]]; then
-  echo "pro-observability web/index.html is stale; run bun run build in ${observability_webapp}" >&2
-  exit 1
-fi
-
 bash "${repo_root}/cliproxyapi-pro-management/apply.sh" "${upstream_root}"
 git -C "${upstream_root}" diff --check
 

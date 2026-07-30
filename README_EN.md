@@ -17,7 +17,6 @@ This project does not maintain a full fork of either upstream project. Instead, 
 - A routing-policy page for upstream routing behavior and provider-scoped request-state protection.
 - A bundled dynamic proxy-pool plugin that aggregates HTTP/SOCKS nodes behind one fixed loopback SOCKS5 endpoint with rotation, health isolation, and failover.
 - A bundled OAuth model-policy plugin that removes unavailable models per provider and account plan, constraining both model listing and auth scheduling.
-- A required Pro Observability plugin that exclusively owns usage, pricing, backups, quota cache, routing cursors, and runtime statistics, with automatic legacy SQLite migration before service startup.
 
 ## Repository layout
 
@@ -58,8 +57,8 @@ Main capabilities:
 
 - Builds a multi-arch Docker image from an upstream CLIProxyAPI release.
 - Builds Pro binary release assets using the same platform matrix and archive formats as upstream.
-- Provides the SQLite usage service and business routes through the required `pro-observability` plugin.
-- Preserves the `/v0/management/usage` API family; Core only hosts Management authentication and the SSE transport bridge.
+- Embeds a SQLite usage service.
+- Exposes `/v0/management/usage` API routes, including status, incremental event polling, and SSE streaming.
 - Supports usage JSONL/NDJSON import and export, including usage events, model prices, quota cache, Pro settings, routing runtime state, account-inspection schedules, and the latest inspection-result snapshot.
 - Supports WebDAV usage backup restore.
 - Supports SQLite-backed quota cache.
@@ -70,7 +69,7 @@ Main capabilities:
 - Adds a backend account-inspection scheduler and executor with token refresh before probing.
 - Adds unified routing-policy and request-state-protection APIs.
 - Optionally starts the Komari agent.
-- Prebundles and enables `pro-observability` in standard macOS, Windows amd64, and Linux releases plus Docker images, alongside `proxy-pool` and `oauth-model-policy`. It is the only persistence implementation; a missing plugin or failed legacy-usage migration blocks proxy service startup.
+- Prebundles the `proxy-pool` and `oauth-model-policy` dynamic libraries in standard macOS, Windows amd64, and Linux releases plus Docker images; Windows ARM64, FreeBSD, and `_no-plugin` assets do not currently bundle dynamic plugins.
 - Redirects `/` to `/management.html`.
 - Enhances the `/healthz` response.
 
@@ -85,13 +84,14 @@ Frontend management-center customization layer for generating the single-file `m
 
 Main capabilities:
 
-- Provides the sole complete monitoring center through the dynamic `pro-observability` plugin resource; Management no longer compiles a `/monitoring` page.
+- Adds the `/monitoring` request monitoring page.
 - Adds the `/account-inspection` account inspection page.
 - Adds the `/routing` routing-policy page.
-- The `proxy-pool` plugin resource owns node configuration, connectivity tests, runtime statistics, and global-proxy takeover/restoration; Management no longer carries a duplicate page.
-- The `oauth-model-policy` plugin resource edits provider-specific OAuth plan rules, custom plans, fallback policies, and plan-discovery caching.
-- The plugin monitoring center shows request, success-rate, latency, token, cache, and cost metrics together with realtime logs, prices, settings, and backup controls.
-- Management Bridge v2 proxies JSON, SSE, binary imports, downloads, and host UI operations without exposing the management key, raw API keys, or auth tokens to the iframe.
+- Adds the `/proxy-pool` page for node configuration, connectivity tests, runtime statistics, and global-proxy takeover/restoration.
+- Adds the `/oauth-model-policy` visual editor for provider-specific OAuth plan rules, custom plans, fallback policies, and plan-discovery caching.
+- Shows request count, success rate, latency, token, and cost metrics.
+- Persists model prices through SQLite.
+- Persists quota cache through SQLite.
 - Shows quota-card cache timestamps and supports single-card refresh.
 - Integrates with backend account inspection for run control, polling, results, and actions.
 - Shows inspection-written `last_error` messages on the auth files page.
@@ -179,7 +179,7 @@ Overview:
 1. Checks the latest upstream `router-for-me/CLIProxyAPI` release.
 2. Computes the Pro release tag, for example `v<core-version>-pro`.
 3. Checks out the latest upstream core and upstream management releases.
-4. Applies core patches and builds Pro binary assets with CGO and required dynamic-plugin support.
+4. Applies core patches and builds Pro binary assets: default desktop/Linux archives enable CGO for dynamic-library plugin support, while `_no-plugin` archives remain CGO-free portable builds.
 5. Reuses the built Linux assets to assemble and push the multi-architecture image through `Dockerfile.runtime`.
 6. Applies the management customization layer and builds the single-file `management.html`.
 7. Creates or updates the current repository GitHub Release, then uploads binaries, `checksums.txt`, and `management.html`.
@@ -195,10 +195,11 @@ v<core-version>-pro
 
 During Docker builds, `CLIPROXY_VERSION` selects the upstream core tag, while `CLIPROXY_BUILD_VERSION` sets the Pro runtime version.
 
-Binary assets use the Pro release tag and keep the `CLIProxyAPI` prefix. Current releases target macOS amd64/arm64, Windows amd64, and Linux amd64/arm64; every asset supports and bundles the required dynamic plugins. Docker images use CGO-enabled Debian builds:
+Binary asset platforms and archive formats match upstream CLIProxyAPI. The version already carries the Pro release tag, so the asset prefix remains `CLIProxyAPI`. Default desktop/Linux archives support dynamic-library plugins; `_no-plugin` archives are for static or constrained environments. Docker images follow upstream with CGO-enabled Debian builds and dynamic-library plugin support:
 
 ```text
 CLIProxyAPI_<core-version>-pro_<os>_<arch>.<archive>
+CLIProxyAPI_<core-version>-pro_<os>_<arch>_no-plugin.<archive>
 checksums.txt
 management.html
 ```
@@ -314,9 +315,9 @@ Configure a persistent volume for this directory in production.
 ### Usage service
 
 ```text
+USAGE_SERVICE_ENABLED
 USAGE_DATA_DIR
 USAGE_DB_PATH
-PRO_OBSERVABILITY_DB_PATH
 USAGE_BATCH_SIZE
 USAGE_POLL_INTERVAL_MS
 USAGE_QUERY_LIMIT

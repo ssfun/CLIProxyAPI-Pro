@@ -285,8 +285,6 @@ jobs:
           cp "${tmp_dir}/arm64/plugins/linux/arm64/proxy-pool.so" "${context_dir}/plugins/linux/arm64/proxy-pool.so"
           cp "${tmp_dir}/amd64/plugins/linux/amd64/oauth-model-policy.so" "${context_dir}/plugins/linux/amd64/oauth-model-policy.so"
           cp "${tmp_dir}/arm64/plugins/linux/arm64/oauth-model-policy.so" "${context_dir}/plugins/linux/arm64/oauth-model-policy.so"
-          cp "${tmp_dir}/amd64/plugins/linux/amd64/pro-observability.so" "${context_dir}/plugins/linux/amd64/pro-observability.so"
-          cp "${tmp_dir}/arm64/plugins/linux/arm64/pro-observability.so" "${context_dir}/plugins/linux/arm64/pro-observability.so"
           cp "${tmp_dir}/amd64/config.example.yaml" "${context_dir}/config.example.yaml"
           cp customizations-repo/cliproxyapi-pro-core/entrypoint.sh "${context_dir}/entrypoint.sh"
           cp customizations-repo/cliproxyapi-pro-core/Dockerfile.runtime "${context_dir}/Dockerfile.runtime"
@@ -300,9 +298,7 @@ jobs:
             "${context_dir}/plugins/linux/amd64/proxy-pool.so" \
             "${context_dir}/plugins/linux/arm64/proxy-pool.so" \
             "${context_dir}/plugins/linux/amd64/oauth-model-policy.so" \
-            "${context_dir}/plugins/linux/arm64/oauth-model-policy.so" \
-            "${context_dir}/plugins/linux/amd64/pro-observability.so" \
-            "${context_dir}/plugins/linux/arm64/pro-observability.so"
+            "${context_dir}/plugins/linux/arm64/oauth-model-policy.so"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
@@ -367,6 +363,14 @@ jobs:
             asset_arch: amd64
             archive_format: zip
             asset_suffix: ""
+          - target: windows-arm64-no-plugin
+            kind: no-plugin
+            runner: windows-11-arm
+            goos: windows
+            goarch: arm64
+            asset_arch: aarch64
+            archive_format: zip
+            asset_suffix: _no-plugin
           - target: linux-amd64
             kind: linux-glibc-plugin
             runner: ubuntu-latest
@@ -385,6 +389,46 @@ jobs:
             archive_format: tar.gz
             asset_suffix: ""
             manylinux_image: quay.io/pypa/manylinux2014_aarch64@sha256:ae34a6ceeefe0b535c525b2e96f297311c8f1e01cfd8b9be5f647eece5b5c60b
+          - target: linux-amd64-no-plugin
+            kind: no-plugin
+            runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            asset_arch: amd64
+            archive_format: tar.gz
+            asset_suffix: _no-plugin
+          - target: linux-arm64-no-plugin
+            kind: no-plugin
+            runner: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            asset_arch: aarch64
+            archive_format: tar.gz
+            asset_suffix: _no-plugin
+          - target: freebsd-amd64
+            kind: freebsd-plugin
+            runner: ubuntu-latest
+            goos: freebsd
+            goarch: amd64
+            asset_arch: amd64
+            archive_format: tar.gz
+            asset_suffix: ""
+          - target: freebsd-amd64-no-plugin
+            kind: no-plugin
+            runner: ubuntu-latest
+            goos: freebsd
+            goarch: amd64
+            asset_arch: amd64
+            archive_format: tar.gz
+            asset_suffix: _no-plugin
+          - target: freebsd-arm64-no-plugin
+            kind: no-plugin
+            runner: ubuntu-latest
+            goos: freebsd
+            goarch: arm64
+            asset_arch: aarch64
+            archive_format: tar.gz
+            asset_suffix: _no-plugin
 
     permissions:
       contents: read
@@ -486,7 +530,7 @@ jobs:
           if [ "${GOOS}" = "windows" ]; then plugin_extension="dll"; fi
           mkdir -p "${archive_dir}/plugins/${GOOS}/${GOARCH}"
           plugin_relatives=()
-          for plugin_name in proxy-pool oauth-model-policy pro-observability; do
+          for plugin_name in proxy-pool oauth-model-policy; do
             plugin_relative="plugins/${GOOS}/${GOARCH}/${plugin_name}.${plugin_extension}"
             plugin_source=".${plugin_name}-build"
             rm -rf "${plugin_source}"
@@ -524,7 +568,7 @@ jobs:
           archive_name="CLIProxyAPI_${RELEASE_TAG#v}_linux_${ASSET_ARCH}.tar.gz"
           rm -rf "dist/linux-${GOARCH}"
           mkdir -p "${archive_dir}"
-          for plugin_name in proxy-pool oauth-model-policy pro-observability; do
+          for plugin_name in proxy-pool oauth-model-policy; do
             rm -rf ".${plugin_name}-build"
             cp -R "../customizations-repo/cliproxyapi-pro-plugins/${plugin_name}" ".${plugin_name}-build"
           done
@@ -562,7 +606,7 @@ jobs:
                 -o "'"${archive_dir}"'/cli-proxy-api" ./cmd/server/
 
               mkdir -p "'"${archive_dir}"'/plugins/linux/${GOARCH}"
-              for plugin_name in proxy-pool oauth-model-policy pro-observability; do
+              for plugin_name in proxy-pool oauth-model-policy; do
                 go -C ".${plugin_name}-build" mod edit -replace github.com/router-for-me/CLIProxyAPI/v7=/src
                 CGO_ENABLED=1 GOOS=linux GOARCH="${GOARCH}" go -C ".${plugin_name}-build" build \
                   -buildvcs=false -trimpath -buildmode=c-shared \
@@ -588,8 +632,110 @@ jobs:
             --source-date-epoch "${SOURCE_DATE_EPOCH}" \
             cli-proxy-api LICENSE README.md README_EN.md config.example.yaml \
             "plugins/linux/${GOARCH}/proxy-pool.so" \
-            "plugins/linux/${GOARCH}/oauth-model-policy.so" \
-            "plugins/linux/${GOARCH}/pro-observability.so"
+            "plugins/linux/${GOARCH}/oauth-model-policy.so"
+
+      - name: Install FreeBSD plugin build dependencies
+        if: matrix.kind == 'freebsd-plugin'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld wget
+
+      - name: Prepare workspace git metadata for FreeBSD plugin build
+        if: matrix.kind == 'freebsd-plugin'
+        env:
+          BUILD_DATE: ${{ steps.prepare-core.outputs.build_date }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          GIT_AUTHOR_DATE="${BUILD_DATE}" GIT_COMMITTER_DATE="${BUILD_DATE}" git commit --allow-empty -m "Prepare workspace metadata for cgo action"
+
+      - name: Build FreeBSD plugin-capable binary
+        if: matrix.kind == 'freebsd-plugin'
+        uses: go-cross/cgo-actions@d0b8f2f2d67923ce9a42d92a7ef0ed1ebd905f0a # v1
+        env:
+          GOFLAGS: -buildvcs=false -trimpath
+        with:
+          dir: upstream-core
+          packages: ./cmd/server/
+          targets: ${{ matrix.goos }}-${{ matrix.goarch }}
+          out-dir: upstream-core/dist/${{ matrix.target }}/bin
+          output: cli-proxy-api
+          flags: -ldflags=-s -w
+          x-flags: |
+            main.Version=${{ needs.check-version.outputs.release_tag }}
+            main.Commit=release-${{ needs.check-version.outputs.core_tag }}
+            main.BuildDate=${{ steps.prepare-core.outputs.build_date }}
+
+      - name: Package FreeBSD plugin-capable archive
+        if: matrix.kind == 'freebsd-plugin'
+        env:
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+          GOOS: ${{ matrix.goos }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+          SOURCE_DATE_EPOCH: ${{ steps.prepare-core.outputs.source_date_epoch }}
+        run: |
+          set -euo pipefail
+          cd upstream-core
+
+          archive_dir="dist/${{ matrix.target }}/archive"
+          archive_name="CLIProxyAPI_${RELEASE_TAG#v}_${GOOS}_${ASSET_ARCH}.tar.gz"
+          mkdir -p "${archive_dir}"
+          cp "dist/${{ matrix.target }}/bin/cli-proxy-api" "${archive_dir}/cli-proxy-api"
+          cp LICENSE README.md README_EN.md config.example.yaml "${archive_dir}/"
+          python ../customizations-repo/scripts/build/create_reproducible_archive.py \
+            --format tar.gz \
+            --output "dist/${archive_name}" \
+            --root "${archive_dir}" \
+            --source-date-epoch "${SOURCE_DATE_EPOCH}" \
+            cli-proxy-api LICENSE README.md README_EN.md config.example.yaml
+
+      - name: Build no-plugin archive
+        if: matrix.kind == 'no-plugin'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+          CORE_TAG: ${{ needs.check-version.outputs.core_tag }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+          ARCHIVE_FORMAT: ${{ matrix.archive_format }}
+          ASSET_SUFFIX: ${{ matrix.asset_suffix }}
+          BUILD_DATE: ${{ steps.prepare-core.outputs.build_date }}
+          SOURCE_DATE_EPOCH: ${{ steps.prepare-core.outputs.source_date_epoch }}
+        run: |
+          set -euo pipefail
+          cd upstream-core
+
+          binary_name="cli-proxy-api"
+          if [ "${GOOS}" = "windows" ]; then
+            binary_name="cli-proxy-api.exe"
+          fi
+
+          archive_dir="dist/${GOOS}-${GOARCH}${ASSET_SUFFIX}/archive"
+          archive_name="CLIProxyAPI_${RELEASE_TAG#v}_${GOOS}_${ASSET_ARCH}${ASSET_SUFFIX}.${ARCHIVE_FORMAT}"
+          rm -rf "dist/${GOOS}-${GOARCH}${ASSET_SUFFIX}"
+          mkdir -p "${archive_dir}"
+
+          CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" go build -buildvcs=false -trimpath \
+            -ldflags="-s -w -X main.Version=${RELEASE_TAG} -X main.Commit=release-${CORE_TAG} -X main.BuildDate=${BUILD_DATE}" \
+            -o "${archive_dir}/${binary_name}" ./cmd/server/
+
+          if [ "${GOOS}" = "linux" ] && readelf -l "${archive_dir}/${binary_name}" | grep -q 'Requesting program interpreter'; then
+            readelf -l "${archive_dir}/${binary_name}" >&2
+            echo "no-plugin linux binary must not require a dynamic interpreter" >&2
+            exit 1
+          fi
+
+          cp LICENSE README.md README_EN.md config.example.yaml "${archive_dir}/"
+          python ../customizations-repo/scripts/build/create_reproducible_archive.py \
+            --format "${ARCHIVE_FORMAT}" \
+            --output "dist/${archive_name}" \
+            --root "${archive_dir}" \
+            --source-date-epoch "${SOURCE_DATE_EPOCH}" \
+            "${binary_name}" LICENSE README.md README_EN.md config.example.yaml
 
       - name: Upload core binary assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -823,7 +969,7 @@ jobs:
             echo "## Assets"
             echo
             echo "- Pro core default desktop/Linux binaries are built with CGO enabled and support dynamic library plugins when the target platform supports them."
-            echo "- Pro core release assets require dynamic plugin support because usage persistence is owned by \`pro-observability\`."
+            echo "- Pro core \`_no-plugin\` binaries are CGO-free portable builds for static or constrained environments."
             echo "- Pro Docker images follow upstream with CGO-enabled Debian builds and dynamic library plugin support."
             echo "- Pro management panel is published as management.html for automatic panel updates."
             echo

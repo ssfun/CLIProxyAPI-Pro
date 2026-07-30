@@ -320,7 +320,7 @@ func TestManualDisabledStateClearsRoutingProtectionOwnership(t *testing.T) {
 	}
 }
 
-func TestRoutingProtectionStateChangeKeepsRoutingOwnership(t *testing.T) {
+func TestInspectionStateChangeClearsRoutingProtectionOwnership(t *testing.T) {
 	for _, disabled := range []bool{true, false} {
 		t.Run(strconv.FormatBool(disabled), func(t *testing.T) {
 			auth := &coreauth.Auth{
@@ -331,29 +331,14 @@ func TestRoutingProtectionStateChangeKeepsRoutingOwnership(t *testing.T) {
 					},
 				},
 			}
-			setRoutingProtectionDisabledState(auth, disabled)
+			setAuthInspectionDisabledState(auth, disabled)
 			if auth.Disabled != disabled {
 				t.Fatalf("disabled = %v want %v", auth.Disabled, disabled)
 			}
-			if !routingProtectionOwned(auth) {
-				t.Fatal("routing policy state change must retain request protection ownership")
+			if routingProtectionOwned(auth) {
+				t.Fatal("account inspection must take ownership from request protection")
 			}
 		})
-	}
-}
-
-func TestRoutingProtectionReleasePreservesForeignError(t *testing.T) {
-	auth := &coreauth.Auth{
-		Disabled: true, Status: coreauth.StatusDisabled,
-		LastError: &coreauth.Error{Code: "provider_failure", Message: "provider unavailable", HTTPStatus: 503},
-		Metadata: map[string]any{
-			"last_error":                 map[string]any{"source": "provider", "message": "provider unavailable"},
-			routingProtectionMetadataKey: map[string]any{"owner": routingProtectionOwner},
-		},
-	}
-	setRoutingProtectionDisabledState(auth, false)
-	if auth.Disabled || auth.Status != coreauth.StatusError || !auth.Unavailable || auth.StatusMessage != "provider unavailable" {
-		t.Fatalf("released auth = %#v", auth)
 	}
 }
 
