@@ -390,6 +390,25 @@ def ensure_cached_at_in_quota_success_state(path: Path, store_setter: str) -> No
     write(path, f'{text[:success_start]}{updated}{text[error_start:]}')
 
 
+def auth_files_page_path(target: Path) -> Path:
+    for relative in ('src/features/authFiles/AuthFilesPage.tsx', 'src/pages/AuthFilesPage.tsx'):
+        path = target / relative
+        if path.is_file():
+            return path
+    raise RuntimeError(f'AuthFilesPage.tsx not found under {target}')
+
+
+def auth_files_styles_path(target: Path) -> Path:
+    for relative in (
+        'src/features/authFiles/AuthFilesPage.module.scss',
+        'src/pages/AuthFilesPage.module.scss',
+    ):
+        path = target / relative
+        if path.is_file():
+            return path
+    raise RuntimeError(f'AuthFilesPage.module.scss not found under {target}')
+
+
 def insert_once(path: Path, marker: str, insertion: str, present: str) -> None:
     text = read(path)
     if present in text:
@@ -1707,17 +1726,41 @@ def patch_quota_page_search(target: Path) -> None:
 
 def patch_quota_card(target: Path) -> None:
     path = target / 'src/components/quota/QuotaCard.tsx'
-    replace_once(
+    insert_once(
         path,
-        "import { TYPE_COLORS } from '@/utils/quota';\n",
-        "import { QuotaCachedTime } from '@/extensions/quota/QuotaCardExtras';\nimport { TYPE_COLORS } from '@/utils/quota';\n",
+        "import styles from '@/pages/QuotaPage.module.scss';\n",
+        "import { QuotaCachedTime } from '@/extensions/quota/QuotaCardExtras';\n"
+        "import styles from '@/pages/QuotaPage.module.scss';\n",
+        "from '@/extensions/quota/QuotaCardExtras'",
     )
     replace_once(path, "  errorStatus?: number;\n}", "  errorStatus?: number;\n  cachedAt?: number;\n}")
-    replace_once(
-        path,
-        "        ) : quota ? (\n          renderQuotaItems(quota, t, { styles, QuotaProgressBar })\n        ) : (",
-        "        ) : quota ? (\n          <>\n            {renderQuotaItems(quota, t, { styles, QuotaProgressBar })}\n            <QuotaCachedTime quotaStatus={quotaStatus} cachedAt={quota.cachedAt} />\n          </>\n        ) : (",
+    text = read(path)
+    if '<QuotaCachedTime quotaStatus={quotaStatus} cachedAt={quota.cachedAt} />' in text:
+        return
+
+    render_variants = (
+        'renderQuotaItems(quota, t, { styles, QuotaProgressBar })',
+        'renderQuotaItems(quota, t, { styles, QuotaProgressBar: BoundQuotaProgressBar })',
     )
+    matches = [variant for variant in render_variants if variant in text]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f'Expected one quota renderer variant in {path}, found {len(matches)}: {render_variants!r}'
+        )
+    render_call = matches[0]
+    old = f"        ) : quota ? (\n          {render_call}\n        ) : ("
+    new = (
+        "        ) : quota ? (\n"
+        "          <>\n"
+        f"            {{{render_call}}}\n"
+        "            <QuotaCachedTime quotaStatus={quotaStatus} cachedAt={quota.cachedAt} />\n"
+        "          </>\n"
+        "        ) : ("
+    )
+    match_count = text.count(old)
+    if match_count != 1:
+        raise RuntimeError(f'Expected one quota success branch in {path}, found {match_count}: {old[:120]!r}')
+    write(path, text.replace(old, new, 1))
 
 
 def patch_quota_store(target: Path) -> None:
@@ -1829,7 +1872,7 @@ def patch_account_inspection_page(target: Path) -> None:
 
 
 def patch_auth_files_page_search(target: Path) -> None:
-    path = target / 'src/pages/AuthFilesPage.tsx'
+    path = auth_files_page_path(target)
     replace_once(
         path,
         "import { useAuthStore, useNotificationStore, useThemeStore } from '@/stores';\n",
@@ -2073,7 +2116,7 @@ def patch_auth_files_page_search(target: Path) -> None:
 
 
 def patch_auth_files_page_sorting(target: Path) -> None:
-    page_path = target / 'src/pages/AuthFilesPage.tsx'
+    page_path = auth_files_page_path(target)
     ui_state_path = target / 'src/features/authFiles/uiState.ts'
 
     replace_once(
@@ -2149,6 +2192,17 @@ def patch_auth_files_page_sorting(target: Path) -> None:
         "    return options;\n"
         "  }, [planSortAvailable, quotaSortAvailable, t]);\n",
     )
+    text = read(page_path)
+    direct_priority = (
+        "        const pa = typeof a.priority === 'number' ? a.priority : 0;\n"
+        "        const pb = typeof b.priority === 'number' ? b.priority : 0;\n"
+    )
+    parsed_priority = (
+        "        const pa = parsePriorityValue(a.priority) ?? 0;\n"
+        "        const pb = parsePriorityValue(b.priority) ?? 0;\n"
+    )
+    if direct_priority in text and parsed_priority not in text:
+        write(page_path, text.replace(direct_priority, parsed_priority, 1))
     replace_once(
         page_path,
         "  const sorted = useMemo(() => {\n"
@@ -2186,8 +2240,8 @@ def patch_auth_files_page_sorting(target: Path) -> None:
         "      copy.sort((a, b) => a.name.localeCompare(b.name));\n"
         "    } else if (effectiveSortMode === 'priority') {\n"
         "      copy.sort((a, b) => {\n"
-        "        const pa = parsePriorityValue(a.priority) ?? 0;\n"
-        "        const pb = parsePriorityValue(b.priority) ?? 0;\n"
+        "        const pa = Number.isFinite(Number(a.priority)) ? Number(a.priority) : 0;\n"
+        "        const pb = Number.isFinite(Number(b.priority)) ? Number(b.priority) : 0;\n"
         "        return pb - pa; // 高优先级排前面\n"
         "      });\n"
         "    } else if (effectiveSortMode === 'plan') {\n"
@@ -2199,22 +2253,30 @@ def patch_auth_files_page_sorting(target: Path) -> None:
         "  }, [effectiveSortMode, filtered, quotaSearchStore]);\n",
     )
 
-    replace_once(
-        page_path,
-        "                value={sortMode}\n"
-        "                options={sortOptions}\n"
-        "                onChange={handleSortModeChange}\n",
-        "                value={effectiveSortMode}\n"
-        "                options={sortOptions}\n"
-        "                onChange={handleSortModeChange}\n",
-    )
+    text = read(page_path)
+    if 'sortMode={effectiveSortMode}' not in text and 'value={effectiveSortMode}' not in text:
+        inline_select = (
+            "                value={sortMode}\n"
+            "                options={sortOptions}\n"
+            "                onChange={handleSortModeChange}\n"
+        )
+        toolbar_prop = "          sortMode={sortMode}\n"
+        if inline_select in text:
+            write(
+                page_path,
+                text.replace(inline_select, inline_select.replace('sortMode', 'effectiveSortMode'), 1),
+            )
+        elif toolbar_prop in text:
+            write(page_path, text.replace(toolbar_prop, "          sortMode={effectiveSortMode}\n", 1))
+        else:
+            raise RuntimeError(f'Pattern not found in {page_path}: auth files sort control')
 
 
 def patch_auth_files_gemini_quota(target: Path) -> None:
     constants_path = target / 'src/features/authFiles/constants.ts'
     quota_section_path = target / 'src/features/authFiles/components/AuthFileQuotaSection.tsx'
     card_path = target / 'src/features/authFiles/components/AuthFileCard.tsx'
-    styles_path = target / 'src/pages/AuthFilesPage.module.scss'
+    styles_path = auth_files_styles_path(target)
 
     replace_once(
         constants_path,
@@ -2272,32 +2334,44 @@ def patch_auth_files_gemini_quota(target: Path) -> None:
         "    if (quotaType === 'kimi') return state.setKimiQuota as unknown as (updater: unknown) => void;",
     )
 
-    replace_once(
-        card_path,
+    card_text = read(card_path)
+    legacy_card_class = (
         "        : quotaType === 'codex'\n"
         "          ? styles.codexCard\n"
-        "          : quotaType === 'kimi'",
-        "        : quotaType === 'codex'\n"
-        "          ? styles.codexCard\n"
-        "          : quotaType === 'gemini-cli'\n"
-        "            ? styles.geminiCliCard\n"
-        "            : quotaType === 'kimi'",
+        "          : quotaType === 'kimi'"
     )
-    insert_once(
-        styles_path,
-        ".kimiCard {\n",
-        ".geminiCliCard {\n"
-        "  background-image: linear-gradient(180deg, rgba(224, 232, 255, 0.08), transparent);\n"
-        "}\n\n"
-        ".kimiCard {\n",
-        '.geminiCliCard {',
-    )
+    if legacy_card_class in card_text:
+        write(
+            card_path,
+            card_text.replace(
+                legacy_card_class,
+                "        : quotaType === 'codex'\n"
+                "          ? styles.codexCard\n"
+                "          : quotaType === 'gemini-cli'\n"
+                "            ? styles.geminiCliCard\n"
+                "            : quotaType === 'kimi'",
+                1,
+            ),
+        )
+        insert_once(
+            styles_path,
+            ".kimiCard {\n",
+            ".geminiCliCard {\n"
+            "  background-image: linear-gradient(180deg, rgba(224, 232, 255, 0.08), transparent);\n"
+            "}\n\n"
+            ".kimiCard {\n",
+            '.geminiCliCard {',
+        )
+    elif "quotaType === 'gemini-cli'" in card_text:
+        pass
+    elif 'AuthFileQuotaSection' not in card_text:
+        raise RuntimeError(f'Pattern not found in {card_path}: quota card layout')
 
 
 def patch_auth_files_runtime_state(target: Path) -> None:
     type_path = target / 'src/types/authFile.ts'
     card_path = target / 'src/features/authFiles/components/AuthFileCard.tsx'
-    page_path = target / 'src/pages/AuthFilesPage.tsx'
+    page_path = auth_files_page_path(target)
 
     insert_once(
         type_path,
@@ -2305,21 +2379,53 @@ def patch_auth_files_runtime_state(target: Path) -> None:
         "  selected?: unknown;\n  success?: unknown;\n",
         "selected?: unknown;",
     )
-    replace_once(
-        card_path,
-        "  const fileStats = {\n    success: normalizeUsageTotal(file.success),\n    failure: normalizeUsageTotal(file.failed),\n  };\n",
-        "  const fileStats = {\n    selected: normalizeUsageTotal(file.selected),\n    success: normalizeUsageTotal(file.success),\n    failure: normalizeUsageTotal(file.failed),\n  };\n",
+    card_text = read(card_path)
+    legacy_stats = (
+        "  const fileStats = {\n    success: normalizeUsageTotal(file.success),\n"
+        "    failure: normalizeUsageTotal(file.failed),\n  };\n"
     )
-    insert_once(
-        card_path,
-        "            <div className={`${styles.cardStats} ${compact ? styles.cardStatsCompact : ''}`}>\n",
-        "            <div className={`${styles.cardStats} ${compact ? styles.cardStatsCompact : ''}`}>\n"
-        "              <div className={styles.statPill}>\n"
-        "                <span className={styles.statLabel}>{t('auth_files.selected_count')}</span>\n"
-        "                <span className={styles.statValue}>{fileStats.selected}</span>\n"
-        "              </div>\n",
-        "t('auth_files.selected_count')",
-    )
+    if legacy_stats in card_text:
+        write(
+            card_path,
+            card_text.replace(
+                legacy_stats,
+                "  const fileStats = {\n    selected: normalizeUsageTotal(file.selected),\n"
+                "    success: normalizeUsageTotal(file.success),\n"
+                "    failure: normalizeUsageTotal(file.failed),\n  };\n",
+                1,
+            ),
+        )
+        insert_once(
+            card_path,
+            "            <div className={`${styles.cardStats} ${compact ? styles.cardStatsCompact : ''}`}>\n",
+            "            <div className={`${styles.cardStats} ${compact ? styles.cardStatsCompact : ''}`}>\n"
+            "              <div className={styles.statPill}>\n"
+            "                <span className={styles.statLabel}>{t('auth_files.selected_count')}</span>\n"
+            "                <span className={styles.statValue}>{fileStats.selected}</span>\n"
+            "              </div>\n",
+            "t('auth_files.selected_count')",
+        )
+    elif 'const selectedCount =' not in card_text and 'const successCount = file.successCount ?? 0;' in card_text:
+        write(
+            card_path,
+            card_text.replace(
+                '  const successCount = file.successCount ?? 0;\n',
+                "  const selectedCount = Math.max(0, Number(file.selected) || 0);\n"
+                "  const successCount = file.successCount ?? 0;\n",
+                1,
+            ),
+        )
+        insert_once(
+            card_path,
+            "          <span className={styles.healthCounts}>\n",
+            "          <span className={styles.healthCounts}>\n"
+            "            <span className={styles.countOk} title={t('auth_files.selected_count')}>\n"
+            "              {t('auth_files.selected_count')} {selectedCount}\n"
+            "            </span>\n",
+            "{t('auth_files.selected_count')} {selectedCount}",
+        )
+    elif "t('auth_files.selected_count')" not in card_text:
+        raise RuntimeError(f'Pattern not found in {card_path}: auth runtime counters')
 
     insert_once(
         page_path,
@@ -2328,27 +2434,26 @@ def patch_auth_files_runtime_state(target: Path) -> None:
         "import { quotaPersistenceMiddleware } from '@/extensions/quota/persistenceMiddleware';\n",
         "quotaPersistenceMiddleware } from '@/extensions/quota/persistenceMiddleware'",
     )
-    replace_once(
-        page_path,
-        "  const handleHeaderRefresh = useCallback(async () => {\n"
-        "    await Promise.all([loadFiles(), loadExcluded(), loadModelAlias()]);\n"
-        "  }, [loadFiles, loadExcluded, loadModelAlias]);\n",
-        "  const handleHeaderRefresh = useCallback(async () => {\n"
-        "    await Promise.all([\n"
-        "      loadFiles(),\n"
-        "      loadExcluded(),\n"
-        "      loadModelAlias(),\n"
-        "      quotaPersistenceMiddleware.ensureFresh(),\n"
-        "    ]);\n"
-        "  }, [loadFiles, loadExcluded, loadModelAlias]);\n",
-    )
+    text = read(page_path)
+    if 'quotaPersistenceMiddleware.ensureFresh()' not in text:
+        refresh_variants = (
+            "    await Promise.all([loadFiles(), loadExcluded(), loadModelAlias()]);\n",
+            "    await Promise.all([loadFiles({ background: true }), loadExcluded(), loadModelAlias()]);\n",
+        )
+        for refresh in refresh_variants:
+            if refresh in text:
+                replacement = refresh.replace(']);\n', ', quotaPersistenceMiddleware.ensureFresh()]);\n')
+                write(page_path, text.replace(refresh, replacement, 1))
+                break
+        else:
+            raise RuntimeError(f'Pattern not found in {page_path}: header refresh')
 
 
 def patch_account_usage_feature(target: Path) -> None:
     icons_path = target / 'src/components/ui/icons.tsx'
     card_path = target / 'src/features/authFiles/components/AuthFileCard.tsx'
-    page_path = target / 'src/pages/AuthFilesPage.tsx'
-    styles_path = target / 'src/pages/AuthFilesPage.module.scss'
+    page_path = auth_files_page_path(target)
+    styles_path = auth_files_styles_path(target)
 
     insert_once(
         icons_path,
@@ -2385,10 +2490,10 @@ export function IconModelCluster({ size = 20, ...props }: IconProps) {
         '    onShowModels,\n    onDownload,\n',
         '    onShowModels,\n    onShowUsage,\n    onDownload,\n',
     )
-    insert_once(
-        card_path,
-        '            </div>\n          </div>\n\n          <div className={`${styles.cardMeta}',
-        '''            </div>
+    card_text = read(card_path)
+    legacy_usage_marker = '            </div>\n          </div>\n\n          <div className={`${styles.cardMeta}'
+    if "onClick={() => onShowUsage(file)}" not in card_text and legacy_usage_marker in card_text:
+        write(card_path, card_text.replace(legacy_usage_marker, '''            </div>
             {authIndexKey && (
               <Button
                 variant="secondary"
@@ -2405,12 +2510,11 @@ export function IconModelCluster({ size = 20, ...props }: IconProps) {
           </div>
 
           <div className={`${styles.cardMeta}''',
-        "onClick={() => onShowUsage(file)}",
-    )
-    insert_once(
-        styles_path,
-        '.modelsActionButton:global(.btn.btn-sm) {\n',
-        '''.usageCornerButton:global(.btn.btn-sm) {
+        1))
+        insert_once(
+            styles_path,
+            '.modelsActionButton:global(.btn.btn-sm) {\n',
+            '''.usageCornerButton:global(.btn.btn-sm) {
   flex: 0 0 auto;
   align-self: flex-start;
   width: 34px;
@@ -2441,8 +2545,27 @@ export function IconModelCluster({ size = 20, ...props }: IconProps) {
 
 .modelsActionButton:global(.btn.btn-sm) {
 ''',
-        '.usageCornerButton:global(.btn.btn-sm)',
-    )
+            '.usageCornerButton:global(.btn.btn-sm)',
+        )
+    elif "onClick={() => onShowUsage(file)}" not in card_text:
+        actions_marker = '        <div className={styles.actionsMain}>\n'
+        if actions_marker not in card_text:
+            raise RuntimeError(f'Pattern not found in {card_path}: auth file actions')
+        write(
+            card_path,
+            card_text.replace(
+                actions_marker,
+                actions_marker
+                + "          {authIndexKey && (\n"
+                + "            <Button variant=\"secondary\" size=\"sm\" onClick={() => onShowUsage(file)}\n"
+                + "              title={t('account_usage.card_action')} disabled={disableControls}>\n"
+                + "              <IconChartColumnIncreasing size={14} />\n"
+                + "              {t('account_usage.card_action')}\n"
+                + "            </Button>\n"
+                + "          )}\n",
+                1,
+            ),
+        )
 
     insert_once(
         page_path,
@@ -2458,20 +2581,44 @@ export function IconModelCluster({ size = 20, ...props }: IconProps) {
         "import type { AuthFileItem } from '@/types';\n",
         "import type { AuthFileItem } from '@/types';",
     )
-    insert_once(
-        page_path,
-        "  const [displaySettingsOpen, setDisplaySettingsOpen] = useState(false);\n",
-        "  const [displaySettingsOpen, setDisplaySettingsOpen] = useState(false);\n"
-        "  const [accountUsageFile, setAccountUsageFile] = useState<AuthFileItem | null>(null);\n",
-        'const [accountUsageFile, setAccountUsageFile]',
-    )
-    replace_once(
-        page_path,
-        "                  onShowModels={showModels}\n                  onDownload={handleDownload}\n",
-        "                  onShowModels={showModels}\n"
-        "                  onShowUsage={setAccountUsageFile}\n"
-        "                  onDownload={handleDownload}\n",
-    )
+    page_text = read(page_path)
+    if 'const [accountUsageFile, setAccountUsageFile]' not in page_text:
+        state_markers = (
+            "  const [displaySettingsOpen, setDisplaySettingsOpen] = useState(false);\n",
+            "  const [sortMode, setSortMode] = useState<AuthFilesSortMode>('default');\n",
+        )
+        for marker in state_markers:
+            if marker in page_text:
+                write(
+                    page_path,
+                    page_text.replace(
+                        marker,
+                        marker
+                        + "  const [accountUsageFile, setAccountUsageFile] = useState<AuthFileItem | null>(null);\n",
+                        1,
+                    ),
+                )
+                break
+        else:
+            raise RuntimeError(f'Pattern not found in {page_path}: account usage state')
+    page_text = read(page_path)
+    if 'onShowUsage={setAccountUsageFile}' not in page_text:
+        for indent in ('                  ', '                '):
+            marker = f'{indent}onShowModels={{showModels}}\n{indent}onDownload={{handleDownload}}\n'
+            if marker in page_text:
+                write(
+                    page_path,
+                    page_text.replace(
+                        marker,
+                        f'{indent}onShowModels={{showModels}}\n'
+                        f'{indent}onShowUsage={{setAccountUsageFile}}\n'
+                        f'{indent}onDownload={{handleDownload}}\n',
+                        1,
+                    ),
+                )
+                break
+        else:
+            raise RuntimeError(f'Pattern not found in {page_path}: auth card usage callback')
     insert_once(
         page_path,
         "      <AuthFileModelsModal\n",
@@ -2701,6 +2848,11 @@ def patch_supporting_api_and_types(target: Path) -> None:
     )
 
     auth_files_path = target / 'src/services/api/authFiles.ts'
+    auth_files_normalizer = (
+        'normalizeAuthFilesResponse'
+        if 'normalizeAuthFilesResponse' in read(auth_files_path)
+        else 'dedupeAuthFilesResponse'
+    )
     replace_once(
         auth_files_path,
         "type AuthFileStatusResponse = { status: string; disabled: boolean };\n",
@@ -2712,11 +2864,31 @@ def patch_supporting_api_and_types(target: Path) -> None:
         "const AUTH_FILES_LIST_CACHE_TTL_MS = 2000;\nlet authFilesListCache: { expiresAt: number; response: AuthFilesResponse } | null = null;\nlet authFilesListRequest: Promise<AuthFilesResponse> | null = null;\nlet authFilesListVersion = 0;\n\nconst cloneAuthFilesResponse = (response: AuthFilesResponse): AuthFilesResponse => ({\n  ...response,\n  files: Array.isArray(response.files) ? [...response.files] : [],\n});\n\nconst invalidateAuthFilesListCache = () => {\n  authFilesListVersion += 1;\n  authFilesListCache = null;\n  authFilesListRequest = null;\n};\n\nconst fetchAuthFilesList = async (): Promise<AuthFilesResponse> => {\n  const now = Date.now();\n  if (authFilesListCache && authFilesListCache.expiresAt > now) {\n    return cloneAuthFilesResponse(authFilesListCache.response);\n  }\n  if (!authFilesListRequest) {\n    const requestVersion = authFilesListVersion;\n    authFilesListRequest = apiClient.get<AuthFilesResponse>('/auth-files')\n      .then(dedupeAuthFilesResponse)\n      .then((response) => {\n        if (requestVersion === authFilesListVersion) {\n          authFilesListCache = {\n            expiresAt: Date.now() + AUTH_FILES_LIST_CACHE_TTL_MS,\n            response: cloneAuthFilesResponse(response),\n          };\n        }\n        return response;\n      })\n      .finally(() => {\n        if (requestVersion === authFilesListVersion) {\n          authFilesListRequest = null;\n        }\n      });\n  }\n  return cloneAuthFilesResponse(await authFilesListRequest);\n};\n\nexport const authFilesApi = {\n",
         "AUTH_FILES_LIST_CACHE_TTL_MS",
     )
-    replace_once(
+    replace_once_if_present(
         auth_files_path,
-        "  list: async () => dedupeAuthFilesResponse(await apiClient.get<AuthFilesResponse>('/auth-files')),\n\n  setStatus: (name: string, disabled: boolean) =>\n    apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled }),\n\n",
-        "  list: fetchAuthFilesList,\n\n  patchFile: async (payload: AuthFilePatchPayload) => {\n    const response = await apiClient.patch<AuthFileStatusResponse>('/auth-files', payload);\n    invalidateAuthFilesListCache();\n    return response;\n  },\n\n  setStatus: async (name: string, disabled: boolean) => {\n    const response = await apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled });\n    invalidateAuthFilesListCache();\n    return response;\n  },\n",
+        '      .then(dedupeAuthFilesResponse)\n',
+        f'      .then({auth_files_normalizer})\n',
     )
+    text = read(auth_files_path)
+    list_variants = (
+        "  list: async () => dedupeAuthFilesResponse(await apiClient.get<AuthFilesResponse>('/auth-files')),\n\n"
+        "  setStatus: (name: string, disabled: boolean) =>\n"
+        "    apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled }),\n\n",
+        "  list: async () =>\n"
+        "    normalizeAuthFilesResponse(await apiClient.get<AuthFilesResponse>('/auth-files')),\n\n"
+        "  setStatus: (name: string, disabled: boolean) =>\n"
+        "    apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled }),\n\n",
+    )
+    list_replacement = (
+        "  list: fetchAuthFilesList,\n\n  patchFile: async (payload: AuthFilePatchPayload) => {\n    const response = await apiClient.patch<AuthFileStatusResponse>('/auth-files', payload);\n    invalidateAuthFilesListCache();\n    return response;\n  },\n\n  setStatus: async (name: string, disabled: boolean) => {\n    const response = await apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled });\n    invalidateAuthFilesListCache();\n    return response;\n  },\n"
+    )
+    if '  list: fetchAuthFilesList,\n' not in text:
+        for list_variant in list_variants:
+            if list_variant in text:
+                write(auth_files_path, text.replace(list_variant, list_replacement, 1))
+                break
+        else:
+            raise RuntimeError(f'Pattern not found in {auth_files_path}: auth files list method')
     replace_once(
         auth_files_path,
         "  patchFields: (name: string, fields: AuthFileFieldsPatch) =>\n    apiClient.patch('/auth-files/fields', { name, ...fields }),\n\n",
