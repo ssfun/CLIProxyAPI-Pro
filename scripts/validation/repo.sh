@@ -33,7 +33,7 @@ python3 "${repo_root}/scripts/validation/check_workflow_actions.py" \
 
 plugin_build_dir="$(mktemp -d "${TMPDIR:-/tmp}/cliproxyapi-pro-plugin.XXXXXX")"
 trap 'rm -rf "${plugin_build_dir}"' EXIT
-for plugin_name in proxy-pool oauth-model-policy pro-observability; do
+for plugin_name in proxy-pool oauth-model-policy; do
   plugin_root="${repo_root}/cliproxyapi-pro-plugins/${plugin_name}"
   go -C "${plugin_root}" test -count=1 ./...
   CGO_ENABLED=1 go -C "${plugin_root}" build \

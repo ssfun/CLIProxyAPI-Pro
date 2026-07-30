@@ -9,13 +9,6 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/redisqueue"
 )
 
-func TestLegacyEmbeddedUsageServiceFailsClosed(t *testing.T) {
-	service, err := Start(context.Background())
-	if err == nil || service != nil {
-		t.Fatalf("Start() = %#v, %v; want nil, error", service, err)
-	}
-}
-
 func TestCollectorRetriesPoppedBatchAfterSQLiteFailure(t *testing.T) {
 	store := openTestStore(t)
 	ctx, cancel := context.WithCancel(context.Background())

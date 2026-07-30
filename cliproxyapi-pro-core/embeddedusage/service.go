@@ -25,7 +25,41 @@ type Service struct {
 }
 
 func Start(ctx context.Context) (*Service, error) {
-	return nil, fmt.Errorf("legacy embedded usage service is unavailable; pro-observability is required")
+	cfg := LoadConfig()
+	if !cfg.Enabled {
+		log.Info("embedded usage service disabled")
+		return nil, nil
+	}
+
+	store, err := OpenStore(cfg.DBPath)
+	if err != nil {
+		return nil, err
+	}
+
+	redisqueue.SetEnabled(true)
+	redisqueue.SetUsageStatisticsEnabled(true)
+
+	service := &Service{
+		ctx:   ctx,
+		cfg:   cfg,
+		store: store,
+	}
+	service.server = NewServer(cfg, store)
+	service.startWorker(func() { service.collect(ctx) })
+	service.startWorker(func() { service.maintain(ctx) })
+	service.startWorker(func() { service.runWebDAVBackups(ctx) })
+	service.startWorker(func() { service.runModelPriceSync(ctx) })
+	go func() {
+		<-ctx.Done()
+		service.workers.Wait()
+		stopRuntimeStateWriter(service)
+		if err := store.Close(); err != nil {
+			log.WithError(err).Warn("failed to close embedded usage store")
+		}
+	}()
+
+	log.Infof("embedded usage service started with db %s", cfg.DBPath)
+	return service, nil
 }
 
 func (s *Service) startWorker(run func()) {

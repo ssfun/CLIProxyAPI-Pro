@@ -6,27 +6,25 @@
 
 ## 定制内容
 
-### 插件资源页面
+### 代理池页面
 
-`proxy-pool` 通过 upstream 插件资源协议注册唯一的代理池管理页，可配置 HTTP/HTTPS/SOCKS5/SOCKS5H 节点、轮询策略、权重、健康检查、隔离和故障转移，并提供批量导入、草稿测试、手动解除隔离和运行诊断。Management 不再编译或注册第二套 `/proxy-pool` 页面。
+新增 `/proxy-pool` 顶级页面，管理预打包的 `proxy-pool` 动态插件。页面可配置 HTTP/HTTPS/SOCKS5/SOCKS5H 节点、轮询策略、权重、健康检查、隔离和故障转移，并提供批量粘贴导入、节点搜索、筛选结果批量启停、快速复制、未保存草稿测试和手动解除隔离。运行区展示成功率、失败数、活动连接、最近成功/失败、配置代次和健康检查时间，并在插件未注册、端口占用或热重载失败时给出诊断。
 
-`oauth-model-policy` 同样注册唯一的插件资源页，按 xAI、Codex、Claude、Gemini CLI、Antigravity 和 Kimi 标签页编辑套餐模型排除规则，支持自定义套餐，并区分 `_unknown` 与 `_default` 回退。缓存时间、提供商探测超时和插件优先级也直接写入插件配置；Management 不再持有该业务页面、service 或样式。
-
-`pro-observability` 注册唯一的完整监控中心资源页，持有页面实现、usage/聚合契约、模型价格、备份、quota cache 和路由运行态。Management 不再编译 `/monitoring` 路由、静态菜单或第二套监控组件；动态入口为 `#/plugin-pages/pro-observability/0`。Core 只保留宿主启动、Management 鉴权和 SSE transport bridge。
+新增 `/oauth-model-policy` 顶级页面，管理预打包的 `oauth-model-policy` 动态插件。页面按 xAI、Codex、Claude、Gemini CLI、Antigravity 和 Kimi 标签页编辑套餐模型排除规则，支持自定义套餐，并区分套餐识别失败使用的 `_unknown` 与已识别套餐缺少专属规则时使用的 `_default`。同时可配置缓存时间、提供商探测超时和插件优先级；保存时自动启用插件运行时。
 
 页面负责在插件监听就绪后把 Core 的全局 `proxy-url` 切换到固定回环 SOCKS5 地址。停止接管时恢复此前的全局代理；带独立 `proxy-url` 的凭证会作为绕过项明确列出。插件配置随 Core 配置持久化，健康状态和连接统计属于进程级运行数据，不写入 usage 业务备份。
 
 轮换粒度是 SOCKS5 TCP tunnel，不保证每个复用的 HTTP 请求都切换节点。默认 `fail-open=false`，避免所有代理失效时静默直连。
 
-### 插件监控中心
+### 请求监控页面
 
-页面由 `pro-observability/webapp` 构建并嵌入插件，通过 upstream 插件资源协议动态加载：
+新增顶级监控路由：
 
 ```text
-#/plugin-pages/pro-observability/0
+/monitoring
 ```
 
-页面消费插件提供的 `/usage*` API，加载初始 usage 快照，并通过增量事件轮询或 SSE usage 流跟进更新，提供：
+该页面消费 customized `cliproxyapi-pro-core` 后端 usage API。页面会加载初始 usage 快照，并通过增量事件轮询或 SSE usage 流跟进更新，提供：
 
 - 请求总量和成功/失败统计
 - 成功率和延迟摘要
@@ -43,11 +41,9 @@
 
 账号汇总表和实时请求表会在模块内部滚动，避免长历史记录把整个页面撑长。
 
-Management 只提供受控的 Bridge v2：复用当前 Core 连接完成 JSON 请求、SSE open/chunk/close、二进制导入、宿主下载、toast/确认框和剪贴板操作。传给 iframe 的 bootstrap 已脱敏，不包含 management key、原始 API key、auth token 或未遮罩凭据；远程 Core 连接也无需在 iframe 中再次登录。
-
 ### 模型价格持久化
 
-模型价格设置通过 `pro-observability` 的 SQLite API 持久化，不再作为普通浏览器本地状态保存：
+模型价格设置通过后端 SQLite API 持久化，不再作为普通浏览器本地状态保存：
 
 - `GET /usage/model-prices`
 - `PUT /usage/model-prices`
@@ -64,7 +60,7 @@ Management 只提供受控的 Bridge v2：复用当前 Core 连接完成 JSON �
 
 ### SQLite 配额持久化
 
-配额快照通过 `pro-observability` usage service 持久化：
+配额快照通过后端 usage service 持久化：
 
 - `GET /usage/quota-cache`
 - `PUT /usage/quota-cache`
@@ -155,26 +151,28 @@ UI 会在主布局中启动 `QuotaPersistenceBootstrap`，把已保存的配额�
 
 `apply_customizations.py` 还会 patch upstream 文件以增加：
 
-- `/routing` 路由；监控中心和账号巡检入口都来自插件动态资源注册。
-- 插件资源 Bridge v2、账号巡检/路由侧边栏文案和图标。
+- `/monitoring`、`/account-inspection` 和 `/routing` 路由。
+- 侧边栏导航文案和图标。
 - 从 `monitoring-locales.json` 合并的多语言文案。
-- 插件 bootstrap 使用的 `usageStatisticsEnabled` 和 `clean` 配置类型。
+- monitoring/account inspection 使用的 `usageStatisticsEnabled` 和 `clean` 配置类型。
 - `authFilesApi.patchFile`、`setStatusWithFallback` helper。
+- `accountInspection` service export。
 - `Select` 的 `triggerClassName` 和 `dropdownClassName` props。
 - `maskSensitiveText` 工具函数。
 - quota state 类型和 success state 中的 `cachedAt` 字段。
 - 管理中心版本卡片的“检查更新”按钮；调用后端 `POST /management-panel/check-update`，仅在 latest release 资源哈希变化时替换面板，并在实际更新后重新加载页面。
 
-插件监控中心采用“首屏快照 + SSE 增量 + cursor 追平”同步链路，并按事件 ID 去重。趋势图、模型排行和 API Key 排行使用 `/usage/aggregates` 服务端聚合；页面隐藏时会暂停 SSE 和 React 增量刷新，回到前台后再按 cursor 补齐。空库收到首条事件时也会自动建立实时日志快照。
+请求监控采用“首屏快照 + SSE 增量 + cursor 追平”同步链路，并按事件 ID 去重。趋势图、模型排行和 API Key 排行优先使用 `/usage/aggregates` 服务端聚合，接口不可用时自动回退到本地明细计算。页面隐藏时会暂停 SSE 和 React 增量刷新，回到前台后再按 cursor 补齐；标题区会展示实时、重连、后台暂停、异常和最近事件时间。
 
 ## 目录结构
 
 - `overlay/` — 直接复制到 upstream checkout 的新增/覆盖文件。
+- `overlay/src/pages/MonitoringCenterPage.tsx` — 请求监控页面。
+- `overlay/src/pages/AccountInspectionPage.tsx` — 账号巡检页面。
 - `overlay/src/pages/RoutingPolicyPage.tsx` — 路由策略和请求状态保护页面。
-- `overlay/src/features/plugins/usePluginResourceBridge.ts` — 插件页面的受控 Management Bridge v2。
-- `overlay/src/features/monitoring/` — 账号 usage 深链与账号套餐显示逻辑，不包含监控中心或账号巡检页面。
+- `overlay/src/features/monitoring/` — 监控与巡检逻辑。
 - `overlay/src/extensions/quota/` — SQLite 配额持久化集成。
-- `overlay/src/services/api/` — 路由策略与账号 usage API clients。
+- `overlay/src/services/api/` — 新增 API clients。
 - `overlay-replacements.json` — 对有意覆盖 upstream 同路径文件的 full-file replacements，记录已审阅的 upstream SHA-256 与替换原因。
 - `monitoring-locales.json` — 合并进 upstream locale 文件的多语言文案。
 - `apply_customizations.py` — 将全部定制应用到目标 upstream checkout。

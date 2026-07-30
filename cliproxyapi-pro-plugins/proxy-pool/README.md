@@ -15,7 +15,7 @@
 
 The plugin itself never rewrites Core's global `proxy-url`. The Pro management page can either leave the endpoint for manual configuration or, after an explicit **Start takeover** action, save the previous value and point Core at the fixed endpoint (for example `socks5://127.0.0.1:8318`). **Stop takeover** restores the saved value.
 
-The plugin registers its management page through `ManagementAPI` as the `/ui` resource; Management does not ship a second proxy-pool implementation. The page supports batch paste (`URL` or `label | URL | weight`), draft testing, manual recovery, and runtime diagnostics. Runtime health and counters are intentionally ephemeral; plugin configuration is persisted with the normal Core configuration.
+The management page also supports batch paste (`URL` or `label | URL | weight`), node search, filtered enable/disable, quick duplication, draft testing, manual recovery, and runtime diagnostics. Runtime health and counters are intentionally ephemeral; plugin configuration is persisted with the normal Core configuration.
 
 ## Management routes
 

@@ -117,31 +117,17 @@ CGO_ENABLED=1 go -C "${oauth_model_policy_source}" build \
   -buildvcs=false -trimpath -buildmode=c-shared \
   -o "${oauth_model_policy_binary}" .
 
-observability_source="${validation_tmp}/pro-observability"
-observability_binary="${validation_tmp}/pro-observability.so"
-cp -R "${repo_root}/cliproxyapi-pro-plugins/pro-observability" "${observability_source}"
-go -C "${observability_source}" mod edit \
-  -replace "github.com/router-for-me/CLIProxyAPI/v7=${upstream_root}"
-go -C "${observability_source}" mod tidy
-CGO_ENABLED=1 go -C "${observability_source}" build \
-  -buildvcs=false -trimpath -buildmode=c-shared \
-  -o "${observability_binary}" .
-
 go -C "${upstream_root}" test "${test_flags[@]}" ./internal/embeddedusage/...
 go -C "${upstream_root}" test "${test_flags[@]}" \
   ./internal/client/claude/models \
   ./internal/api/handlers/management \
-  ./internal/cmd \
+  ./internal/pluginhost \
   ./internal/pluginstore \
   ./internal/redisqueue \
   ./internal/requestmeta \
   ./sdk/api/handlers \
   ./sdk/api/handlers/claude \
   ./sdk/cliproxy/auth
-CLIPROXY_PRO_OBSERVABILITY_PLUGIN="${observability_binary}" \
-  go -C "${upstream_root}" test "${test_flags[@]}" ./internal/pluginhost
-go -C "${upstream_root}" test "${test_flags[@]}" ./internal/api \
-  -run '^TestPluginUsageOwnsManagementRoutesAndCoreKeepsOnlyStreamBridge$'
 CLIPROXY_OAUTH_MODEL_POLICY_PLUGIN="${oauth_model_policy_binary}" \
   go -C "${upstream_root}" test "${test_flags[@]}" ./sdk/cliproxy \
     -run '^TestOAuthModelPolicyXAIRegistersPerPlanModelsAndConstrainsSelection$'

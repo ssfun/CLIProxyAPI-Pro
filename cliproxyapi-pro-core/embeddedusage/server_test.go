@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -886,6 +887,71 @@ func TestUsageImportFlushesQueuedRuntimeStateBeforeExplicitRestore(t *testing.T)
 	stats, ok, err := targetStore.GetAuthRuntimeStats(ctx, "idx-a", "auth-a")
 	if err != nil || !ok || stats.SelectedCount != 9 || stats.SuccessCount != 7 || stats.FailureCount != 2 {
 		t.Fatalf("restored stats = %+v, %v, %v", stats, ok, err)
+	}
+}
+
+func TestUsageExportImportRestoresLatestAccountInspectionSnapshot(t *testing.T) {
+	defer SetAccountInspectionSnapshotHandlers(nil, nil)
+
+	sourceSnapshot := json.RawMessage(`{
+		"version": 1,
+		"state": "completed",
+		"lastStartedAt": 1000,
+		"lastFinishedAt": 2000,
+		"settings": {"targetType": "xai", "workers": 4, "deleteWorkers": 4, "timeout": 15000},
+		"summary": {"totalFiles": 1, "probeSetCount": 1, "sampledCount": 1},
+		"healthCounts": {"total": 1, "inspectionError": 1},
+		"results": [{"key": "xai.json::xai-1", "provider": "xai", "fileName": "xai.json", "authIndex": "xai-1", "action": "keep", "error": "upstream error", "errorDetail": "{\"error\":{\"message\":\"raw upstream response\"}}"}]
+	}`)
+	SetAccountInspectionSnapshotHandlers(func() ([]byte, bool, error) {
+		return sourceSnapshot, true, nil
+	}, nil)
+
+	sourceStore := openTestStore(t)
+	sourceRouter := testUsageRouter(sourceStore)
+	exportRecorder := httptest.NewRecorder()
+	exportRequest := httptest.NewRequest(http.MethodGet, "/usage/export", nil)
+	sourceRouter.ServeHTTP(exportRecorder, exportRequest)
+	if exportRecorder.Code != http.StatusOK {
+		t.Fatalf("export status = %d, want 200; body=%s", exportRecorder.Code, exportRecorder.Body.String())
+	}
+	if !bytes.Contains(exportRecorder.Body.Bytes(), []byte(`"record_type":"account_inspection_snapshot"`)) {
+		t.Fatalf("export body does not contain account inspection snapshot: %s", exportRecorder.Body.String())
+	}
+
+	var restoredSnapshot json.RawMessage
+	SetAccountInspectionSnapshotHandlers(nil, func(raw []byte) error {
+		restoredSnapshot = append(restoredSnapshot[:0], raw...)
+		return nil
+	})
+	targetStore := openTestStore(t)
+	targetRouter := testUsageRouter(targetStore)
+	importRecorder := httptest.NewRecorder()
+	importRequest := httptest.NewRequest(http.MethodPost, "/usage/import", bytes.NewReader(exportRecorder.Body.Bytes()))
+	targetRouter.ServeHTTP(importRecorder, importRequest)
+	if importRecorder.Code != http.StatusOK {
+		t.Fatalf("import status = %d, want 200; body=%s", importRecorder.Code, importRecorder.Body.String())
+	}
+	var importResult struct {
+		AccountInspectionSnapshot        bool `json:"accountInspectionSnapshot"`
+		AccountInspectionSnapshotRecords int  `json:"accountInspectionSnapshotRecords"`
+	}
+	if err := json.Unmarshal(importRecorder.Body.Bytes(), &importResult); err != nil {
+		t.Fatalf("json.Unmarshal(import result) error = %v", err)
+	}
+	if !importResult.AccountInspectionSnapshot || importResult.AccountInspectionSnapshotRecords != 1 {
+		t.Fatalf("import result = %+v, want restored snapshot with one record", importResult)
+	}
+	var sourceValue map[string]any
+	var restoredValue map[string]any
+	if err := json.Unmarshal(sourceSnapshot, &sourceValue); err != nil {
+		t.Fatalf("json.Unmarshal(source snapshot) error = %v", err)
+	}
+	if err := json.Unmarshal(restoredSnapshot, &restoredValue); err != nil {
+		t.Fatalf("json.Unmarshal(restored snapshot) error = %v", err)
+	}
+	if !reflect.DeepEqual(restoredValue, sourceValue) {
+		t.Fatalf("restored snapshot = %#v, want %#v", restoredValue, sourceValue)
 	}
 }
 

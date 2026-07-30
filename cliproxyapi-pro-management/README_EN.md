@@ -6,27 +6,25 @@ This directory does not vendor the upstream application. It keeps overlay files 
 
 ## What this customization adds
 
-### Plugin resource pages
+### Proxy pool page
 
-`proxy-pool` registers the sole proxy-pool management page through the upstream plugin resource protocol. It configures HTTP/HTTPS/SOCKS5/SOCKS5H nodes, selection strategy, weights, health checks, isolation, and failover, with batch import, draft tests, manual recovery, and runtime diagnostics. Management no longer compiles or registers a second `/proxy-pool` page.
+Adds a top-level `/proxy-pool` page for the prebundled `proxy-pool` dynamic plugin. It manages HTTP/HTTPS/SOCKS5/SOCKS5H nodes, selection strategy, weights, health checks, isolation, and failover. It also supports batch paste, node search, filtered enable/disable, quick duplication, unsaved-draft tests, and manual isolation recovery. Runtime details include success rate, failures, active tunnels, last success/failure, config generation, and health-cycle timestamps, with explicit diagnostics for registration, listener, and hot-reload failures.
 
-`oauth-model-policy` likewise registers its sole plugin resource page. Provider tabs edit plan-specific exclusions for xAI, Codex, Claude, Gemini CLI, Antigravity, and Kimi, including custom plan keys and distinct `_unknown` and `_default` fallbacks. Cache TTL, provider resolve timeout, and plugin priority are written directly to plugin configuration; Management no longer owns that business page, service, or styling.
-
-`pro-observability` registers the sole complete monitoring-center resource and owns the UI implementation, usage/aggregate contracts, model prices, backups, quota cache, and routing runtime. Management no longer compiles a `/monitoring` route, static menu item, or second set of monitoring components; the dynamic entry is `#/plugin-pages/pro-observability/0`. Core retains only host startup, Management authentication, and the SSE transport bridge.
+Adds a top-level `/oauth-model-policy` page for the prebundled `oauth-model-policy` dynamic plugin. Provider tabs edit plan-specific model exclusions for xAI, Codex, Claude, Gemini CLI, Antigravity, and Kimi, including custom plan keys, while keeping `_unknown` plan-discovery failures separate from the `_default` fallback for recognized plans without a dedicated rule. The page also controls cache TTL, provider resolve timeout, and plugin priority, and enables the plugin runtime when saving.
 
 After the listener is ready, the page can point Core's global `proxy-url` at the fixed loopback SOCKS5 endpoint; stopping takeover restores the previous global proxy. Credentials with their own `proxy-url` are listed explicitly as bypasses. Plugin configuration persists with the normal Core configuration, while health state and connection counters remain process-local runtime data and are not mixed into usage backups.
 
 Rotation is per SOCKS5 TCP tunnel, not necessarily per multiplexed HTTP request. `fail-open=false` is the default to prevent silent direct traffic leakage.
 
-### Plugin monitoring center
+### Request monitoring page
 
-The page is built from `pro-observability/webapp`, embedded in the plugin, and loaded through the upstream plugin resource protocol:
+Adds a top-level monitoring route:
 
 ```text
-#/plugin-pages/pro-observability/0
+/monitoring
 ```
 
-The page consumes the plugin-owned `/usage*` API. It loads an initial usage snapshot, follows incremental event polling or the SSE usage stream, and provides:
+The page consumes the customized `cliproxyapi-pro-core` backend usage API. It loads an initial usage snapshot, follows incremental event polling or the SSE usage stream, and provides:
 
 - request totals and success/failure metrics
 - success rate and latency summaries
@@ -43,11 +41,9 @@ The page consumes the plugin-owned `/usage*` API. It loads an initial usage snap
 
 Large account and realtime tables scroll inside their panels, so long histories do not stretch the whole page.
 
-Management supplies only a controlled Bridge v2 for the active Core connection: JSON requests, SSE open/chunk/close, binary imports, host downloads, toast/confirm UI, and clipboard operations. The sanitized iframe bootstrap contains no management key, raw API key, auth token, or unmasked credential material, and remote-Core connections do not require a second iframe login.
-
 ### Model price persistence
 
-Model price settings are persisted through the `pro-observability` SQLite API instead of normal browser-only state:
+Model price settings are persisted through the backend SQLite API instead of normal browser-only state:
 
 - `GET /usage/model-prices`
 - `PUT /usage/model-prices`
@@ -64,7 +60,7 @@ The backend selects pricing per request and snapshots the estimated cost on each
 
 ### SQLite-backed quota persistence
 
-Quota snapshots are persisted through the `pro-observability` usage service:
+Quota snapshots are persisted through the backend usage service:
 
 - `GET /usage/quota-cache`
 - `PUT /usage/quota-cache`
@@ -155,26 +151,28 @@ Protection is disabled by default. `observe` records matches; only `enforce` dis
 
 `apply_customizations.py` also patches upstream files to add:
 
-- the `/routing` route; both monitoring and account inspection are discovered from the plugin resource registry.
-- Plugin Resource Bridge v2 plus account-inspection/routing sidebar labels and icons.
+- `/monitoring`, `/account-inspection`, and `/routing` routes.
+- sidebar navigation labels and icon.
 - locale entries from `monitoring-locales.json`.
-- `usageStatisticsEnabled` and `clean` config types used by the plugin bootstrap.
+- `usageStatisticsEnabled` and `clean` config types used by monitoring/account inspection.
 - `authFilesApi.patchFile` and `setStatusWithFallback` helpers.
+- `accountInspection` service export.
 - `Select` `triggerClassName` and `dropdownClassName` props.
 - `maskSensitiveText` utility.
 - `cachedAt` fields for quota state types and success states.
 - a “Check for updates” action on the Management Center version tile; it calls `POST /management-panel/check-update`, replaces the panel only when the latest-release asset hash changes, and reloads only after an actual update.
 
-The plugin monitoring center uses an initial snapshot plus SSE increments and cursor catch-up, with event-ID deduplication. Trends, model rankings, and API-key rankings use server-side `/usage/aggregates` data. Hidden tabs pause SSE and React incremental updates, then catch up by cursor when visible again. The first event received by an empty database also establishes and refreshes the realtime-log snapshot.
+Request Monitoring uses an initial snapshot plus SSE increments and cursor catch-up, with event-ID deduplication. Trends, model rankings, and API-key rankings prefer server-side `/usage/aggregates` data and automatically fall back to local detail calculations when unavailable. Hidden tabs pause SSE and React incremental updates, then catch up by cursor when visible again; the page header shows live, reconnecting, background-paused, error, and latest-event states.
 
 ## Repository layout
 
 - `overlay/` — files copied directly into the upstream checkout.
+- `overlay/src/pages/MonitoringCenterPage.tsx` — request monitoring UI.
+- `overlay/src/pages/AccountInspectionPage.tsx` — account inspection UI.
 - `overlay/src/pages/RoutingPolicyPage.tsx` — routing policy and request-state-protection UI.
-- `overlay/src/features/plugins/usePluginResourceBridge.ts` — controlled Management Bridge v2 for plugin pages.
-- `overlay/src/features/monitoring/` — account-usage deep links and account-plan display logic; it contains neither the monitoring center nor account inspection.
+- `overlay/src/features/monitoring/` — monitoring and inspection logic.
 - `overlay/src/extensions/quota/` — SQLite quota persistence integration.
-- `overlay/src/services/api/` — routing-policy and account-usage API clients.
+- `overlay/src/services/api/` — added API clients.
 - `overlay-replacements.json` — reviewed upstream SHA-256 values and reasons for full-file replacements that intentionally collide with upstream paths.
 - `monitoring-locales.json` — locale additions merged into upstream locale files.
 - `apply_customizations.py` — applies all customizations to a target upstream checkout.

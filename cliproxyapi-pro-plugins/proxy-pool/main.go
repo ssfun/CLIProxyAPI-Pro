@@ -38,7 +38,6 @@ import "C"
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -88,8 +87,7 @@ type registrationCapabilities struct {
 }
 
 type managementRegistration struct {
-	Routes    []managementRoute `json:"routes"`
-	Resources []resourceRoute   `json:"resources"`
+	Routes []managementRoute `json:"routes"`
 }
 
 type managementRoute struct {
@@ -97,15 +95,6 @@ type managementRoute struct {
 	Path        string `json:"path"`
 	Description string `json:"description"`
 }
-
-type resourceRoute struct {
-	Path        string `json:"path"`
-	Menu        string `json:"menu"`
-	Description string `json:"description"`
-}
-
-//go:embed web/index.html
-var proxyPoolManagementPage []byte
 
 type managementRequest struct {
 	Method string      `json:"Method"`
@@ -174,20 +163,13 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 	case pluginabi.MethodPluginRegister, pluginabi.MethodPluginReconfigure:
 		return configurePlugin(request)
 	case pluginabi.MethodManagementRegister:
-		return okEnvelope(managementRegistration{
-			Routes: []managementRoute{
-				{Method: http.MethodGet, Path: "/pro/proxy-pool/status", Description: "Return the Pro proxy pool runtime status."},
-				{Method: http.MethodPost, Path: "/pro/proxy-pool/test", Description: "Test one configured proxy node."},
-				{Method: http.MethodPost, Path: "/pro/proxy-pool/test-all", Description: "Test all configured proxy nodes."},
-				{Method: http.MethodPost, Path: "/pro/proxy-pool/reset-stats", Description: "Reset proxy pool runtime statistics."},
-				{Method: http.MethodPost, Path: "/pro/proxy-pool/recover", Description: "Clear transient isolation for one proxy node."},
-			},
-			Resources: []resourceRoute{{
-				Path:        "/ui",
-				Menu:        "代理池",
-				Description: "Proxy pool nodes, health, failover, and takeover",
-			}},
-		})
+		return okEnvelope(managementRegistration{Routes: []managementRoute{
+			{Method: http.MethodGet, Path: "/pro/proxy-pool/status", Description: "Return the Pro proxy pool runtime status."},
+			{Method: http.MethodPost, Path: "/pro/proxy-pool/test", Description: "Test one configured proxy node."},
+			{Method: http.MethodPost, Path: "/pro/proxy-pool/test-all", Description: "Test all configured proxy nodes."},
+			{Method: http.MethodPost, Path: "/pro/proxy-pool/reset-stats", Description: "Reset proxy pool runtime statistics."},
+			{Method: http.MethodPost, Path: "/pro/proxy-pool/recover", Description: "Clear transient isolation for one proxy node."},
+		}})
 	case pluginabi.MethodManagementHandle:
 		return handleManagement(request)
 	default:
@@ -254,16 +236,6 @@ func handleManagement(raw []byte) ([]byte, error) {
 	}
 	path := strings.TrimSpace(request.Path)
 	switch {
-	case request.Method == http.MethodGet && strings.HasSuffix(path, "/ui"):
-		return okEnvelope(pluginapi.ManagementResponse{
-			StatusCode: http.StatusOK,
-			Headers: http.Header{
-				"Content-Type":            []string{"text/html; charset=utf-8"},
-				"Content-Security-Policy": []string{"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors *"},
-				"Cache-Control":           []string{"no-store"},
-			},
-			Body: append([]byte(nil), proxyPoolManagementPage...),
-		})
 	case request.Method == http.MethodGet && strings.HasSuffix(path, "/pro/proxy-pool/status"):
 		return okEnvelope(jsonResponse(http.StatusOK, current.Status()))
 	case request.Method == http.MethodPost && strings.HasSuffix(path, "/pro/proxy-pool/test"):

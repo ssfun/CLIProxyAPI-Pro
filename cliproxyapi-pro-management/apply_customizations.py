@@ -243,6 +243,20 @@ AUTH_FILES_SELECTED_COUNT_LABEL_KEYS = {
     'zh-TW.json': '調度',
 }
 
+PROXY_POOL_NAV_LOCALE_KEYS = {
+    'en.json': {'label': 'Proxy Management', 'meta': 'Rotating upstream proxy gateway'},
+    'ru.json': {'label': 'Управление прокси', 'meta': 'Шлюз ротации внешних прокси'},
+    'zh-CN.json': {'label': '代理管理', 'meta': '多节点轮询与故障转移'},
+    'zh-TW.json': {'label': '代理管理', 'meta': '多節點輪詢與故障轉移'},
+}
+
+OAUTH_MODEL_POLICY_NAV_LOCALE_KEYS = {
+    'en.json': {'label': 'Model Policy', 'meta': 'Per-plan model availability rules'},
+    'ru.json': {'label': 'Политика моделей', 'meta': 'Правила доступности моделей по тарифам'},
+    'zh-CN.json': {'label': '模型策略', 'meta': '按账号套餐配置模型可用范围'},
+    'zh-TW.json': {'label': '模型策略', 'meta': '依帳號套餐設定模型可用範圍'},
+}
+
 def load_overlay_replacement_manifest(path: Path) -> dict[str, set[str]]:
     payload = json.loads(path.read_text())
     if payload.get('schemaVersion') != 1 or not isinstance(payload.get('replacements'), list):
@@ -385,7 +399,10 @@ def auth_files_page_path(target: Path) -> Path:
 
 
 def auth_files_styles_path(target: Path) -> Path:
-    for relative in ('src/features/authFiles/AuthFilesPage.module.scss', 'src/pages/AuthFilesPage.module.scss'):
+    for relative in (
+        'src/features/authFiles/AuthFilesPage.module.scss',
+        'src/pages/AuthFilesPage.module.scss',
+    ):
         path = target / relative
         if path.is_file():
             return path
@@ -702,41 +719,15 @@ def patch_routes(target: Path) -> None:
     replace_once(
         path,
         "import { QuotaPage } from '@/pages/QuotaPage';\n",
-        "import { QuotaPage } from '@/pages/QuotaPage';\nimport { RoutingPolicyPage } from '@/pages/RoutingPolicyPage';\n",
+        "import { QuotaPage } from '@/pages/QuotaPage';\nimport { MonitoringCenterPage } from '@/pages/MonitoringCenterPage';\nimport { AccountInspectionPage } from '@/pages/AccountInspectionPage';\nimport { RoutingPolicyPage } from '@/pages/RoutingPolicyPage';\nimport { ProxyPoolPage } from '@/pages/ProxyPoolPage';\nimport { OAuthModelPolicyPage } from '@/pages/OAuthModelPolicyPage';\n",
     )
     replace_once(
         path,
         "  { path: '/quota', element: <QuotaPage /> },\n",
-        "  { path: '/quota', element: <QuotaPage /> },\n  { path: '/routing', element: <RoutingPolicyPage /> },\n",
+        "  { path: '/quota', element: <QuotaPage /> },\n  { path: '/monitoring', element: <MonitoringCenterPage /> },\n  { path: '/account-inspection', element: <AccountInspectionPage /> },\n  { path: '/routing', element: <RoutingPolicyPage /> },\n  { path: '/proxy-pool', element: <ProxyPoolPage /> },\n  { path: '/oauth-model-policy', element: <OAuthModelPolicyPage /> },\n",
     )
 
 
-def patch_plugin_resource_bridge(target: Path) -> None:
-    path = target / 'src/features/plugins/PluginResourcePage.tsx'
-    insert_once(
-        path,
-        "import { useCallback, useEffect, useMemo, useState } from 'react';\n",
-        "import { useCallback, useEffect, useMemo, useRef, useState } from 'react';\n",
-        'useRef, useState',
-    )
-    insert_once(
-        path,
-        "import styles from './PluginResourcePage.module.scss';\n",
-        "import styles from './PluginResourcePage.module.scss';\nimport { usePluginResourceBridge } from './usePluginResourceBridge';\n",
-        "from './usePluginResourceBridge'",
-    )
-    insert_once(
-        path,
-        "  const [error, setError] = useState('');\n",
-        "  const [error, setError] = useState('');\n  const frameRef = useRef<HTMLIFrameElement>(null);\n  usePluginResourceBridge(frameRef);\n",
-        'usePluginResourceBridge(frameRef)',
-    )
-    insert_once(
-        path,
-        '        <iframe\n',
-        '        <iframe\n          ref={frameRef}\n',
-        'ref={frameRef}',
-    )
 def patch_layout(target: Path) -> None:
     path = target / 'src/components/layout/MainLayout.tsx'
     insert_once(
@@ -748,17 +739,103 @@ def patch_layout(target: Path) -> None:
     insert_once(
         path,
         "  IconSidebarProviders,\n",
-        "  IconSidebarRouting,\n  IconSidebarProviders,\n",
-        "  IconSidebarRouting,\n",
+        "  IconModelCluster,\n  IconSidebarAccountInspection,\n  IconSidebarMonitor,\n  IconSidebarProxyPool,\n  IconSidebarRouting,\n  IconSidebarProviders,\n",
+        "  IconSidebarAccountInspection,\n",
     )
     replace_once(
         path,
         "  oauth: <IconSidebarOauth size={18} />,\n  quota: <IconSidebarQuota size={18} />,\n",
-        "  oauth: <IconSidebarOauth size={18} />,\n  quota: <IconSidebarQuota size={18} />,\n  routing: <IconSidebarRouting size={18} />,\n",
+        "  oauth: <IconSidebarOauth size={18} />,\n  quota: <IconSidebarQuota size={18} />,\n  monitoring: <IconSidebarMonitor size={18} />,\n  accountInspection: <IconSidebarAccountInspection size={18} />,\n  routing: <IconSidebarRouting size={18} />,\n  proxyPool: <IconSidebarProxyPool size={18} />,\n  oauthModelPolicy: <IconModelCluster size={18} />,\n",
+    )
+    insert_once(
+        path,
+        "              {\n                path: '/plugins',\n",
+        "              {\n"
+        "                path: '/proxy-pool',\n"
+        "                labelKey: 'nav.proxy_pool',\n"
+        "                metaKey: 'nav_meta.proxy_pool',\n"
+        "                icon: sidebarIcons.proxyPool,\n"
+        "              },\n"
+        "              {\n"
+        "                path: '/oauth-model-policy',\n"
+        "                labelKey: 'nav.oauth_model_policy',\n"
+        "                metaKey: 'nav_meta.oauth_model_policy',\n"
+        "                icon: sidebarIcons.oauthModelPolicy,\n"
+        "              },\n"
+        "              {\n"
+        "                path: '/plugins',\n",
+        "path: '/proxy-pool',",
     )
     text = read(path)
+    if "path: '/monitoring'" not in text:
+        flat_quota_item = "    { path: '/quota', label: t('nav.quota_management'), icon: sidebarIcons.quota },\n"
+        grouped_quota_item = (
+            "        {\n"
+            "          path: '/quota',\n"
+            "          labelKey: 'nav.quota_management',\n"
+            "          metaKey: 'nav_meta.quota_management',\n"
+            "          icon: sidebarIcons.quota,\n"
+            "        },\n"
+        )
+        if flat_quota_item in text:
+            write(
+                path,
+                text.replace(
+                    flat_quota_item,
+                    flat_quota_item
+                    + "    { path: '/monitoring', label: t('nav.monitoring_center'), icon: sidebarIcons.monitoring },\n"
+                    + "    { path: '/account-inspection', label: t('nav.account_inspection'), icon: sidebarIcons.accountInspection },\n",
+                    1,
+                ),
+            )
+        elif grouped_quota_item in text:
+            write(
+                path,
+                text.replace(
+                    grouped_quota_item,
+                    grouped_quota_item
+                    + "        {\n"
+                    + "          path: '/monitoring',\n"
+                    + "          labelKey: 'nav.monitoring_center',\n"
+                    + "          metaKey: 'nav_meta.monitoring_center',\n"
+                    + "          icon: sidebarIcons.monitoring,\n"
+                    + "        },\n"
+                    + "        {\n"
+                    + "          path: '/account-inspection',\n"
+                    + "          labelKey: 'nav.account_inspection',\n"
+                    + "          metaKey: 'nav_meta.account_inspection',\n"
+                    + "          icon: sidebarIcons.accountInspection,\n"
+                    + "        },\n",
+                    1,
+                ),
+            )
+        else:
+            raise RuntimeError(f'Pattern not found in {path}: quota navigation item')
+    replace_once_if_present(
+        path,
+        "        {\n"
+        "          path: '/account-inspection',\n"
+        "          labelKey: 'nav.account_inspection',\n"
+        "          metaKey: 'nav_meta.account_inspection',\n"
+        "          icon: sidebarIcons.monitoring,\n"
+        "        },\n",
+        "        {\n"
+        "          path: '/account-inspection',\n"
+        "          labelKey: 'nav.account_inspection',\n"
+        "          metaKey: 'nav_meta.account_inspection',\n"
+        "          icon: sidebarIcons.accountInspection,\n"
+        "        },\n",
+    )
+    replace_once_if_present(
+        path,
+        "    { path: '/account-inspection', label: t('nav.account_inspection'), icon: sidebarIcons.monitoring },\n",
+        "    { path: '/account-inspection', label: t('nav.account_inspection'), icon: sidebarIcons.accountInspection },\n",
+    )
     flat_routing_item = (
         "    { path: '/routing', label: t('nav.routing_policy'), icon: sidebarIcons.routing },\n"
+    )
+    flat_account_inspection_item = (
+        "    { path: '/account-inspection', label: t('nav.account_inspection'), icon: sidebarIcons.accountInspection },\n"
     )
     grouped_routing_item = (
         "        {\n"
@@ -768,30 +845,29 @@ def patch_layout(target: Path) -> None:
         "          icon: sidebarIcons.routing,\n"
         "        },\n"
     )
-    grouped_quota_item = (
+    grouped_account_inspection_item = (
         "        {\n"
-        "          path: '/quota',\n"
-        "          labelKey: 'nav.quota_management',\n"
-        "          metaKey: 'nav_meta.quota_management',\n"
-        "          icon: sidebarIcons.quota,\n"
+        "          path: '/account-inspection',\n"
+        "          labelKey: 'nav.account_inspection',\n"
+        "          metaKey: 'nav_meta.account_inspection',\n"
+        "          icon: sidebarIcons.accountInspection,\n"
         "        },\n"
     )
     text = read(path).replace(flat_routing_item, '').replace(grouped_routing_item, '')
-    flat_quota_item = "    { path: '/quota', label: t('nav.quota_management'), icon: sidebarIcons.quota },\n"
-    if flat_quota_item in text:
+    if flat_account_inspection_item in text:
         text = text.replace(
-            flat_quota_item,
-            flat_quota_item + flat_routing_item,
+            flat_account_inspection_item,
+            flat_account_inspection_item + flat_routing_item,
             1,
         )
-    elif grouped_quota_item in text:
+    elif grouped_account_inspection_item in text:
         text = text.replace(
-            grouped_quota_item,
-            grouped_quota_item + grouped_routing_item,
+            grouped_account_inspection_item,
+            grouped_account_inspection_item + grouped_routing_item,
             1,
         )
     else:
-        raise RuntimeError(f'Pattern not found in {path}: quota navigation item')
+        raise RuntimeError(f'Pattern not found in {path}: account inspection navigation item')
     write(path, text)
     replace_once(
         path,
@@ -821,6 +897,20 @@ def patch_icons(target: Path) -> None:
         "  );\n"
         "}\n\n"
     )
+    account_inspection_icon = (
+        "export function IconSidebarAccountInspection({ size = 20, ...props }: IconProps) {\n"
+        "  return (\n"
+        f"    <svg {{...{svg_props}}} width={{size}} height={{size}} {{...props}}>\n"
+        "      <rect x=\"5\" y=\"3\" width=\"11\" height=\"16\" rx=\"2\" />\n"
+        "      <path d=\"M9 7h3\" />\n"
+        "      <path d=\"m8.5 11 1.4 1.4 2.6-2.8\" />\n"
+        "      <circle cx=\"16.5\" cy=\"16.5\" r=\"3\" />\n"
+        "      <path d=\"m19 19 2 2\" />\n"
+        "      <path d=\"M8 3.5h5\" fill=\"currentColor\" fillOpacity=\"0.08\" />\n"
+        "    </svg>\n"
+        "  );\n"
+        "}\n\n"
+    )
     routing_icon = (
         "export function IconSidebarRouting({ size = 20, ...props }: IconProps) {\n"
         "  return (\n"
@@ -835,11 +925,30 @@ def patch_icons(target: Path) -> None:
         "  );\n"
         "}\n\n"
     )
+    proxy_pool_icon = (
+        "export function IconSidebarProxyPool({ size = 20, ...props }: IconProps) {\n"
+        "  return (\n"
+        f"    <svg {{...{svg_props}}} width={{size}} height={{size}} {{...props}}>\n"
+        "      <circle cx=\"6\" cy=\"7\" r=\"2.5\" />\n"
+        "      <circle cx=\"18\" cy=\"7\" r=\"2.5\" />\n"
+        "      <circle cx=\"12\" cy=\"18\" r=\"2.5\" />\n"
+        "      <path d=\"M8.5 7h7\" />\n"
+        "      <path d=\"m7.4 9 3.2 6.6\" />\n"
+        "      <path d=\"m16.6 9-3.2 6.6\" />\n"
+        "      <path d=\"m12.5 4.5 2 2.5-2 2.5\" />\n"
+        "    </svg>\n"
+        "  );\n"
+        "}\n\n"
+    )
     icons_to_insert = ""
     if "export function IconSidebarMonitor" not in text:
         icons_to_insert += monitor_icon
+    if "export function IconSidebarAccountInspection" not in text:
+        icons_to_insert += account_inspection_icon
     if "export function IconSidebarRouting" not in text:
         icons_to_insert += routing_icon
+    if "export function IconSidebarProxyPool" not in text:
+        icons_to_insert += proxy_pool_icon
     if not icons_to_insert:
         return
     for marker in (
@@ -1617,39 +1726,41 @@ def patch_quota_page_search(target: Path) -> None:
 
 def patch_quota_card(target: Path) -> None:
     path = target / 'src/components/quota/QuotaCard.tsx'
-    text = read(path)
-    extras_import = "import { QuotaCachedTime } from '@/extensions/quota/QuotaCardExtras';\n"
-    if extras_import not in text:
-        quota_imports = (
-            "import { TYPE_COLORS } from '@/utils/quota';\n",
-            "import { TYPE_COLORS, resolveQuotaErrorMessage } from '@/utils/quota';\n",
-        )
-        for quota_import in quota_imports:
-            if quota_import in text:
-                write(path, text.replace(quota_import, extras_import + quota_import, 1))
-                break
-        else:
-            raise RuntimeError(f'Pattern not found in {path}: quota utils import')
+    insert_once(
+        path,
+        "import styles from '@/pages/QuotaPage.module.scss';\n",
+        "import { QuotaCachedTime } from '@/extensions/quota/QuotaCardExtras';\n"
+        "import styles from '@/pages/QuotaPage.module.scss';\n",
+        "from '@/extensions/quota/QuotaCardExtras'",
+    )
     replace_once(path, "  errorStatus?: number;\n}", "  errorStatus?: number;\n  cachedAt?: number;\n}")
     text = read(path)
-    cached_time = "<QuotaCachedTime quotaStatus={quotaStatus} cachedAt={quota.cachedAt} />"
-    if cached_time not in text:
-        render_variants = (
-            (
-                "        ) : quota ? (\n          renderQuotaItems(quota, t, { styles, QuotaProgressBar })\n        ) : (",
-                "        ) : quota ? (\n          <>\n            {renderQuotaItems(quota, t, { styles, QuotaProgressBar })}\n            <QuotaCachedTime quotaStatus={quotaStatus} cachedAt={quota.cachedAt} />\n          </>\n        ) : (",
-            ),
-            (
-                "        ) : quota ? (\n          renderQuotaItems(quota, t, { styles, QuotaProgressBar: BoundQuotaProgressBar })\n        ) : (",
-                "        ) : quota ? (\n          <>\n            {renderQuotaItems(quota, t, { styles, QuotaProgressBar: BoundQuotaProgressBar })}\n            <QuotaCachedTime quotaStatus={quotaStatus} cachedAt={quota.cachedAt} />\n          </>\n        ) : (",
-            ),
+    if '<QuotaCachedTime quotaStatus={quotaStatus} cachedAt={quota.cachedAt} />' in text:
+        return
+
+    render_variants = (
+        'renderQuotaItems(quota, t, { styles, QuotaProgressBar })',
+        'renderQuotaItems(quota, t, { styles, QuotaProgressBar: BoundQuotaProgressBar })',
+    )
+    matches = [variant for variant in render_variants if variant in text]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f'Expected one quota renderer variant in {path}, found {len(matches)}: {render_variants!r}'
         )
-        for old, new in render_variants:
-            if old in text:
-                write(path, text.replace(old, new, 1))
-                break
-        else:
-            raise RuntimeError(f'Pattern not found in {path}: quota render block')
+    render_call = matches[0]
+    old = f"        ) : quota ? (\n          {render_call}\n        ) : ("
+    new = (
+        "        ) : quota ? (\n"
+        "          <>\n"
+        f"            {{{render_call}}}\n"
+        "            <QuotaCachedTime quotaStatus={quotaStatus} cachedAt={quota.cachedAt} />\n"
+        "          </>\n"
+        "        ) : ("
+    )
+    match_count = text.count(old)
+    if match_count != 1:
+        raise RuntimeError(f'Expected one quota success branch in {path}, found {match_count}: {old[:120]!r}')
+    write(path, text.replace(old, new, 1))
 
 
 def patch_quota_store(target: Path) -> None:
@@ -1745,6 +1856,19 @@ def patch_quota_styles(target: Path) -> None:
         ".geminiCliCard",
     )
 
+
+def patch_account_inspection_page(target: Path) -> None:
+    path = target / 'src/pages/AccountInspectionPage.tsx'
+    replace_once_if_present(
+        path,
+        "  const used = normalizeNumberValue(quota.billing.usedPercent ?? quota.billing.used_percent);\n"
+        "  return used !== null && used >= usedPercentThreshold;\n",
+        "  const used =\n"
+        "    normalizeNumberValue(quota.billing.usagePercent ?? quota.billing.usage_percent)\n"
+        "    ?? normalizeNumberValue(quota.billing.usedPercent ?? quota.billing.used_percent)\n"
+        "    ?? maxAntigravityGroupUsedPercent(Array.isArray(quota.billing.productUsage) ? quota.billing.productUsage : []);\n"
+        "  return used !== null && used >= usedPercentThreshold;\n",
+    )
 
 
 def patch_auth_files_page_search(target: Path) -> None:
@@ -2138,7 +2262,10 @@ def patch_auth_files_page_sorting(target: Path) -> None:
         )
         toolbar_prop = "          sortMode={sortMode}\n"
         if inline_select in text:
-            write(page_path, text.replace(inline_select, inline_select.replace('sortMode', 'effectiveSortMode'), 1))
+            write(
+                page_path,
+                text.replace(inline_select, inline_select.replace('sortMode', 'effectiveSortMode'), 1),
+            )
         elif toolbar_prop in text:
             write(page_path, text.replace(toolbar_prop, "          sortMode={effectiveSortMode}\n", 1))
         else:
@@ -2466,7 +2593,8 @@ export function IconModelCluster({ size = 20, ...props }: IconProps) {
                     page_path,
                     page_text.replace(
                         marker,
-                        marker + "  const [accountUsageFile, setAccountUsageFile] = useState<AuthFileItem | null>(null);\n",
+                        marker
+                        + "  const [accountUsageFile, setAccountUsageFile] = useState<AuthFileItem | null>(null);\n",
                         1,
                     ),
                 )
@@ -2720,6 +2848,11 @@ def patch_supporting_api_and_types(target: Path) -> None:
     )
 
     auth_files_path = target / 'src/services/api/authFiles.ts'
+    auth_files_normalizer = (
+        'normalizeAuthFilesResponse'
+        if 'normalizeAuthFilesResponse' in read(auth_files_path)
+        else 'dedupeAuthFilesResponse'
+    )
     replace_once(
         auth_files_path,
         "type AuthFileStatusResponse = { status: string; disabled: boolean };\n",
@@ -2728,14 +2861,34 @@ def patch_supporting_api_and_types(target: Path) -> None:
     insert_once(
         auth_files_path,
         "export const authFilesApi = {\n",
-        "const AUTH_FILES_LIST_CACHE_TTL_MS = 2000;\nlet authFilesListCache: { expiresAt: number; response: AuthFilesResponse } | null = null;\nlet authFilesListRequest: Promise<AuthFilesResponse> | null = null;\nlet authFilesListVersion = 0;\n\nconst cloneAuthFilesResponse = (response: AuthFilesResponse): AuthFilesResponse => ({\n  ...response,\n  files: Array.isArray(response.files) ? [...response.files] : [],\n});\n\nconst invalidateAuthFilesListCache = () => {\n  authFilesListVersion += 1;\n  authFilesListCache = null;\n  authFilesListRequest = null;\n};\n\nconst fetchAuthFilesList = async (): Promise<AuthFilesResponse> => {\n  const now = Date.now();\n  if (authFilesListCache && authFilesListCache.expiresAt > now) {\n    return cloneAuthFilesResponse(authFilesListCache.response);\n  }\n  if (!authFilesListRequest) {\n    const requestVersion = authFilesListVersion;\n    authFilesListRequest = apiClient.get<AuthFilesResponse>('/auth-files')\n      .then(normalizeAuthFilesResponse)\n      .then((response) => {\n        if (requestVersion === authFilesListVersion) {\n          authFilesListCache = {\n            expiresAt: Date.now() + AUTH_FILES_LIST_CACHE_TTL_MS,\n            response: cloneAuthFilesResponse(response),\n          };\n        }\n        return response;\n      })\n      .finally(() => {\n        if (requestVersion === authFilesListVersion) {\n          authFilesListRequest = null;\n        }\n      });\n  }\n  return cloneAuthFilesResponse(await authFilesListRequest);\n};\n\nexport const authFilesApi = {\n",
+        "const AUTH_FILES_LIST_CACHE_TTL_MS = 2000;\nlet authFilesListCache: { expiresAt: number; response: AuthFilesResponse } | null = null;\nlet authFilesListRequest: Promise<AuthFilesResponse> | null = null;\nlet authFilesListVersion = 0;\n\nconst cloneAuthFilesResponse = (response: AuthFilesResponse): AuthFilesResponse => ({\n  ...response,\n  files: Array.isArray(response.files) ? [...response.files] : [],\n});\n\nconst invalidateAuthFilesListCache = () => {\n  authFilesListVersion += 1;\n  authFilesListCache = null;\n  authFilesListRequest = null;\n};\n\nconst fetchAuthFilesList = async (): Promise<AuthFilesResponse> => {\n  const now = Date.now();\n  if (authFilesListCache && authFilesListCache.expiresAt > now) {\n    return cloneAuthFilesResponse(authFilesListCache.response);\n  }\n  if (!authFilesListRequest) {\n    const requestVersion = authFilesListVersion;\n    authFilesListRequest = apiClient.get<AuthFilesResponse>('/auth-files')\n      .then(dedupeAuthFilesResponse)\n      .then((response) => {\n        if (requestVersion === authFilesListVersion) {\n          authFilesListCache = {\n            expiresAt: Date.now() + AUTH_FILES_LIST_CACHE_TTL_MS,\n            response: cloneAuthFilesResponse(response),\n          };\n        }\n        return response;\n      })\n      .finally(() => {\n        if (requestVersion === authFilesListVersion) {\n          authFilesListRequest = null;\n        }\n      });\n  }\n  return cloneAuthFilesResponse(await authFilesListRequest);\n};\n\nexport const authFilesApi = {\n",
         "AUTH_FILES_LIST_CACHE_TTL_MS",
     )
-    replace_once(
+    replace_once_if_present(
         auth_files_path,
-        "  list: async () =>\n    normalizeAuthFilesResponse(await apiClient.get<AuthFilesResponse>('/auth-files')),\n\n  setStatus: (name: string, disabled: boolean) =>\n    apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled }),\n\n",
-        "  list: fetchAuthFilesList,\n\n  patchFile: async (payload: AuthFilePatchPayload) => {\n    const response = await apiClient.patch<AuthFileStatusResponse>('/auth-files', payload);\n    invalidateAuthFilesListCache();\n    return response;\n  },\n\n  setStatus: async (name: string, disabled: boolean) => {\n    const response = await apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled });\n    invalidateAuthFilesListCache();\n    return response;\n  },\n",
+        '      .then(dedupeAuthFilesResponse)\n',
+        f'      .then({auth_files_normalizer})\n',
     )
+    text = read(auth_files_path)
+    list_variants = (
+        "  list: async () => dedupeAuthFilesResponse(await apiClient.get<AuthFilesResponse>('/auth-files')),\n\n"
+        "  setStatus: (name: string, disabled: boolean) =>\n"
+        "    apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled }),\n\n",
+        "  list: async () =>\n"
+        "    normalizeAuthFilesResponse(await apiClient.get<AuthFilesResponse>('/auth-files')),\n\n"
+        "  setStatus: (name: string, disabled: boolean) =>\n"
+        "    apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled }),\n\n",
+    )
+    list_replacement = (
+        "  list: fetchAuthFilesList,\n\n  patchFile: async (payload: AuthFilePatchPayload) => {\n    const response = await apiClient.patch<AuthFileStatusResponse>('/auth-files', payload);\n    invalidateAuthFilesListCache();\n    return response;\n  },\n\n  setStatus: async (name: string, disabled: boolean) => {\n    const response = await apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled });\n    invalidateAuthFilesListCache();\n    return response;\n  },\n"
+    )
+    if '  list: fetchAuthFilesList,\n' not in text:
+        for list_variant in list_variants:
+            if list_variant in text:
+                write(auth_files_path, text.replace(list_variant, list_replacement, 1))
+                break
+        else:
+            raise RuntimeError(f'Pattern not found in {auth_files_path}: auth files list method')
     replace_once(
         auth_files_path,
         "  patchFields: (name: string, fields: AuthFileFieldsPatch) =>\n    apiClient.patch('/auth-files/fields', { name, ...fields }),\n\n",
@@ -2761,7 +2914,7 @@ def patch_supporting_api_and_types(target: Path) -> None:
     replace_once(
         api_index_path,
         "export * from './apiCall';\n",
-        "export * from './apiCall';\nexport * from './routingPolicy';\n",
+        "export * from './apiCall';\nexport * from './accountInspection';\nexport * from './routingPolicy';\n",
     )
 
     format_path = target / 'src/utils/format.ts'
@@ -2836,6 +2989,16 @@ def patch_locales(target: Path) -> None:
         data = json.loads(read(locale_path))
         additions = monitoring.get(locale_path.name, {})
         data.setdefault('nav', {}).update(additions.get('nav', {}))
+        proxy_pool_nav = PROXY_POOL_NAV_LOCALE_KEYS.get(
+            locale_path.name,
+            PROXY_POOL_NAV_LOCALE_KEYS['en.json'],
+        )
+        data.setdefault('nav', {})['proxy_pool'] = proxy_pool_nav['label']
+        oauth_model_policy_nav = OAUTH_MODEL_POLICY_NAV_LOCALE_KEYS.get(
+            locale_path.name,
+            OAUTH_MODEL_POLICY_NAV_LOCALE_KEYS['en.json'],
+        )
+        data.setdefault('nav', {})['oauth_model_policy'] = oauth_model_policy_nav['label']
         nav_additions = additions.get('nav', {})
         data.setdefault('nav_meta', {}).update(
             additions.get(
@@ -2847,10 +3010,23 @@ def patch_locales(target: Path) -> None:
                 },
             )
         )
+        data.setdefault('nav_meta', {})['proxy_pool'] = proxy_pool_nav['meta']
+        data.setdefault('nav_meta', {})['oauth_model_policy'] = oauth_model_policy_nav['meta']
         data['monitoring'] = additions.get('monitoring', data.get('monitoring', {}))
         data['account_usage'] = additions.get('account_usage', data.get('account_usage', {}))
         data['usage_stats'] = additions.get('usage_stats', data.get('usage_stats', {}))
         data['routing_policy'] = additions.get('routing_policy', data.get('routing_policy', {}))
+        data['proxy_pool'] = additions.get(
+            'proxy_pool',
+            monitoring.get('en.json', {}).get('proxy_pool', data.get('proxy_pool', {})),
+        )
+        data['oauth_model_policy'] = additions.get(
+            'oauth_model_policy',
+            monitoring.get('en.json', {}).get(
+                'oauth_model_policy',
+                data.get('oauth_model_policy', {}),
+            ),
+        )
         data.setdefault('quota_management', {}).update(QUOTA_LOCALE_KEYS.get(locale_path.name, {}))
         gemini_cli_locale = GEMINI_CLI_LOCALE_KEYS.get(locale_path.name, GEMINI_CLI_LOCALE_KEYS['en.json'])
         data.setdefault('auth_files', {})['filter_gemini-cli'] = gemini_cli_locale['auth_filter']
@@ -2897,7 +3073,6 @@ def main() -> None:
     patch_modal_scroll_lock(target)
     patch_modal_content_scrollbar_layout(target)
     patch_routes(target)
-    patch_plugin_resource_bridge(target)
     patch_layout(target)
     patch_icons(target)
     patch_quota_types(target)
@@ -2909,6 +3084,7 @@ def main() -> None:
     patch_quota_page_search(target)
     patch_quota_card(target)
     patch_quota_styles(target)
+    patch_account_inspection_page(target)
     patch_auth_files_page_search(target)
     patch_auth_files_page_sorting(target)
     patch_auth_files_gemini_quota(target)
