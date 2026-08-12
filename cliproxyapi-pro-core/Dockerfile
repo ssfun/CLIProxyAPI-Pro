@@ -61,7 +61,7 @@ RUN set -eux; \
       -ldflags="-s -w -X 'main.Version=${CLIPROXY_BUILD_VERSION}' -X 'main.Commit=release-${CLIPROXY_SOURCE_VERSION}' -X 'main.BuildDate=${BUILD_DATE}'" \
       -o /out/CLIProxyAPI ./cmd/server/
 
-FROM debian:bookworm@sha256:9344f8b8992482f80cba753f323adeaf17690076c095ccff6cc9536be98185dc
+FROM debian:bookworm@sha256:813017f3d62be4b5891a7acca6a01bdcd4b8513daa81b1ab99d3a50385b26931
 
 ARG TARGETARCH
 
