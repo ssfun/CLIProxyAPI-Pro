@@ -131,6 +131,7 @@ go -C "${upstream_root}" test "${test_flags[@]}" \
   ./internal/translator/codex/claude \
   ./internal/translator/codex/openai/chat-completions \
   ./internal/translator/codex/openai/responses \
+  ./internal/translator/gemini/openai/responses \
   ./internal/pro/... \
   ./sdk/api/handlers \
   ./sdk/api/handlers/claude \
