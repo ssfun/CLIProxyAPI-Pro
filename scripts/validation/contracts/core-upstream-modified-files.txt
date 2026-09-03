@@ -38,12 +38,6 @@ internal/pluginstore/auth.go
 internal/redisqueue/plugin.go
 internal/runtime/executor/claude_executor_execute.go
 internal/runtime/executor/claude_executor_stream.go
-internal/runtime/executor/codex_executor_execute.go
-internal/runtime/executor/codex_executor_stream.go
-internal/runtime/executor/codex_executor_terminal.go
-internal/runtime/executor/codex_openai_images.go
-internal/runtime/executor/codex_websockets_execute.go
-internal/runtime/executor/codex_websockets_stream.go
 internal/runtime/executor/helps/logging_helpers.go
 internal/runtime/executor/helps/usage_helpers.go
 internal/runtime/executor/openai_compat_executor.go
@@ -75,7 +69,6 @@ sdk/cliproxy/auth/conductor_lifecycle.go
 sdk/cliproxy/auth/conductor_refresh.go
 sdk/cliproxy/auth/conductor_selection.go
 sdk/cliproxy/auth/conductor_stream.go
-sdk/cliproxy/auth/home_concurrency.go
 sdk/cliproxy/auth/scheduler.go
 sdk/cliproxy/auth/selector.go
 sdk/cliproxy/auth/types.go
