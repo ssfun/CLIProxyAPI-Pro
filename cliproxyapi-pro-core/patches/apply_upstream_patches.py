@@ -2641,6 +2641,174 @@ replace_once(
     'meta[coreexecutor.SpeedMetadataKey] = speed',
 )
 
+handlers_error_response_test_source = ROOT / 'sdk/api/handlers/handlers_error_response_test.go'
+add_go_import(handlers_error_response_test_source, '"bytes"\n', '\t"encoding/json"\n')
+insert_before(
+    handlers_error_response_test_source,
+    'func TestWriteErrorResponse_AddonHeadersDisabledByDefault(t *testing.T) {\n',
+    '''func TestBuildErrorResponseBody_NormalizesNonCanonicalRateLimitJSON(t *testing.T) {
+	body := BuildErrorResponseBody(http.StatusTooManyRequests, `{"detail":"Rate limit exceeded"}`)
+	var payload struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("body is not valid JSON: %v; body=%s", err, body)
+	}
+	if payload.Error.Message != "Rate limit exceeded" {
+		t.Fatalf("error.message = %q, want %q", payload.Error.Message, "Rate limit exceeded")
+	}
+	if payload.Error.Type != "rate_limit_error" {
+		t.Fatalf("error.type = %q, want rate_limit_error", payload.Error.Type)
+	}
+	if payload.Error.Code != "rate_limit_exceeded" {
+		t.Fatalf("error.code = %q, want rate_limit_exceeded", payload.Error.Code)
+	}
+}
+
+func TestBuildErrorResponseBody_PreservesCanonicalRateLimitFields(t *testing.T) {
+	body := BuildErrorResponseBody(http.StatusTooManyRequests, `{"error":{"type":"usage_limit_reached","code":"usage_limit","resets_in_seconds":120}}`)
+	var payload struct {
+		Error struct {
+			Type            string `json:"type"`
+			Code            string `json:"code"`
+			ResetsInSeconds int    `json:"resets_in_seconds"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("body is not valid JSON: %v; body=%s", err, body)
+	}
+	if payload.Error.Type != "usage_limit_reached" || payload.Error.Code != "usage_limit" || payload.Error.ResetsInSeconds != 120 {
+		t.Fatalf("canonical rate limit fields were not preserved: %+v", payload.Error)
+	}
+}
+
+''',
+    'func TestBuildErrorResponseBody_NormalizesNonCanonicalRateLimitJSON(',
+)
+
+replace_once(
+    handlers_source,
+    '// If errText is already valid JSON, it is returned as-is to preserve upstream error payloads.\n',
+    '// Valid non-429 JSON is preserved. A 429 is normalized into an OpenAI-compatible\n// error envelope so Codex clients can recognize the rate-limit retry signal.\n',
+    'A 429 is normalized into an OpenAI-compatible',
+)
+
+replace_go_function(
+    handlers_source,
+    'func BuildErrorResponseBody(status int, errText string) []byte',
+    '''func BuildErrorResponseBody(status int, errText string) []byte {
+	if status <= 0 {
+		status = http.StatusInternalServerError
+	}
+	if strings.TrimSpace(errText) == "" {
+		errText = http.StatusText(status)
+	}
+
+	trimmed := strings.TrimSpace(errText)
+	if trimmed != "" && json.Valid([]byte(trimmed)) {
+		if status == http.StatusTooManyRequests {
+			if normalized := normalizeRateLimitErrorBody(trimmed); len(normalized) > 0 {
+				return normalized
+			}
+		} else {
+			return []byte(trimmed)
+		}
+	}
+
+	errType := "invalid_request_error"
+	var code string
+	switch status {
+	case http.StatusUnauthorized:
+		errType = "authentication_error"
+		code = "invalid_api_key"
+	case http.StatusForbidden:
+		errType = "permission_error"
+		code = "insufficient_quota"
+	case http.StatusTooManyRequests:
+		errType = "rate_limit_error"
+		code = "rate_limit_exceeded"
+	case http.StatusNotFound:
+		errType = "invalid_request_error"
+		code = "model_not_found"
+	default:
+		if status >= http.StatusInternalServerError {
+			errType = "server_error"
+			code = "internal_server_error"
+		}
+	}
+
+	payload, err := json.Marshal(ErrorResponse{
+		Error: ErrorDetail{
+			Message: errText,
+			Type:    errType,
+			Code:    code,
+		},
+	})
+	if err != nil {
+		return []byte(fmt.Sprintf(`{"error":{"message":%q,"type":"server_error","code":"internal_server_error"}}`, errText))
+	}
+	return payload
+}
+''',
+    'func normalizeRateLimitErrorBody',
+)
+
+insert_before(
+    handlers_source,
+    '// StreamingKeepAliveInterval returns the SSE keep-alive interval for this server.\n',
+    '''func normalizeRateLimitErrorBody(errText string) []byte {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(errText), &payload); err != nil {
+		return nil
+	}
+
+	errorObject, _ := payload["error"].(map[string]any)
+	if errorObject == nil {
+		errorObject = make(map[string]any)
+	}
+
+	message, _ := errorObject["message"].(string)
+	if strings.TrimSpace(message) == "" {
+		if value, ok := payload["error"].(string); ok {
+			message = value
+		}
+	}
+	if strings.TrimSpace(message) == "" {
+		for _, key := range []string{"message", "detail"} {
+			if value, ok := payload[key].(string); ok && strings.TrimSpace(value) != "" {
+				message = value
+				break
+			}
+		}
+	}
+	if strings.TrimSpace(message) == "" {
+		message = http.StatusText(http.StatusTooManyRequests)
+	}
+	errorObject["message"] = message
+
+	if value, ok := errorObject["type"].(string); !ok || strings.TrimSpace(value) == "" {
+		errorObject["type"] = "rate_limit_error"
+	}
+	if value, ok := errorObject["code"].(string); !ok || strings.TrimSpace(value) == "" {
+		errorObject["code"] = "rate_limit_exceeded"
+	}
+	payload["error"] = errorObject
+
+	normalized, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return normalized
+}
+
+''',
+    'func normalizeRateLimitErrorBody',
+)
+
 codex_chat_completions_request = ROOT / 'internal/translator/codex/openai/chat-completions/codex_openai_request.go'
 replace_once(
     codex_chat_completions_request,
@@ -5885,6 +6053,7 @@ format_go_writes([
 	'sdk/auth/filestore_identity.go',
 	'sdk/auth/filestore_identity_test.go',
     'sdk/api/handlers/handlers.go',
+    'sdk/api/handlers/handlers_error_response_test.go',
     'sdk/api/handlers/api_key_policy_test.go',
 	'sdk/api/handlers/api_key_policy_context_test.go',
     'sdk/api/handlers/handlers_context.go',
