@@ -95,6 +95,16 @@ def replace_once(path: Path, old: str, new: str, present=None) -> None:
     write(path, text.replace(old, new, 1))
 
 
+def replace_all(path: Path, old: str, new: str, present=None) -> None:
+    text = read(path)
+    if (present or new) and (present or new) in text:
+        return
+    match_count = text.count(old)
+    if match_count == 0:
+        raise SystemExit(f'expected at least one pattern in {path}, found none: {old[:120]!r}')
+    write(path, text.replace(old, new))
+
+
 def insert_before(path: Path, marker: str, insertion: str, present: str) -> None:
     text = read(path)
     if present in text:
@@ -250,6 +260,9 @@ new_customization_paths = (
 	'internal/api/server_model_policy.go',
 	'internal/runtime/executor/helps/quota_settlement_test.go',
 	'internal/runtime/executor/helps/usage_pro_extensions.go',
+	'internal/runtime/executor/helps/retry_after.go',
+	'internal/runtime/executor/helps/retry_after_test.go',
+	'internal/runtime/executor/codex_retry_after_test.go',
     'internal/runtime/executor/helps/usage_speed_test.go',
 	'internal/runtime/executor/claude_usage_speed_test.go',
 	'internal/runtime/executor/claude_stream_terminal.go',
@@ -275,6 +288,7 @@ new_customization_paths = (
     'sdk/cliproxy/auth/auth_runtime_state_test.go',
 	'sdk/cliproxy/auth/auth_account_policy.go',
 	'sdk/cliproxy/auth/auth_account_policy_test.go',
+	'sdk/cliproxy/auth/codex_retry_after_headers_test.go',
 	'sdk/cliproxy/auth/scheduler_runtime_state.go',
     'sdk/cliproxy/auth/inspection_refresh.go',
     'sdk/cliproxy/auth/pinned_execution.go',
@@ -299,6 +313,9 @@ queue_go_source('sdk/auth/filestore_identity_test.go')
 queue_go_source('internal/runtime/executor/api_key_policy_usage_test.go')
 queue_go_source('internal/runtime/executor/helps/quota_settlement_test.go')
 queue_go_source('internal/runtime/executor/helps/usage_pro_extensions.go')
+queue_go_source('internal/runtime/executor/helps/retry_after.go')
+queue_go_source('internal/runtime/executor/helps/retry_after_test.go')
+queue_go_source('internal/runtime/executor/codex_retry_after_test.go')
 queue_go_source('internal/runtime/executor/response_translation.go')
 queue_go_source('internal/pro/observability/config_test.go')
 queue_go_source('sdk/cliproxy/usage/manager_pro_test.go')
@@ -307,6 +324,116 @@ queue_go_source('internal/pluginhost/plugin_executor_usage.go')
 queue_go_source('sdk/auth/filestore_identity.go')
 queue_go_source('sdk/cliproxy/auth/scheduler_runtime_state.go')
 queue_go_source('internal/runtime/executor/claude_stream_terminal.go')
+queue_go_source('sdk/cliproxy/auth/codex_retry_after_headers_test.go')
+
+codex_terminal = ROOT / 'internal/runtime/executor/codex_executor_terminal.go'
+replace_go_function(
+    codex_terminal,
+    'func newCodexStatusErr(statusCode int, body []byte) statusErr',
+    '''func newCodexStatusErr(statusCode int, body []byte, responseHeaders ...http.Header) statusErr {
+	errCode := statusCode
+	if isCodexModelCapacityError(body) || isCodexUsageLimitError(body) {
+		errCode = http.StatusTooManyRequests
+	}
+	body = classifyCodexStatusError(errCode, body)
+	retryAfter := parseCodexRetryAfter(errCode, body, time.Now())
+	if retryAfter == nil && len(responseHeaders) > 0 {
+		retryAfter = helps.ParseRetryAfterHeader(responseHeaders[0].Get("Retry-After"), time.Now())
+	}
+	if retryAfter == nil && errCode == http.StatusTooManyRequests && !isCodexModelCapacityError(body) {
+		fallback := 10 * time.Second
+		retryAfter = &fallback
+	}
+	err := statusErr{code: errCode, msg: string(body), retryAfter: retryAfter}
+	return err
+}
+''',
+    'helps.ParseRetryAfterHeader(responseHeaders[0].Get("Retry-After"), time.Now())',
+)
+
+codex_execute = ROOT / 'internal/runtime/executor/codex_executor_execute.go'
+replace_all(
+    codex_execute,
+    'newCodexStatusErr(httpResp.StatusCode, b)',
+    'newCodexStatusErr(httpResp.StatusCode, b, httpResp.Header)',
+    'newCodexStatusErr(httpResp.StatusCode, b, httpResp.Header)',
+)
+
+codex_images = ROOT / 'internal/runtime/executor/codex_openai_images.go'
+replace_all(
+    codex_images,
+    'newCodexStatusErr(httpResp.StatusCode, data)',
+    'newCodexStatusErr(httpResp.StatusCode, data, httpResp.Header)',
+    'newCodexStatusErr(httpResp.StatusCode, data, httpResp.Header)',
+)
+
+codex_stream = ROOT / 'internal/runtime/executor/codex_executor_stream.go'
+replace_once(
+    codex_stream,
+    'newCodexStatusErr(httpResp.StatusCode, data)',
+    'newCodexStatusErr(httpResp.StatusCode, data, httpResp.Header)',
+    'newCodexStatusErr(httpResp.StatusCode, data, httpResp.Header)',
+)
+
+codex_websocket_execute = ROOT / 'internal/runtime/executor/codex_websockets_execute.go'
+replace_once(
+    codex_websocket_execute,
+    'newCodexStatusErr(respHS.StatusCode, bodyErr)',
+    'newCodexStatusErr(respHS.StatusCode, bodyErr, respHS.Header)',
+    'newCodexStatusErr(respHS.StatusCode, bodyErr, respHS.Header)',
+)
+
+codex_websocket_stream = ROOT / 'internal/runtime/executor/codex_websockets_stream.go'
+replace_once(
+    codex_websocket_stream,
+    'newCodexStatusErr(respHS.StatusCode, bodyErr)',
+    'newCodexStatusErr(respHS.StatusCode, bodyErr, respHS.Header)',
+    'newCodexStatusErr(respHS.StatusCode, bodyErr, respHS.Header)',
+)
+
+home_concurrency = ROOT / 'sdk/cliproxy/auth/home_concurrency.go'
+replace_go_function(
+    home_concurrency,
+    'func SafeResponseHeaders(err error) http.Header',
+    '''func SafeResponseHeaders(err error) http.Header {
+	var busy *HomeConcurrencyBusyError
+	if errors.As(err, &busy) && busy != nil {
+		return busy.SafeResponseHeaders()
+	}
+	var exhausted *homeRetryRoundExhaustedError
+	if errors.As(err, &exhausted) && exhausted != nil {
+		retryAfter := exhausted.RetryAfter()
+		if retryAfter == nil {
+			return nil
+		}
+		return safeRetryAfterHeader(*retryAfter)
+	}
+	var cooldown *homeDispatchRetryAfterError
+	if errors.As(err, &cooldown) && cooldown != nil {
+		retryAfter := cooldown.RetryAfter()
+		if retryAfter == nil {
+			return nil
+		}
+		return safeRetryAfterHeader(*retryAfter)
+	}
+	var modelCooldown *modelCooldownError
+	if errors.As(err, &modelCooldown) && modelCooldown != nil {
+		return modelCooldown.Headers()
+	}
+	var retryAfterStatusErr interface {
+		StatusCode() int
+		RetryAfter() *time.Duration
+	}
+	if errors.As(err, &retryAfterStatusErr) && retryAfterStatusErr != nil && retryAfterStatusErr.StatusCode() == http.StatusTooManyRequests {
+		if retryAfter := retryAfterStatusErr.RetryAfter(); retryAfter != nil {
+			return safeRetryAfterHeader(*retryAfter)
+		}
+	}
+	return nil
+}
+''',
+    'var retryAfterStatusErr interface',
+)
 
 codex_device = ROOT / 'sdk/auth/codex_device.go'
 replace_once(
@@ -5934,13 +6061,24 @@ format_go_writes([
     'internal/runtime/executor/helps/logging_helpers.go',
 	'internal/runtime/executor/helps/quota_settlement_test.go',
 	'internal/runtime/executor/helps/usage_pro_extensions.go',
-    'internal/runtime/executor/helps/response_observer_test.go',
+	'internal/runtime/executor/helps/retry_after.go',
+	'internal/runtime/executor/helps/retry_after_test.go',
+	'internal/runtime/executor/helps/response_observer_test.go',
     'internal/runtime/executor/helps/usage_helpers.go',
     'internal/runtime/executor/helps/usage_speed_test.go',
     'internal/runtime/executor/claude_usage_speed_test.go',
     'internal/runtime/executor/claude_executor_execute.go',
     'internal/runtime/executor/claude_executor_stream.go',
-    'internal/runtime/executor/claude_stream_terminal.go',
+	'internal/runtime/executor/claude_stream_terminal.go',
+	'internal/runtime/executor/codex_executor_terminal.go',
+	'internal/runtime/executor/codex_executor_execute.go',
+	'internal/runtime/executor/codex_openai_images.go',
+	'internal/runtime/executor/codex_executor_stream.go',
+	'internal/runtime/executor/codex_websockets_execute.go',
+	'internal/runtime/executor/codex_websockets_stream.go',
+	'internal/runtime/executor/codex_retry_after_test.go',
+	'sdk/cliproxy/auth/home_concurrency.go',
+	'sdk/cliproxy/auth/codex_retry_after_headers_test.go',
     'internal/pro/oauthpolicy/config/config.go',
     'internal/pro/oauthpolicy/config/config_test.go',
     'internal/pro/oauthpolicy/policy/engine.go',

@@ -41,6 +41,12 @@ internal/pluginstore/auth.go	upstream-generic-fix	plugin-store-auth	upstream-pri
 internal/redisqueue/plugin.go	must-remain-host-patch	observability	retain-usage-enrichment-and-monitoring-controls
 internal/runtime/executor/claude_executor_execute.go	upstream-generic-fix	usage-accounting	upstream-preserve-claude-failed-usage
 internal/runtime/executor/claude_executor_stream.go	upstream-generic-fix	usage-accounting	upstream-preserve-claude-stream-failed-usage
+internal/runtime/executor/codex_executor_execute.go	upstream-generic-fix	codex-rate-limit-retry	upstream-forward-codex-retry-after-through-http-execution
+internal/runtime/executor/codex_executor_stream.go	upstream-generic-fix	codex-rate-limit-retry	upstream-forward-codex-retry-after-through-stream-execution
+internal/runtime/executor/codex_executor_terminal.go	upstream-generic-fix	codex-rate-limit-retry	upstream-parse-body-header-and-safe-fallback-retry-timing
+internal/runtime/executor/codex_openai_images.go	upstream-generic-fix	codex-rate-limit-retry	upstream-forward-codex-retry-after-through-image-execution
+internal/runtime/executor/codex_websockets_execute.go	upstream-generic-fix	codex-rate-limit-retry	upstream-forward-codex-retry-after-through-websocket-execution
+internal/runtime/executor/codex_websockets_stream.go	upstream-generic-fix	codex-rate-limit-retry	upstream-forward-codex-retry-after-through-websocket-stream
 internal/runtime/executor/helps/logging_helpers.go	generic-host-hook	request-observer	upstream-final-response-observer
 internal/runtime/executor/helps/usage_helpers.go	must-remain-host-patch	api-key-policy	retain-synchronous-quota-settlement-while-upstreaming-usage-fixes
 internal/runtime/executor/openai_compat_executor.go	upstream-generic-fix	usage-accounting	upstream-terminal-usage-publication-correctness
@@ -72,6 +78,7 @@ sdk/cliproxy/auth/conductor_lifecycle.go	generic-host-hook	auth-lifecycle	upstre
 sdk/cliproxy/auth/conductor_refresh.go	upstream-generic-fix	scheduler	upstream-centralized-scheduler-refresh
 sdk/cliproxy/auth/conductor_selection.go	generic-host-hook	account-policy	upstream-auth-overlay-and-selection-observer
 sdk/cliproxy/auth/conductor_stream.go	generic-host-hook	usage-accounting	upstream-stream-attempt-context
+sdk/cliproxy/auth/home_concurrency.go	upstream-generic-fix	codex-rate-limit-retry	upstream-expose-safe-retry-after-from-codex-status-errors
 sdk/cliproxy/auth/scheduler.go	must-remain-host-patch	scheduler-runtime-state	retain-routing-cursor-persistence-and-runtime-state
 sdk/cliproxy/auth/selector.go	must-remain-host-patch	scheduler-runtime-state	retain-cursor-selection-semantics
 sdk/cliproxy/auth/types.go	must-remain-host-patch	scheduler-runtime-state	retain-auth-runtime-counters
