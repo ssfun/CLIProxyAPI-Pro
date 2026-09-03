@@ -255,6 +255,7 @@ new_customization_paths = (
 	'internal/runtime/executor/claude_stream_terminal.go',
 	'internal/runtime/executor/api_key_policy_usage_test.go',
 	'internal/runtime/executor/response_translation.go',
+	'internal/translator/gemini/openai/responses/compaction_end_turn_test.go',
 	'internal/pro/observability/config_test.go',
 	'internal/redisqueue/speed_test.go',
 	'internal/redisqueue/api_key_policy_usage_test.go',
@@ -307,6 +308,7 @@ queue_go_source('internal/pluginhost/plugin_executor_usage.go')
 queue_go_source('sdk/auth/filestore_identity.go')
 queue_go_source('sdk/cliproxy/auth/scheduler_runtime_state.go')
 queue_go_source('internal/runtime/executor/claude_stream_terminal.go')
+queue_go_source('internal/translator/gemini/openai/responses/compaction_end_turn_test.go')
 
 codex_device = ROOT / 'sdk/auth/codex_device.go'
 replace_once(
@@ -5569,6 +5571,55 @@ replace_once(
 # functionResponse. Top-level sibling inline_data parts make the request end in
 # an invalid model turn and are rejected with HTTP 400.
 gemini_responses_request = ROOT / 'internal/translator/gemini/openai/responses/gemini_openai-responses_request.go'
+insert_before(
+    gemini_responses_request,
+    'func geminiContent(role string, parts [][]byte) []byte {\n',
+    '''// ensureGeminiResponsesCompactionEndsWithUser prevents Gemini and Antigravity
+// backends from rejecting Codex remote-compaction requests whose final assembled
+// content is a model turn. Codex places compaction_trigger after a detached
+// reasoning carrier; the carrier is intentionally preserved, so append a
+// synthetic empty user turn only for compaction requests.
+func ensureGeminiResponsesCompactionEndsWithUser(payload []byte, input gjson.Result) []byte {
+	if !input.IsArray() {
+		return payload
+	}
+	hasCompactionTrigger := false
+	input.ForEach(func(_, item gjson.Result) bool {
+		if item.Get("type").String() == "compaction_trigger" {
+			hasCompactionTrigger = true
+			return false
+		}
+		return true
+	})
+	if !hasCompactionTrigger {
+		return payload
+	}
+	contents := gjson.GetBytes(payload, "contents")
+	if !contents.IsArray() || len(contents.Array()) == 0 {
+		return payload
+	}
+	contentArray := contents.Array()
+	last := contentArray[len(contentArray)-1]
+	if !strings.EqualFold(strings.TrimSpace(last.Get("role").String()), "model") {
+		return payload
+	}
+	contentItems := make([][]byte, 0, len(contentArray)+1)
+	for _, content := range contentArray {
+		contentItems = append(contentItems, []byte(content.Raw))
+	}
+	contentItems = append(contentItems, geminiContent("user", [][]byte{[]byte(`{"text":""}`)}))
+	return translatorcommon.SetRawArrayItems(payload, "contents", contentItems)
+}
+
+''',
+    'func ensureGeminiResponsesCompactionEndsWithUser',
+)
+replace_once(
+    gemini_responses_request,
+    '''\treturn stripTrailingOpenAIResponsesModelPrefill(result)\n''',
+    '''\tresult = stripTrailingOpenAIResponsesModelPrefill(result)\n\treturn ensureGeminiResponsesCompactionEndsWithUser(result, root.Get("input"))\n''',
+    'return ensureGeminiResponsesCompactionEndsWithUser(result, root.Get("input"))',
+)
 replace_once(
     gemini_responses_request,
     '''\tparts := make([][]byte, 0, 1+len(imageParts))
@@ -5880,6 +5931,7 @@ format_go_writes([
     'internal/translator/codex/openai/responses/codex_openai-responses_request.go',
     'internal/translator/gemini/openai/responses/gemini_openai-responses_request.go',
     'internal/translator/gemini/openai/responses/gemini_openai-responses_request_test.go',
+    'internal/translator/gemini/openai/responses/compaction_end_turn_test.go',
     'sdk/auth/codex_device.go',
     'sdk/auth/filestore.go',
 	'sdk/auth/filestore_identity.go',
