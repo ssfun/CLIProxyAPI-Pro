@@ -263,6 +263,7 @@ new_customization_paths = (
 	'internal/runtime/executor/helps/retry_after.go',
 	'internal/runtime/executor/helps/retry_after_test.go',
 	'internal/runtime/executor/codex_retry_after_test.go',
+	'sdk/cliproxy/auth/codex_rate_limit_request_scoped_test.go',
     'internal/runtime/executor/helps/usage_speed_test.go',
 	'internal/runtime/executor/claude_usage_speed_test.go',
 	'internal/runtime/executor/claude_stream_terminal.go',
@@ -316,6 +317,7 @@ queue_go_source('internal/runtime/executor/helps/usage_pro_extensions.go')
 queue_go_source('internal/runtime/executor/helps/retry_after.go')
 queue_go_source('internal/runtime/executor/helps/retry_after_test.go')
 queue_go_source('internal/runtime/executor/codex_retry_after_test.go')
+queue_go_source('sdk/cliproxy/auth/codex_rate_limit_request_scoped_test.go')
 queue_go_source('internal/runtime/executor/response_translation.go')
 queue_go_source('internal/pro/observability/config_test.go')
 queue_go_source('sdk/cliproxy/usage/manager_pro_test.go')
@@ -325,6 +327,29 @@ queue_go_source('sdk/auth/filestore_identity.go')
 queue_go_source('sdk/cliproxy/auth/scheduler_runtime_state.go')
 queue_go_source('internal/runtime/executor/claude_stream_terminal.go')
 queue_go_source('sdk/cliproxy/auth/codex_retry_after_headers_test.go')
+
+status_err_source = ROOT / 'internal/runtime/executor/openai_compat_executor.go'
+replace_once(
+    status_err_source,
+    '''type statusErr struct {
+	code       int
+	msg        string
+	retryAfter *time.Duration
+}
+
+func (e statusErr) Error() string {''',
+    '''type statusErr struct {
+	code          int
+	msg           string
+	retryAfter    *time.Duration
+	requestScoped bool
+}
+
+func (e statusErr) IsRequestScoped() bool { return e.requestScoped }
+
+func (e statusErr) Error() string {''',
+    'requestScoped bool\n}\n\nfunc (e statusErr) IsRequestScoped() bool',
+)
 
 codex_terminal = ROOT / 'internal/runtime/executor/codex_executor_terminal.go'
 replace_go_function(
@@ -344,7 +369,7 @@ replace_go_function(
 		fallback := 10 * time.Second
 		retryAfter = &fallback
 	}
-	err := statusErr{code: errCode, msg: string(body), retryAfter: retryAfter}
+	err := statusErr{code: errCode, msg: string(body), retryAfter: retryAfter, requestScoped: errCode == http.StatusTooManyRequests}
 	return err
 }
 ''',
