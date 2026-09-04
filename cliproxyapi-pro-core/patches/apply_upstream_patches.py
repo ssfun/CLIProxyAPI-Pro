@@ -5565,6 +5565,119 @@ replace_once(
     's.persistMixedCursor(persistedCursorKey, picked.ID)',
 )
 
+# Vertex requires multimodal tool results to live inside the corresponding
+# functionResponse. Top-level sibling inline_data parts make the request end in
+# an invalid model turn and are rejected with HTTP 400.
+gemini_responses_request = ROOT / 'internal/translator/gemini/openai/responses/gemini_openai-responses_request.go'
+replace_once(
+    gemini_responses_request,
+    '''\tparts := make([][]byte, 0, 1+len(imageParts))
+\tparts = append(parts, functionResponse)
+\tparts = append(parts, imageParts...)
+\treturn parts
+''',
+    '''\tfor _, imagePart := range imageParts {
+\t\tinlineData := []byte(`{"inlineData":{"mimeType":"","data":""}}`)
+\t\tinlineData, _ = sjson.SetBytes(inlineData, "inlineData.mimeType", gjson.GetBytes(imagePart, "inline_data.mime_type").String())
+\t\tinlineData, _ = sjson.SetBytes(inlineData, "inlineData.data", gjson.GetBytes(imagePart, "inline_data.data").String())
+\t\tfunctionResponse, _ = sjson.SetRawBytes(functionResponse, "functionResponse.parts.-1", inlineData)
+\t}
+\treturn [][]byte{functionResponse}
+''',
+    'functionResponse.parts.-1',
+)
+
+gemini_responses_request_test = ROOT / 'internal/translator/gemini/openai/responses/gemini_openai-responses_request_test.go'
+replace_once(
+    gemini_responses_request_test,
+    '''\tparts := userContent.Get("parts").Array()
+\tif len(parts) < 2 {
+\t\tt.Fatalf("expected at least 2 parts (functionResponse + inline_data), got %d; raw: %s", len(parts), userContent.Raw)
+\t}''',
+    '''\tparts := userContent.Get("parts").Array()
+\tif len(parts) != 1 {
+\t\tt.Fatalf("expected one top-level functionResponse part, got %d; raw: %s", len(parts), userContent.Raw)
+\t}''',
+    'expected one top-level functionResponse part',
+)
+replace_once(
+    gemini_responses_request_test,
+    '''\timg := parts[1].Get("inline_data")
+\tif !img.Exists() {
+\t\tt.Fatalf("expected second part to have inline_data, got %s", parts[1].Raw)
+\t}
+\tif got := img.Get("mime_type").String(); got != "image/png" {
+\t\tt.Fatalf("expected mime_type = %q, got %q", "image/png", got)
+\t}''',
+    '''\timg := fr.Get("parts.0.inlineData")
+\tif !img.Exists() {
+\t\tt.Fatalf("expected image nested under functionResponse.parts, got %s", fr.Raw)
+\t}
+\tif got := img.Get("mimeType").String(); got != "image/png" {
+\t\tt.Fatalf("expected mimeType = %q, got %q", "image/png", got)
+\t}''',
+    'expected image nested under functionResponse.parts',
+)
+replace_once(
+    gemini_responses_request_test,
+    '''\t\tif len(parts) != 2 {
+\t\t\tt.Fatalf("expected 2 parts (functionResponse + inline_data), got %d; raw: %s", len(parts), userContent.Raw)
+\t\t}
+\t\tif got := parts[1].Get("inline_data.mime_type").String(); got != "image/png" {
+\t\t\tt.Fatalf("expected mime_type 'image/png', got %q", got)
+\t\t}
+\t\tif got := parts[1].Get("inline_data.data").String(); got != "iVBORw0KGgoAAAANSUhEUg==" {''',
+    '''\t\tif len(parts) != 1 {
+\t\t\tt.Fatalf("expected one top-level functionResponse part, got %d; raw: %s", len(parts), userContent.Raw)
+\t\t}
+\t\tif got := parts[0].Get("functionResponse.parts.0.inlineData.mimeType").String(); got != "image/png" {
+\t\t\tt.Fatalf("expected nested mimeType 'image/png', got %q", got)
+\t\t}
+\t\tif got := parts[0].Get("functionResponse.parts.0.inlineData.data").String(); got != "iVBORw0KGgoAAAANSUhEUg==" {''',
+    'expected nested mimeType',
+)
+insert_before(
+    gemini_responses_request_test,
+    'func TestConvertOpenAIResponsesRequestToGemini_GroupsNonContiguousParallelToolOutputs(t *testing.T) {',
+    '''func TestConvertOpenAIResponsesRequestToGemini_BindsImagesToParallelFunctionResponses(t *testing.T) {
+\tinputJSON := `{
+\t\t"model":"gemini-3.7-flash-high",
+\t\t"input":[
+\t\t\t{"type":"function_call","call_id":"call-1","name":"first_image","arguments":"{}"},
+\t\t\t{"type":"function_call","call_id":"call-2","name":"second_image","arguments":"{}"},
+\t\t\t{"type":"function_call_output","call_id":"call-1","output":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]},
+\t\t\t{"type":"function_call_output","call_id":"call-2","output":[{"type":"input_image","image_url":"data:image/jpeg;base64,BBBB"}]}
+\t\t]
+\t}`
+\tresult := ConvertOpenAIResponsesRequestToGemini("gemini-3.7-flash-high", []byte(inputJSON), false)
+\tresponses := gjson.GetBytes(result, "contents.1.parts").Array()
+\tif len(responses) != 2 {
+\t\tt.Fatalf("function response count = %d, want 2; result=%s", len(responses), result)
+\t}
+\twants := []struct {
+\t\tid, mimeType, data string
+\t}{
+\t\t{"call-1", "image/png", "AAAA"},
+\t\t{"call-2", "image/jpeg", "BBBB"},
+\t}
+\tfor index, want := range wants {
+\t\tresponse := responses[index].Get("functionResponse")
+\t\tif got := response.Get("id").String(); got != want.id {
+\t\t\tt.Fatalf("function response %d id = %q, want %q; result=%s", index, got, want.id, result)
+\t\t}
+\t\tif got := response.Get("parts.0.inlineData.mimeType").String(); got != want.mimeType {
+\t\t\tt.Fatalf("function response %d mime type = %q, want %q; result=%s", index, got, want.mimeType, result)
+\t\t}
+\t\tif got := response.Get("parts.0.inlineData.data").String(); got != want.data {
+\t\t\tt.Fatalf("function response %d data = %q, want %q; result=%s", index, got, want.data, result)
+\t\t}
+\t}
+}
+
+''',
+    'func TestConvertOpenAIResponsesRequestToGemini_BindsImagesToParallelFunctionResponses',
+)
+
 # Account policy fields are execution-only overlays. Every Manager-driven
 # incremental scheduler refresh must therefore go through RefreshSchedulerEntry,
 # whose single low-level upsert resolves the latest cached account policy.
@@ -5765,6 +5878,8 @@ format_go_writes([
     'internal/translator/codex/openai/chat-completions/codex_openai_request.go',
     'internal/translator/codex/openai/responses/codex_fast_service_tier_test.go',
     'internal/translator/codex/openai/responses/codex_openai-responses_request.go',
+    'internal/translator/gemini/openai/responses/gemini_openai-responses_request.go',
+    'internal/translator/gemini/openai/responses/gemini_openai-responses_request_test.go',
     'sdk/auth/codex_device.go',
     'sdk/auth/filestore.go',
 	'sdk/auth/filestore_identity.go',
