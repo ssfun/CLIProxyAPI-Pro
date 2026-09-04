@@ -95,6 +95,19 @@ def replace_once(path: Path, old: str, new: str, present=None) -> None:
     write(path, text.replace(old, new, 1))
 
 
+def replace_all_exact(path: Path, old: str, new: str, expected_count: int) -> None:
+    text = read(path)
+    old_count = text.count(old)
+    new_count = text.count(new)
+    if old_count == 0 and new_count == expected_count:
+        return
+    if old_count != expected_count or new_count != 0:
+        raise SystemExit(
+            f'expected {expected_count} patterns in {path}, found old={old_count}, new={new_count}: {old[:120]!r}'
+        )
+    write(path, text.replace(old, new))
+
+
 def insert_before(path: Path, marker: str, insertion: str, present: str) -> None:
     text = read(path)
     if present in text:
@@ -250,6 +263,7 @@ new_customization_paths = (
 	'internal/api/server_model_policy.go',
 	'internal/runtime/executor/helps/quota_settlement_test.go',
 	'internal/runtime/executor/helps/usage_pro_extensions.go',
+	'internal/runtime/executor/codex_retry_after_test.go',
     'internal/runtime/executor/helps/usage_speed_test.go',
 	'internal/runtime/executor/claude_usage_speed_test.go',
 	'internal/runtime/executor/claude_stream_terminal.go',
@@ -275,6 +289,7 @@ new_customization_paths = (
     'sdk/cliproxy/auth/auth_runtime_state_test.go',
 	'sdk/cliproxy/auth/auth_account_policy.go',
 	'sdk/cliproxy/auth/auth_account_policy_test.go',
+	'sdk/cliproxy/auth/codex_retry_after_headers_test.go',
 	'sdk/cliproxy/auth/scheduler_runtime_state.go',
     'sdk/cliproxy/auth/inspection_refresh.go',
     'sdk/cliproxy/auth/pinned_execution.go',
@@ -299,6 +314,7 @@ queue_go_source('sdk/auth/filestore_identity_test.go')
 queue_go_source('internal/runtime/executor/api_key_policy_usage_test.go')
 queue_go_source('internal/runtime/executor/helps/quota_settlement_test.go')
 queue_go_source('internal/runtime/executor/helps/usage_pro_extensions.go')
+queue_go_source('internal/runtime/executor/codex_retry_after_test.go')
 queue_go_source('internal/runtime/executor/response_translation.go')
 queue_go_source('internal/pro/observability/config_test.go')
 queue_go_source('sdk/cliproxy/usage/manager_pro_test.go')
@@ -307,6 +323,202 @@ queue_go_source('internal/pluginhost/plugin_executor_usage.go')
 queue_go_source('sdk/auth/filestore_identity.go')
 queue_go_source('sdk/cliproxy/auth/scheduler_runtime_state.go')
 queue_go_source('internal/runtime/executor/claude_stream_terminal.go')
+queue_go_source('sdk/cliproxy/auth/codex_retry_after_headers_test.go')
+
+codex_terminal = ROOT / 'internal/runtime/executor/codex_executor_terminal.go'
+replace_go_function(
+    codex_terminal,
+    'func newCodexStatusErr(statusCode int, body []byte) statusErr',
+    '''func newCodexStatusErr(statusCode int, body []byte) statusErr {
+	return newCodexStatusErrWithHeaders(statusCode, body, nil)
+}
+
+func newCodexStatusErrWithHeaders(statusCode int, body []byte, responseHeaders http.Header) statusErr {
+	errCode := statusCode
+	if isCodexModelCapacityError(body) || isCodexUsageLimitError(body) {
+		errCode = http.StatusTooManyRequests
+	}
+	body = classifyCodexStatusError(errCode, body)
+	now := time.Now()
+	retryAfter := parseCodexRetryAfter(errCode, body, now)
+	if retryAfter == nil && errCode == http.StatusTooManyRequests && responseHeaders != nil {
+		retryAfter = parseCodexRetryAfterHeader(responseHeaders.Get("Retry-After"), now)
+	}
+	return statusErr{code: errCode, msg: string(body), retryAfter: retryAfter}
+}
+
+func parseCodexRetryAfterHeader(raw string, now time.Time) *time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	const maxRetryAfterSeconds = int64(1<<63-1) / int64(time.Second)
+	deltaSeconds := true
+	for _, digit := range raw {
+		if digit < '0' || digit > '9' {
+			deltaSeconds = false
+			break
+		}
+	}
+	if deltaSeconds {
+		if seconds, err := strconv.ParseInt(raw, 10, 64); err == nil && seconds > 0 && seconds <= maxRetryAfterSeconds {
+			delay := time.Duration(seconds) * time.Second
+			return &delay
+		}
+	}
+	if resetAt, err := http.ParseTime(raw); err == nil {
+		if delay := resetAt.Sub(now); delay > 0 {
+			return &delay
+		}
+	}
+	return nil
+}
+''',
+    'func newCodexStatusErrWithHeaders(',
+)
+
+codex_execute = ROOT / 'internal/runtime/executor/codex_executor_execute.go'
+replace_all_exact(
+    codex_execute,
+    'newCodexStatusErr(httpResp.StatusCode, b)',
+    'newCodexStatusErrWithHeaders(httpResp.StatusCode, b, httpResp.Header)',
+    2,
+)
+
+codex_images = ROOT / 'internal/runtime/executor/codex_openai_images.go'
+replace_all_exact(
+    codex_images,
+    'newCodexStatusErr(httpResp.StatusCode, data)',
+    'newCodexStatusErrWithHeaders(httpResp.StatusCode, data, httpResp.Header)',
+    4,
+)
+
+codex_stream = ROOT / 'internal/runtime/executor/codex_executor_stream.go'
+replace_all_exact(
+    codex_stream,
+    'newCodexStatusErr(httpResp.StatusCode, data)',
+    'newCodexStatusErrWithHeaders(httpResp.StatusCode, data, httpResp.Header)',
+    1,
+)
+
+codex_websocket_execute = ROOT / 'internal/runtime/executor/codex_websockets_execute.go'
+replace_all_exact(
+    codex_websocket_execute,
+    'newCodexStatusErr(respHS.StatusCode, bodyErr)',
+    'newCodexStatusErrWithHeaders(respHS.StatusCode, bodyErr, respHS.Header)',
+    1,
+)
+
+codex_websocket_stream = ROOT / 'internal/runtime/executor/codex_websockets_stream.go'
+replace_all_exact(
+    codex_websocket_stream,
+    'newCodexStatusErr(respHS.StatusCode, bodyErr)',
+    'newCodexStatusErrWithHeaders(respHS.StatusCode, bodyErr, respHS.Header)',
+    1,
+)
+
+codex_websocket_errors = ROOT / 'internal/runtime/executor/codex_websockets_errors.go'
+replace_go_function(
+    codex_websocket_errors,
+    'func parseCodexWebsocketError(payload []byte) (error, bool)',
+    '''func parseCodexWebsocketError(payload []byte) (error, bool) {
+	if len(payload) == 0 {
+		return nil, false
+	}
+	if strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "error" {
+		return nil, false
+	}
+	status := int(gjson.GetBytes(payload, "status").Int())
+	if status == 0 {
+		status = int(gjson.GetBytes(payload, "status_code").Int())
+	}
+	if status <= 0 {
+		return nil, false
+	}
+
+	out := buildCodexWebsocketErrorPayload(payload, status)
+	headers := parseCodexWebsocketErrorHeaders(payload)
+	statusError := statusErr{code: status, msg: string(out)}
+	now := time.Now()
+	if retryAfter := parseCodexRetryAfter(status, out, now); retryAfter != nil {
+		statusError.retryAfter = retryAfter
+	} else if status == http.StatusTooManyRequests {
+		if retryAfter := parseCodexRetryAfterHeader(headers.Get("Retry-After"), now); retryAfter != nil {
+			statusError.retryAfter = retryAfter
+		} else if isCodexWebsocketConnectionLimitError(payload) {
+			retryAfter := time.Duration(0)
+			statusError.retryAfter = &retryAfter
+		}
+	} else if isCodexWebsocketConnectionLimitError(payload) {
+		retryAfter := time.Duration(0)
+		statusError.retryAfter = &retryAfter
+	}
+	return statusErrWithHeaders{
+		statusErr: statusError,
+		headers:   headers,
+	}, true
+}
+''',
+    'parseCodexRetryAfterHeader(headers.Get("Retry-After"), now)',
+)
+
+codex_websocket_tests = ROOT / 'internal/runtime/executor/codex_websockets_executor_test.go'
+replace_once(
+    codex_websocket_tests,
+    '''	if got := *retryable.RetryAfter(); got != 0 {
+		t.Fatalf("retryAfter = %v, want connection-limit fallback 0", got)
+	}
+''',
+    '''	if got := *retryable.RetryAfter(); got != time.Second {
+		t.Fatalf("retryAfter = %v, want standard Retry-After 1s", got)
+	}
+''',
+    'want standard Retry-After 1s',
+)
+
+home_concurrency = ROOT / 'sdk/cliproxy/auth/home_concurrency.go'
+replace_go_function(
+    home_concurrency,
+    'func SafeResponseHeaders(err error) http.Header',
+    '''func SafeResponseHeaders(err error) http.Header {
+	var busy *HomeConcurrencyBusyError
+	if errors.As(err, &busy) && busy != nil {
+		return busy.SafeResponseHeaders()
+	}
+	var exhausted *homeRetryRoundExhaustedError
+	if errors.As(err, &exhausted) && exhausted != nil {
+		retryAfter := exhausted.RetryAfter()
+		if retryAfter == nil {
+			return nil
+		}
+		return safeRetryAfterHeader(*retryAfter)
+	}
+	var cooldown *homeDispatchRetryAfterError
+	if errors.As(err, &cooldown) && cooldown != nil {
+		retryAfter := cooldown.RetryAfter()
+		if retryAfter == nil {
+			return nil
+		}
+		return safeRetryAfterHeader(*retryAfter)
+	}
+	var modelCooldown *modelCooldownError
+	if errors.As(err, &modelCooldown) && modelCooldown != nil {
+		return modelCooldown.Headers()
+	}
+	var statusRetryAfter interface {
+		StatusCode() int
+		RetryAfter() *time.Duration
+	}
+	if errors.As(err, &statusRetryAfter) && statusRetryAfter != nil && statusRetryAfter.StatusCode() == http.StatusTooManyRequests {
+		if retryAfter := statusRetryAfter.RetryAfter(); retryAfter != nil {
+			return safeRetryAfterHeader(*retryAfter)
+		}
+	}
+	return nil
+}
+''',
+    'var statusRetryAfter interface',
+)
 
 codex_device = ROOT / 'sdk/auth/codex_device.go'
 replace_once(
@@ -5773,6 +5985,15 @@ format_go_writes([
     'internal/runtime/executor/claude_executor_execute.go',
     'internal/runtime/executor/claude_executor_stream.go',
     'internal/runtime/executor/claude_stream_terminal.go',
+    'internal/runtime/executor/codex_executor_execute.go',
+    'internal/runtime/executor/codex_executor_stream.go',
+    'internal/runtime/executor/codex_executor_terminal.go',
+    'internal/runtime/executor/codex_openai_images.go',
+    'internal/runtime/executor/codex_retry_after_test.go',
+    'internal/runtime/executor/codex_websockets_errors.go',
+    'internal/runtime/executor/codex_websockets_execute.go',
+    'internal/runtime/executor/codex_websockets_executor_test.go',
+    'internal/runtime/executor/codex_websockets_stream.go',
     'internal/pro/oauthpolicy/config/config.go',
     'internal/pro/oauthpolicy/config/config_test.go',
     'internal/pro/oauthpolicy/policy/engine.go',
@@ -5904,6 +6125,8 @@ format_go_writes([
     'sdk/cliproxy/auth/conductor.go',
     'sdk/cliproxy/auth/conductor_execution.go',
     'sdk/cliproxy/auth/conductor_speed_test.go',
+    'sdk/cliproxy/auth/codex_retry_after_headers_test.go',
+    'sdk/cliproxy/auth/home_concurrency.go',
     'sdk/cliproxy/auth/scheduler.go',
     'sdk/cliproxy/auth/types.go',
     'sdk/cliproxy/builder.go',
