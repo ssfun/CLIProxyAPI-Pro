@@ -262,8 +262,12 @@ func snapshotObservedAtMS(input Input) int64 {
 	if input.QuotaObservedAtMS > 0 {
 		return input.QuotaObservedAtMS
 	}
+	attributes, err := proquota.PlanEvidenceAttributes(input.AuthProvider, input.QuotaSnapshotJSON)
+	if err != nil {
+		return 0
+	}
 	payload := map[string]any{}
-	if json.Unmarshal(input.QuotaSnapshotJSON, &payload) == nil {
+	if json.Unmarshal(attributes, &payload) == nil {
 		if value, known := numberValue(firstValue(payload, "observed_at_ms", "observedAtMS", "cachedAt")); known {
 			return int64(value)
 		}
@@ -296,8 +300,12 @@ func planFromQuotaSnapshot(provider string, input Input) (string, string, error)
 		}
 		return "", "quota-cache", nil
 	}
+	attributes, err := proquota.PlanEvidenceAttributes(provider, input.QuotaSnapshotJSON)
+	if err != nil {
+		return "", "quota-cache", err
+	}
 	payload := map[string]any{}
-	if err := json.Unmarshal(input.QuotaSnapshotJSON, &payload); err != nil {
+	if err := json.Unmarshal(attributes, &payload); err != nil {
 		return "", "quota-cache", fmt.Errorf("decode snapshot: %w", err)
 	}
 	if status := normalizeKey(stringValue(payload["status"])); status != "" && status != "success" {

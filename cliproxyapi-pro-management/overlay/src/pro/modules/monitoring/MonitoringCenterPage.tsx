@@ -1,3 +1,4 @@
+import { useMonitoringAnalytics } from './features/hooks/useMonitoringAnalytics';
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -46,11 +47,6 @@ import {
   type AccountPlanQuotaStore,
 } from '@/pro/modules/quota';
 import {
-  addMonitoringSummaryRow,
-  buildServerUsageTrendAnalytics,
-  buildUsageTrendAnalytics,
-  createMonitoringSummaryAccumulator,
-  finalizeMonitoringSummary,
   formatPercent,
   getRankingMetricValue,
   hasCompleteUsageAnalyticsSource,
@@ -450,6 +446,7 @@ export function MonitoringCenterPage() {
     refresh: refreshAggregates,
   } = useUsageAggregates({
     latestId,
+    generation: Number(usage?.generation) || 0,
     timeRange,
     apiKeyHash: usageTrendApiKey,
     enabled: connectionStatus === 'connected',
@@ -670,77 +667,10 @@ export function MonitoringCenterPage() {
   const scopedRows = scopedRowsState.rows;
   const scopedFailureCount = scopedRowsState.failureCount;
 
-  const usageRowGroups = useMemo(() => {
-    const nowMs = Math.max(
-      Number(usageAggregates?.snapshotAtMs) || 0,
-      allRows.reduce((latest, row) => Math.max(latest, row.timestampMs), 0)
-    );
-    const summaryWindowStartMs = nowMs - 30 * 60 * 1000;
-    const todayStart = new Date(nowMs);
-    todayStart.setHours(0, 0, 0, 0);
-    const tomorrowStart = new Date(todayStart);
-    tomorrowStart.setDate(tomorrowStart.getDate() + 1);
-    const yesterdayStart = new Date(todayStart);
-    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-    const resolvedRange = resolveTimeRange(timeRange, nowMs);
-    const trendStatsRows: MonitoringEventRow[] = [];
-    const topSummaryAccumulator = createMonitoringSummaryAccumulator();
-    const todaySummaryAccumulator = createMonitoringSummaryAccumulator();
-    const trendSummaryAccumulator = createMonitoringSummaryAccumulator();
-    let todayCost = 0;
-    let yesterdayCost = 0;
-
-    allRows.forEach((row) => {
-      if (!row.statsIncluded) return;
-      addMonitoringSummaryRow(topSummaryAccumulator, row, summaryWindowStartMs, nowMs);
-      if (row.timestampMs >= todayStart.getTime() && row.timestampMs < tomorrowStart.getTime()) {
-        addMonitoringSummaryRow(todaySummaryAccumulator, row, summaryWindowStartMs, nowMs);
-        todayCost += row.totalCost;
-      } else if (row.timestampMs >= yesterdayStart.getTime() && row.timestampMs < todayStart.getTime()) {
-        yesterdayCost += row.totalCost;
-      }
-      if (row.timestampMs >= resolvedRange.fromMs && row.timestampMs <= resolvedRange.toMs) {
-        trendStatsRows.push(row);
-        addMonitoringSummaryRow(trendSummaryAccumulator, row, summaryWindowStartMs, nowMs);
-      }
-    });
-
-    return {
-      trendStatsRows,
-      topSummary: finalizeMonitoringSummary(topSummaryAccumulator),
-      todaySummary: finalizeMonitoringSummary(todaySummaryAccumulator),
-      trendSummary: finalizeMonitoringSummary(trendSummaryAccumulator),
-      todayCost,
-      yesterdayCost,
-    };
-  }, [allRows, timeRange, usageAggregates?.snapshotAtMs]);
-  const {
-    trendStatsRows,
-    topSummary,
-    todaySummary,
-    yesterdayCost,
-  } = usageRowGroups;
-
-  const clientUsageTrendAnalytics = useMemo(
-    () => buildUsageTrendAnalytics(trendStatsRows, timeRange, usageTrendApiKey, t('monitoring.filter_all_api_keys')),
-    [trendStatsRows, timeRange, usageTrendApiKey, t]
-  );
-  const serverUsageTrendAnalytics = useMemo(
-    () => buildServerUsageTrendAnalytics(
-      usageAggregates,
-      usageAggregates?.scopeTimeRange ?? timeRange,
-      modelPrices,
-      clientUsageTrendAnalytics.apiKeyOptions,
-      usageAggregates?.scopeApiKeyHash ?? usageTrendApiKey,
-      t('monitoring.api_key_unattributed')
-    ),
-    [clientUsageTrendAnalytics.apiKeyOptions, modelPrices, t, timeRange, usageAggregates, usageTrendApiKey]
-  );
-  const aggregateTrendScopeMatches = Boolean(
-    usageAggregates
-      && usageAggregates.scopeTimeRangeKey === timeRangeKey
-      && usageAggregates.scopeApiKeyHash === usageTrendApiKey
-  );
+  const { aggregateTrendScopeMatches, topSummary, todaySummary, yesterdayCost, clientUsageTrendAnalytics, serverUsageTrendAnalytics } = useMonitoringAnalytics({
+    allRows, usageAggregates, timeRange, timeRangeKey, usageTrendApiKey, modelPrices, apiKeyOptions,
+    allKeysLabel: t('monitoring.filter_all_api_keys'), unattributedLabel: t('monitoring.api_key_unattributed'),
+  });
   const usageTrendDataReady = hasCompleteUsageAnalyticsSource(
     aggregateTrendScopeMatches,
     Boolean(usage),
@@ -1566,6 +1496,9 @@ export function MonitoringCenterPage() {
 
           <div className={styles.usageStatsHero}>
             <TopUsageStats cards={usageMetricCards} />
+            {usageAggregates?.summarySnapshotAtMs ? (
+              <small>{t('monitoring.summary_updated', { time: new Date(usageAggregates.summarySnapshotAtMs).toLocaleTimeString() })}</small>
+            ) : null}
           </div>
         </div>
       </section>

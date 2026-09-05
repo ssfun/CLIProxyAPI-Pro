@@ -1,6 +1,6 @@
 # CLIProxyAPI Pro
 
-CLIProxyAPI Pro is a minimal customization-layer collection for two upstream projects:
+CLIProxyAPI Pro combines static business modules and a customization build layer for two upstream projects:
 
 - `cliproxyapi-pro-core/` — backend Docker build customization for `router-for-me/CLIProxyAPI`.
 - `cliproxyapi-pro-management/` — frontend management-center customization for `router-for-me/Cli-Proxy-API-Management-Center`.
@@ -378,3 +378,7 @@ Special thanks to:
 - Management English README: `cliproxyapi-pro-management/README_EN.md`
 - Management Chinese README: `cliproxyapi-pro-management/README.md`
 - Chinese project overview: `README.md`
+
+## Maintenance boundaries
+
+Pro contains static business modules and an upstream customization layer. Minimal patching refers to the host integration surface, not a small overall codebase. See [PATCH_MAINTENANCE.md](PATCH_MAINTENANCE.md) for ownership, retirement criteria, and validation requirements.

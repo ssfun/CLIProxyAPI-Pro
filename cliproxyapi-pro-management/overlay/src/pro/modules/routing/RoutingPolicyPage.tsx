@@ -1,3 +1,4 @@
+import { startPolling } from '@/pro/shared/polling';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
@@ -180,6 +181,8 @@ export function RoutingPolicyPage() {
       ) as Record<RoutingPolicyProvider, string>
   );
   const [loading, setLoading] = useState(true);
+  const [runtimeError, setRuntimeError] = useState('');
+  const [runtimeUpdatedAt, setRuntimeUpdatedAt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [releasing, setReleasing] = useState<string | null>(null);
   const [selectedRuntimeDetail, setSelectedRuntimeDetailState] =
@@ -225,6 +228,8 @@ export function RoutingPolicyPage() {
 
   const applyConfigResponse = useCallback((response: RoutingPolicyResponse, replaceDraft = true) => {
     setData(response);
+    setRuntimeError('');
+    setRuntimeUpdatedAt(Date.now());
     if (!replaceDraft) return;
     setRequestProtection(response.requestProtection);
     setStatusCodeInputs(
@@ -254,11 +259,11 @@ export function RoutingPolicyPage() {
     try {
       const response = await routingPolicyApi.get();
       if (runtimeRequestIdRef.current !== requestId) return;
-      if (dirtyRef.current) setData(response);
-      else applyConfigResponse(response);
+      applyConfigResponse(response, !dirtyRef.current);
     } catch (error: unknown) {
       if (runtimeRequestIdRef.current !== requestId) return;
       const message = error instanceof Error ? error.message : t('routing_policy.load_failed');
+      setRuntimeError(message);
       showNotification(`${t('routing_policy.load_failed')}: ${message}`, 'error');
     } finally {
       if (runtimeRequestIdRef.current === requestId) setLoading(false);
@@ -271,29 +276,25 @@ export function RoutingPolicyPage() {
 
   useEffect(() => {
     if (activeView !== 'runtime' || connectionStatus !== 'connected' || saving || releasing) return;
-    let inFlight = false;
     let cancelled = false;
-    const timer = window.setInterval(() => {
-      if (inFlight) return;
-      inFlight = true;
-      const requestId = runtimeRequestIdRef.current + 1;
-      runtimeRequestIdRef.current = requestId;
-      void routingPolicyApi.get()
-        .then((response) => {
-          if (cancelled || runtimeRequestIdRef.current !== requestId) return;
-          setData((current) =>
-            current
-              ? { ...current, active: response.active, recentEvents: response.recentEvents }
-              : response
-          );
-        })
-        .catch(() => undefined)
-        .finally(() => { inFlight = false; });
+    const stop = startPolling(async () => {
+      if (document.hidden) return;
+      const requestId = ++runtimeRequestIdRef.current;
+      try {
+        const response = await routingPolicyApi.get();
+        if (cancelled || runtimeRequestIdRef.current !== requestId) return;
+        setData((current) => current
+          ? { ...current, active: response.active, recentEvents: response.recentEvents }
+          : response);
+        setRuntimeUpdatedAt(Date.now());
+        setRuntimeError('');
+      } catch (error) {
+        if (!cancelled && runtimeRequestIdRef.current === requestId) {
+          setRuntimeError(error instanceof Error ? error.message : String(error));
+        }
+      }
     }, 15000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
+    return () => { cancelled = true; stop(); };
   }, [activeView, connectionStatus, releasing, saving]);
 
   const setProtection = useCallback(
@@ -503,6 +504,14 @@ export function RoutingPolicyPage() {
         onRefresh={() => void loadPolicy()}
         onToggle={handleEnabledChange}
       />
+
+      {(runtimeError || connectionStatus !== 'connected') && (
+        <div role="status" className={styles.staleNotice}>
+          {t('routing_policy.runtime.stale')}
+          {runtimeUpdatedAt > 0 && <span>{t('routing_policy.runtime.last_updated', { time: formatTimestamp(runtimeUpdatedAt, i18n.language, '-') })}</span>}
+          {runtimeError && <span>{runtimeError}</span>}
+        </div>
+      )}
 
       <ProFeatureTabs
         ariaLabel={t('routing_policy.title')}

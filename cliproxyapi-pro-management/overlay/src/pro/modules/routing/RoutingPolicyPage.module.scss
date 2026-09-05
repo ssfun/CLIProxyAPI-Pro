@@ -564,3 +564,13 @@
     max-height: min(360px, 55vh);
   }
 }
+
+.staleNotice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--warning-color, #b7791f);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}

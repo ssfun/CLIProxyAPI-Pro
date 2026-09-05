@@ -1,4 +1,4 @@
-# Latest-only baseline: CLIProxyAPI v7.2.146 (d31b15916d15b550bbf388fd6da4a47d4d864109).
+# Latest-only baseline: CLIProxyAPI v7.2.151 (5208aec703b5ce7e3445f6e9d91cc13b3e78003a).
 # Update this reviewed surface only when adapting to a newer latest upstream release.
 cmd/server/main.go
 config.example.yaml

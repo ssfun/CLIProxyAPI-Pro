@@ -1,6 +1,6 @@
 # CLIProxyAPI Pro
 
-CLIProxyAPI Pro 是对两个 upstream 项目的最小化定制层集合：
+CLIProxyAPI Pro 是基于两个 upstream 项目的静态业务模块与定制构建层：
 
 - `cliproxyapi-pro-core/`：基于 `router-for-me/CLIProxyAPI` 的后端 Docker 构建定制。
 - `cliproxyapi-pro-management/`：基于 `router-for-me/Cli-Proxy-API-Management-Center` 的前端管理中心定制。
@@ -350,6 +350,10 @@ KOMARI_SECRET
 ```
 
 完整说明见 `cliproxyapi-pro-core/README.md`。
+
+## 维护边界
+
+Pro 已包含持久化、监控、账号策略和代理池等业务模块。最小化原则约束的是 upstream 注入面，不代表业务代码规模很小。补丁用途、责任归属、退出条件与验证要求见 [PATCH_MAINTENANCE.md](PATCH_MAINTENANCE.md)。
 
 ## 设计原则
 

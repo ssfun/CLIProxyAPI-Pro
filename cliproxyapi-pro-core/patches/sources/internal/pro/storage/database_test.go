@@ -2,8 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -21,13 +19,10 @@ func TestEmbeddedIANATimezoneDataIsAvailable(t *testing.T) {
 	}
 }
 
-func TestDatabaseOwnsLifecycleAndDomainRepositories(t *testing.T) {
+func TestDatabaseOwnsLifecycle(t *testing.T) {
 	database, err := OpenSQLite(filepath.Join(t.TempDir(), "nested", "pro.db"))
 	if err != nil {
 		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	if database.Usage().Domain() != DomainUsage || database.Quota().Domain() != DomainQuota || database.RoutingState().Domain() != DomainRoutingState {
-		t.Fatal("domain repositories do not preserve ownership")
 	}
 	if err := database.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -53,34 +48,6 @@ func TestApplySchemaIsIdempotentForAdditiveMigrations(t *testing.T) {
 	}
 	if err := ApplySchema(context.Background(), database.SQL(), schema); err != nil {
 		t.Fatalf("second ApplySchema() error = %v", err)
-	}
-}
-
-func TestRepositoryTransactionRollsBackOnFailure(t *testing.T) {
-	database, err := OpenSQLite(filepath.Join(t.TempDir(), "pro.db"))
-	if err != nil {
-		t.Fatalf("OpenSQLite() error = %v", err)
-	}
-	defer database.Close()
-	if _, err := database.SQL().Exec(`create table sample (value text)`); err != nil {
-		t.Fatalf("create table error = %v", err)
-	}
-	wantErr := errors.New("stop")
-	err = database.Settings().Transaction(context.Background(), func(tx *sql.Tx) error {
-		if _, insertErr := tx.Exec(`insert into sample(value) values ('temporary')`); insertErr != nil {
-			return insertErr
-		}
-		return wantErr
-	})
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("Transaction() error = %v, want %v", err, wantErr)
-	}
-	var count int
-	if err := database.SQL().QueryRow(`select count(*) from sample`).Scan(&count); err != nil {
-		t.Fatalf("count rows error = %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("row count = %d, want rollback", count)
 	}
 }
 

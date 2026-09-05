@@ -1,3 +1,4 @@
+import { useQuotaSummaries } from './useQuotaSummaries';
 import {
   useCallback,
   useEffect,
@@ -357,10 +358,6 @@ export function APIKeyPolicyPage() {
   const [filter, setFilter] = useState<BindingFilter>('all');
   const [pageView, setPageView] = useState<PageView>('policies');
   const [quotaFilter, setQuotaFilter] = useState<QuotaFilter>('all');
-  const [quotaSummaries, setQuotaSummaries] = useState<APIKeyQuotaSummary[]>([]);
-  const [quotaSnapshotAt, setQuotaSnapshotAt] = useState(0);
-  const [quotaLoading, setQuotaLoading] = useState(false);
-  const [quotaError, setQuotaError] = useState('');
   const [search, setSearch] = useState('');
   const [workspaceTarget, setWorkspaceTarget] = useState<WorkspaceTarget | null>(null);
   const [draft, setDraft] = useState<WorkspaceDraft | null>(null);
@@ -381,9 +378,6 @@ export function APIKeyPolicyPage() {
   const dangerBusyRef = useRef(false);
   const quotaRevisionRef = useRef(0);
   const quotaBusyRef = useRef(false);
-  const quotaSummaryRevisionRef = useRef(0);
-  const quotaManualRevisionRef = useRef(0);
-  const quotaManualInFlightRef = useRef(false);
   const dirty = workspaceIsDirty(workspaceTarget, draft);
   const quotaSupported = Boolean(snapshot && supportsAPIKeyQuota(snapshot.capabilities));
   const quotaOverviewSupported = Boolean(snapshot && supportsAPIKeyQuotaOverview(snapshot.capabilities));
@@ -472,85 +466,28 @@ export function APIKeyPolicyPage() {
       saveRevisionRef.current += 1;
       dangerRevisionRef.current += 1;
       quotaRevisionRef.current += 1;
-      quotaSummaryRevisionRef.current += 1;
       savingRef.current = false;
       dangerBusyRef.current = false;
       quotaBusyRef.current = false;
-      quotaManualRevisionRef.current += 1;
-      quotaManualInFlightRef.current = false;
     };
   }, [load]);
 
-  const loadQuotaSummaries = useCallback(async (quiet = false) => {
-    if (!quotaOverviewSupported || connectionStatus !== 'connected') {
-      if (!quiet) {
-        quotaManualRevisionRef.current += 1;
-        quotaManualInFlightRef.current = false;
-        setQuotaLoading(false);
-      }
-      return;
-    }
-    // A background poll must not supersede a user-triggered refresh. The
-    // manual response owns the loading state until it settles.
-    if (quiet && quotaManualInFlightRef.current) return;
-    const revision = ++quotaSummaryRevisionRef.current;
-    const manualRevision = quiet ? 0 : ++quotaManualRevisionRef.current;
-    if (!quiet) {
-      quotaManualInFlightRef.current = true;
-      setQuotaLoading(true);
-    }
-    try {
-      const response = await apiKeyPolicyApi.quotaSummaries();
-      if (revision !== quotaSummaryRevisionRef.current) return;
-      setQuotaSummaries(Array.isArray(response.items) ? response.items : []);
-      setQuotaSnapshotAt(Number(response.snapshotAtMs) || Date.now());
-      setQuotaError('');
-    } catch (error) {
-      if (revision !== quotaSummaryRevisionRef.current) return;
-      setQuotaError(errorMessage(error));
-    } finally {
-      if (!quiet && manualRevision === quotaManualRevisionRef.current) {
-        quotaManualInFlightRef.current = false;
-        setQuotaLoading(false);
-      }
-    }
-  }, [connectionStatus, errorMessage, quotaOverviewSupported]);
-
-  const refreshQuotaAfterMutation = useCallback(async () => {
-    // A successful mutation establishes a new server state. Invalidate any
-    // older manual response before fetching the corresponding quota snapshot.
-    quotaSummaryRevisionRef.current += 1;
-    quotaManualRevisionRef.current += 1;
-    quotaManualInFlightRef.current = false;
-    setQuotaLoading(false);
-    await loadQuotaSummaries(true);
-  }, [loadQuotaSummaries]);
+  const {
+    quotaSummaries, quotaSnapshotAt, quotaLoading, quotaError,
+    loadQuotaSummaries, refreshQuotaAfterMutation,
+  } = useQuotaSummaries(
+    quotaOverviewSupported && connectionStatus === 'connected',
+    pageView === 'quotas' || quotaWorkspaceOpen,
+    errorMessage,
+  );
 
   const refreshPage = useCallback(async () => {
     await Promise.all([load(), loadQuotaSummaries()]);
   }, [load, loadQuotaSummaries]);
 
   useEffect(() => {
-    if (!quotaOverviewSupported || connectionStatus !== 'connected') {
-      quotaSummaryRevisionRef.current += 1;
-      quotaManualRevisionRef.current += 1;
-      quotaManualInFlightRef.current = false;
-      setQuotaSummaries([]);
-      setQuotaSnapshotAt(0);
-      setQuotaError('');
-      setQuotaLoading(false);
-      setPageView('policies');
-      return;
-    }
-    void loadQuotaSummaries();
-  }, [connectionStatus, loadQuotaSummaries, quotaOverviewSupported]);
-
-  useEffect(() => {
-    if ((pageView !== 'quotas' && !quotaWorkspaceOpen) || !quotaOverviewSupported) return;
-    void loadQuotaSummaries(true);
-    const timer = window.setInterval(() => void loadQuotaSummaries(true), 15_000);
-    return () => window.clearInterval(timer);
-  }, [loadQuotaSummaries, pageView, quotaOverviewSupported, quotaWorkspaceOpen]);
+    if (!quotaOverviewSupported || connectionStatus !== 'connected') setPageView('policies');
+  }, [connectionStatus, quotaOverviewSupported]);
 
   const openWorkspace = useCallback(
     (target: WorkspaceTarget, profileId?: string) => {

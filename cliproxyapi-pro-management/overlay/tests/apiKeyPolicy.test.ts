@@ -178,20 +178,14 @@ describe('API Key Policy profile drafts', () => {
     expect(client).toContain("'/api-key-policy-quota-summaries'");
     expect(page).toContain("type PageView = 'policies' | 'quotas'");
     expect(page).toContain("type QuotaVisualState = 'inactive' | 'disabled' | 'available' | 'warning' | 'exhausted' | 'blocked' | 'unknown'");
-    expect(page).toContain("window.setInterval(() => void loadQuotaSummaries(true), 15_000)");
     expect(page).toContain("const quotaWorkspaceOpen = workspaceTarget?.kind === 'policy' && Boolean(workspaceTarget.policy.quota);");
-    expect(page).toContain("if ((pageView !== 'quotas' && !quotaWorkspaceOpen) || !quotaOverviewSupported) return;");
     expect(page).toContain('const currentQuotaSummary = currentPolicy ? quotaSummaryByPolicy.get(currentPolicy.id) : undefined;');
     expect(page).toContain('currentQuotaSummary && currentQuotaSummary.policyVersion === currentPolicy?.version');
     expect(page).toContain('currentQuota.usage.requestsUsed');
     expect(page).not.toContain('currentPolicy.quota.usage.requestsUsed');
-    expect(page).toContain('if (quiet && quotaManualInFlightRef.current) return;');
     expect(page).toContain("setPageView('policies');");
-    expect(page).toContain('quotaSummaryRevisionRef.current += 1;');
     expect(page).toContain('quotaVisualState(summary, takeoverActive, policy.quota?.enabled === true)');
     expect(page).toContain('apiKeyPolicyApi.resetQuota(policy.id, policy.version)');
-    expect(page).toContain('const refreshQuotaAfterMutation = useCallback(async () => {');
-    expect(page).toContain('quotaManualRevisionRef.current += 1;');
     expect(page).toContain('await Promise.all([load(), refreshQuotaAfterMutation()]);');
     expect(page).toContain('onRefresh={() => void refreshPage()}');
     expect(page).toContain("quotaFilter === 'inactive'");
@@ -496,13 +490,14 @@ describe('API Key Policy profile drafts', () => {
   test('keeps aggregate fallback scoped and preserves stale data only within one connection', () => {
     const page = readFileSync(resolve(import.meta.dir, '../src/pro/modules/monitoring/MonitoringCenterPage.tsx'), 'utf8');
     const hook = readFileSync(resolve(import.meta.dir, '../src/pro/modules/monitoring/features/hooks/useUsageAggregates.ts'), 'utf8');
-    expect(page).toContain('usageAggregates.scopeTimeRangeKey === timeRangeKey');
-    expect(page).toContain('usageAggregates.scopeApiKeyHash === usageTrendApiKey');
+    const analytics = readFileSync(resolve(import.meta.dir, '../src/pro/modules/monitoring/features/hooks/useMonitoringAnalytics.ts'), 'utf8');
+    expect(analytics).toContain('usageAggregates.scopeTimeRangeKey === timeRangeKey');
+    expect(analytics).toContain('usageAggregates.scopeApiKeyHash === usageTrendApiKey');
     expect(page).not.toContain('scopeAPIKeyPolicyId');
     expect(page).not.toContain('scopePolicyMode');
     expect(page).toContain('if (!serverUsageTrendAnalytics || !aggregateTrendScopeMatches)');
     expect(hook).toContain('const connectionChanged = activeConnectionKeyRef.current !== connectionKey;');
-    expect(hook).toContain('if (connectionChanged) {');
+    expect(hook).toContain('if (connectionChanged || datasetChanged) {');
     expect(hook).toContain('setData(null);');
     expect(hook).toContain('data?.scopeConnectionKey === connectionKey ? data : null');
     expect(page).toContain('refreshMeta(false)');

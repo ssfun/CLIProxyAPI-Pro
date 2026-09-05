@@ -1,6 +1,4 @@
-// Package storage owns the shared Pro SQLite connection and exposes explicit
-// domain repositories. Business modules share one database without sharing
-// lifecycle or transaction implementation details.
+// Package storage owns the shared Pro SQLite connection and lifecycle leases.
 package storage
 
 import (
@@ -61,17 +59,6 @@ func init() {
 		},
 	)
 }
-
-type Domain string
-
-const (
-	DomainUsage           Domain = "usage"
-	DomainModelPrice      Domain = "model_price"
-	DomainQuota           Domain = "quota"
-	DomainSettings        Domain = "settings"
-	DomainRoutingState    Domain = "routing_state"
-	DomainInspectionState Domain = "inspection_state"
-)
 
 type Database struct {
 	mu     sync.RWMutex
@@ -176,17 +163,6 @@ func (d *Database) Close() error {
 	return shared.db.Close()
 }
 
-func (d *Database) Repository(domain Domain) Repository {
-	return Repository{database: d, domain: domain}
-}
-
-func (d *Database) Usage() Repository           { return d.Repository(DomainUsage) }
-func (d *Database) ModelPrice() Repository      { return d.Repository(DomainModelPrice) }
-func (d *Database) Quota() Repository           { return d.Repository(DomainQuota) }
-func (d *Database) Settings() Repository        { return d.Repository(DomainSettings) }
-func (d *Database) RoutingState() Repository    { return d.Repository(DomainRoutingState) }
-func (d *Database) InspectionState() Repository { return d.Repository(DomainInspectionState) }
-
 // SameConnection reports whether two lifecycle leases share the same SQLite
 // connection. It is intentionally diagnostic-only; callers must not infer
 // domain ownership from it.
@@ -203,39 +179,6 @@ func (d *Database) SameConnection(other *Database) bool {
 	rightClosed := other.closed
 	other.mu.RUnlock()
 	return !leftClosed && !rightClosed && left != nil && left == right
-}
-
-type Repository struct {
-	database *Database
-	domain   Domain
-}
-
-func (r Repository) Domain() Domain { return r.domain }
-
-func (r Repository) SQL() *sql.DB {
-	if r.database == nil {
-		return nil
-	}
-	return r.database.SQL()
-}
-
-func (r Repository) Transaction(ctx context.Context, run func(*sql.Tx) error) error {
-	if run == nil {
-		return nil
-	}
-	db := r.SQL()
-	if db == nil {
-		return sql.ErrConnDone
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := run(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
 }
 
 // RetryBusy centralizes the retry contract used by state and quota writes.

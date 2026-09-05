@@ -388,6 +388,7 @@
       "plan_default_hint": "Used for a recognized plan without its own configured rule."
     },
     "monitoring": {
+      "summary_updated": "Overview updated at {{time}} · refreshes every minute while requests arrive",
       "eyebrow": "Runtime Overview",
       "title": "Request Monitoring",
       "subtitle": "A unified operations view across model-level calls, upstream channels, auth credentials, and estimated cost. KPIs default to model calls, while task buckets are shown separately so usage.total_requests is not mistaken for business request count.",
@@ -1518,6 +1519,8 @@
         "auto_enable_hint": "Only re-enable credentials disabled by this policy."
       },
       "runtime": {
+        "stale": "Runtime status could not be refreshed. The data below may be out of date.",
+        "last_updated": "Last successful update: {{time}}",
         "active_title": "Protected Credentials",
         "active_count": "{{count}} credentials currently owned by request protection",
         "events_title": "Recent Protection Events",
@@ -1608,6 +1611,7 @@
       "no_auth_providers_hint": "Добавьте файл аутентификации, чтобы настроить правила провайдера."
     },
     "monitoring": {
+      "summary_updated": "Обзор обновлён в {{time}} · обновляется раз в минуту при новых запросах",
       "eyebrow": "Runtime Overview",
       "title": "Мониторинг запросов",
       "subtitle": "Единая операционная панель для вызовов моделей, upstream-каналов, auth credential и оценочной стоимости. KPI по умолчанию считают model-level calls, а task bucket показываются отдельно, чтобы usage.total_requests не путался с бизнес-запросами.",
@@ -2738,6 +2742,8 @@
         "auto_enable_hint": "Включать только credential, отключённые этой политикой."
       },
       "runtime": {
+        "stale": "Не удалось обновить состояние. Данные могут быть устаревшими.",
+        "last_updated": "Последнее успешное обновление: {{time}}",
         "active_title": "Защищённые credential",
         "active_count": "Сейчас request protection управляет {{count}} credential",
         "events_title": "Недавние события защиты",
@@ -3300,6 +3306,7 @@
       "plan_default_hint": "套餐已识别但没有单独规则时使用。"
     },
     "monitoring": {
+      "summary_updated": "概览更新于 {{time}} · 有新请求时每分钟更新",
       "eyebrow": "Runtime Overview",
       "title": "请求监控",
       "subtitle": "围绕模型层调用、上游渠道、认证凭证和估算花费建立统一视图。这里默认以模型调用为统计口径，同时补充近似任务桶，避免把 usage.total_requests 误读成业务请求数。",
@@ -4430,6 +4437,8 @@
         "auto_enable_hint": "只会重新启用由本策略禁用的账号。"
       },
       "runtime": {
+        "stale": "运行状态更新失败，以下数据可能已过期。",
+        "last_updated": "最后成功更新：{{time}}",
         "active_title": "受保护账号",
         "active_count": "当前有 {{count}} 个账号由请求保护策略管理",
         "events_title": "最近保护事件",
@@ -4853,6 +4862,7 @@
       "plan_default_hint": "套餐已識別但沒有單獨規則時使用。"
     },
     "monitoring": {
+      "summary_updated": "概覽更新於 {{time}} · 有新請求時每分鐘更新",
       "eyebrow": "Runtime Overview",
       "title": "請求監控",
       "subtitle": "圍繞模型層呼叫、上游渠道、認證憑證與估算花費建立統一視圖。首頁預設以模型呼叫為統計口徑，同時補充近似任務桶，避免把 usage.total_requests 誤讀成業務請求數。",
@@ -5983,6 +5993,8 @@
         "auto_enable_hint": "只會重新啟用由本策略停用的帳號。"
       },
       "runtime": {
+        "stale": "執行狀態更新失敗，以下資料可能已過期。",
+        "last_updated": "最後成功更新：{{time}}",
         "active_title": "受保護帳號",
         "active_count": "目前有 {{count}} 個帳號由請求保護策略管理",
         "events_title": "最近保護事件",
