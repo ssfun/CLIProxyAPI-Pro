@@ -58,8 +58,6 @@ internal/runtime/executor/xai_executor_stream.go	generic-host-hook	request-obser
 internal/runtime/executor/xai_websockets_executor.go	generic-host-hook	request-observer	upstream-built-in-websocket-response-observer
 internal/translator/codex/openai/chat-completions/codex_openai_request.go	upstream-generic-fix	codex-fast-tier	upstream-forward-fast-service-tier-as-priority
 internal/translator/codex/openai/responses/codex_openai-responses_request.go	upstream-generic-fix	codex-fast-tier	upstream-normalize-fast-service-tier-to-priority
-internal/translator/gemini/openai/responses/gemini_openai-responses_request.go	upstream-generic-fix	vertex-tool-images	upstream-nest-tool-result-images-under-function-response
-internal/translator/gemini/openai/responses/gemini_openai-responses_request_test.go	upstream-generic-fix	vertex-tool-images	upstream-nest-tool-result-images-under-function-response
 sdk/api/handlers/claude/code_handlers.go	must-remain-host-patch	final-model-response	retain-request-policy-model-filtering
 sdk/api/handlers/gemini/gemini_handlers.go	must-remain-host-patch	final-model-response	retain-request-policy-model-filtering-and-errors
 sdk/api/handlers/handlers.go	must-remain-host-patch	api-key-policy	retain-policy-visible-model-and-speed-contract
