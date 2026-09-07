@@ -325,6 +325,36 @@ queue_go_source('sdk/cliproxy/auth/scheduler_runtime_state.go')
 queue_go_source('internal/runtime/executor/claude_stream_terminal.go')
 queue_go_source('sdk/cliproxy/auth/codex_retry_after_headers_test.go')
 
+claude_identity = ROOT / 'internal/auth/claude/identity.go'
+insert_before(
+    claude_identity,
+    '// ReadMetadataString reads a string-valued metadata entry under the metadata\n',
+    '''// ReadMetadataBool reads a boolean entry under the shared metadata lock.
+func ReadMetadataBool(metadata *map[string]any, key string) bool {
+\tif metadata == nil {
+\t\treturn false
+\t}
+\tclaudeDevicePoolMu.Lock()
+\tdefer claudeDevicePoolMu.Unlock()
+\tvalue, _ := (*metadata)[key].(bool)
+\treturn value
+}
+
+''',
+    'func ReadMetadataBool(',
+)
+claude_executor_auth = ROOT / 'internal/runtime/executor/claude_executor_auth.go'
+for flag, variable in (
+    ('skip_account_profile', 'skip'),
+    ('is_setup_token', 'isSetup'),
+    ('setup_token', 'isSetup'),
+):
+    replace_once(
+        claude_executor_auth,
+        f'\tif {variable}, _ := auth.Metadata["{flag}"].(bool); {variable} {{\n',
+        f'\tif claudeauth.ReadMetadataBool(&auth.Metadata, "{flag}") {{\n',
+    )
+
 codex_terminal = ROOT / 'internal/runtime/executor/codex_executor_terminal.go'
 replace_go_function(
     codex_terminal,

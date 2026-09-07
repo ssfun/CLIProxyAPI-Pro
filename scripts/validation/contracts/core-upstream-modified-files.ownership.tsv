@@ -1,4 +1,4 @@
-# Latest-only ownership review for Core v7.2.146.
+# Latest-only ownership review for Core v7.2.152.
 # Categories describe the whole Pro delta for each modified upstream file.
 # The current roadmap keeps host business-state extensions in host patches;
 # this review does not assume or require a plugin migration.
@@ -19,6 +19,7 @@ internal/api/server_options.go	must-remain-host-patch	api-key-policy	retain-host
 internal/api/server_reload.go	must-remain-host-patch	api-key-policy	retain-atomic-configured-key-publication
 internal/api/server_routes.go	must-remain-host-patch	final-response-and-routing	retain-root-route-api-key-policy-and-final-model-filtering
 internal/api/server_test.go	must-remain-host-patch	management-contracts	retain-mixed-host-management-regressions-while-moving-usage-contracts-with-plugin
+internal/auth/claude/identity.go	upstream-generic-fix	claude-auth-concurrency	upstream-lock-boolean-metadata-reads
 internal/client/codex/live/client_secret.go	must-remain-host-patch	api-key-policy	retain-realtime-issuer-policy-snapshot
 internal/client/codex/live/live.go	must-remain-host-patch	api-key-policy	retain-realtime-model-policy-and-quota-admission
 internal/client/codex/live/sideband.go	must-remain-host-patch	api-key-policy	retain-webrtc-quota-settlement
@@ -39,6 +40,7 @@ internal/pluginhost/rpc_schema.go	generic-host-hook	plugin-quota	upstream-rpc-qu
 internal/pluginhost/snapshot.go	generic-host-hook	plugin-quota	upstream-quota-capability-snapshot
 internal/pluginstore/auth.go	upstream-generic-fix	plugin-store-auth	upstream-private-github-release-auth
 internal/redisqueue/plugin.go	must-remain-host-patch	observability	retain-usage-enrichment-and-monitoring-controls
+internal/runtime/executor/claude_executor_auth.go	upstream-generic-fix	claude-auth-concurrency	upstream-lock-setup-token-metadata-reads
 internal/runtime/executor/claude_executor_execute.go	upstream-generic-fix	usage-accounting	upstream-preserve-claude-failed-usage
 internal/runtime/executor/claude_executor_stream.go	upstream-generic-fix	usage-accounting	upstream-preserve-claude-stream-failed-usage
 internal/runtime/executor/codex_executor_execute.go	upstream-generic-fix	codex-rate-limit-retry	upstream-forward-standard-retry-after-through-http-execution

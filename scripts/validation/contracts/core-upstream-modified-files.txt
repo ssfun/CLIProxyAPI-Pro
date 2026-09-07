@@ -1,4 +1,4 @@
-# Latest-only baseline: CLIProxyAPI v7.2.151 (5208aec703b5ce7e3445f6e9d91cc13b3e78003a).
+# Latest-only baseline: CLIProxyAPI v7.2.152 (c76dfd4e0edabab9000628b1560ab8ab379eadb8).
 # Update this reviewed surface only when adapting to a newer latest upstream release.
 cmd/server/main.go
 config.example.yaml
@@ -16,6 +16,7 @@ internal/api/server_options.go
 internal/api/server_reload.go
 internal/api/server_routes.go
 internal/api/server_test.go
+internal/auth/claude/identity.go
 internal/client/codex/live/client_secret.go
 internal/client/codex/live/live.go
 internal/client/codex/live/sideband.go
@@ -36,6 +37,7 @@ internal/pluginhost/rpc_schema.go
 internal/pluginhost/snapshot.go
 internal/pluginstore/auth.go
 internal/redisqueue/plugin.go
+internal/runtime/executor/claude_executor_auth.go
 internal/runtime/executor/claude_executor_execute.go
 internal/runtime/executor/claude_executor_stream.go
 internal/runtime/executor/codex_executor_execute.go
