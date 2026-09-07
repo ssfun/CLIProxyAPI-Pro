@@ -5363,16 +5363,18 @@ replace_once(
     auth_conductor,
     '''\tm.mu.Unlock()
 \tif m.scheduler != nil && authSnapshot != nil {
-\t\tm.scheduler.upsertAuth(authSnapshot)
-\t}
 ''',
     '''\tm.mu.Unlock()
 \tqueueAuthRuntimeStats(authSnapshot, authStatsObservedAt)
-\tif authSnapshot != nil {
-\t\tm.RefreshSchedulerEntry(authSnapshot.ID)
-\t}
+\tif m.scheduler != nil && authSnapshot != nil {
 ''',
     'queueAuthRuntimeStats(authSnapshot, authStatsObservedAt)',
+)
+replace_once(
+    auth_conductor,
+    '\t\tm.scheduler.upsertAuthResult(authSnapshot, targetModels, result.CredentialScope)\n',
+    '\t\tm.scheduler.upsertAuthResult(m.applyAccountPolicy(authSnapshot), targetModels, result.CredentialScope)\n',
+    'm.scheduler.upsertAuthResult(m.applyAccountPolicy(authSnapshot),',
 )
 replace_once(
     auth_conductor,
@@ -5799,8 +5801,9 @@ replace_once(
 )
 
 # Account policy fields are execution-only overlays. Every Manager-driven
-# incremental scheduler refresh must therefore go through RefreshSchedulerEntry,
-# whose single low-level upsert resolves the latest cached account policy.
+# full scheduler refresh must therefore go through RefreshSchedulerEntry.
+# Result updates retain upstream model scope and stale-generation handling,
+# applying the cached account policy to an execution-only snapshot.
 auth_package = ROOT / 'sdk/cliproxy/auth'
 auth_go_paths = set(auth_package.glob('*.go'))
 auth_go_paths.update(
@@ -5818,6 +5821,13 @@ if direct_scheduler_upserts != expected_direct_scheduler_upserts:
         'Manager scheduler upserts must be centralized in RefreshSchedulerEntry: '
         f'found {direct_scheduler_upserts}'
     )
+result_scheduler_upserts = {
+    path.relative_to(ROOT).as_posix(): read(path).count('m.scheduler.upsertAuthResult(')
+    for path in auth_go_paths
+    if read(path).count('m.scheduler.upsertAuthResult(') > 0
+}
+if result_scheduler_upserts != {'sdk/cliproxy/auth/conductor_cooldown.go': 1}:
+    raise SystemExit(f'unexpected Manager result scheduler upserts: {result_scheduler_upserts}')
 
 format_go_writes([
     'cmd/server/main.go',
