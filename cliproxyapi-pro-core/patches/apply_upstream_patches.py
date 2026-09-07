@@ -335,7 +335,8 @@ replace_go_function(
 
 func newCodexStatusErrWithHeaders(statusCode int, body []byte, responseHeaders http.Header) statusErr {
 	errCode := statusCode
-	if isCodexModelCapacityError(body) || isCodexUsageLimitError(body) {
+	credentialScoped := isCodexUsageLimitError(body)
+	if isCodexModelCapacityError(body) || credentialScoped {
 		errCode = http.StatusTooManyRequests
 	}
 	body = classifyCodexStatusError(errCode, body)
@@ -344,7 +345,7 @@ func newCodexStatusErrWithHeaders(statusCode int, body []byte, responseHeaders h
 	if retryAfter == nil && errCode == http.StatusTooManyRequests && responseHeaders != nil {
 		retryAfter = parseCodexRetryAfterHeader(responseHeaders.Get("Retry-After"), now)
 	}
-	return statusErr{code: errCode, msg: string(body), retryAfter: retryAfter}
+	return statusErr{code: errCode, msg: string(body), retryAfter: retryAfter, credentialScoped: credentialScoped}
 }
 
 func parseCodexRetryAfterHeader(raw string, now time.Time) *time.Duration {
@@ -438,7 +439,7 @@ replace_go_function(
 
 	out := buildCodexWebsocketErrorPayload(payload, status)
 	headers := parseCodexWebsocketErrorHeaders(payload)
-	statusError := statusErr{code: status, msg: string(out)}
+	statusError := statusErr{code: status, msg: string(out), credentialScoped: isCodexUsageLimitError(out)}
 	now := time.Now()
 	if retryAfter := parseCodexRetryAfter(status, out, now); retryAfter != nil {
 		statusError.retryAfter = retryAfter
@@ -1930,14 +1931,13 @@ replace_once(
 )
 replace_once(
     realtime_live_source,
-    '''\t\t\tsession := liveSession{authID: selected.ID, model: model, media: mediaSession}
+    '''\t\t\tsession.ownerPrincipal, session.ownerProvider = requestOwner(c)
 ''',
-    '''\t\t\tsession := liveSession{
-\t\t\t\tauthID: selected.ID, model: model, media: mediaSession,
-\t\t\t\tquotaModel: quotaModel, quotaSettlement: apikeypolicy.QuotaUsageSettlementFromContext(c.Request.Context()),
-\t\t\t}
+    '''\t\t\tsession.quotaModel = quotaModel
+\t\t\tsession.quotaSettlement = apikeypolicy.QuotaUsageSettlementFromContext(c.Request.Context())
+\t\t\tsession.ownerPrincipal, session.ownerProvider = requestOwner(c)
 ''',
-    'quotaSettlement: apikeypolicy.QuotaUsageSettlementFromContext',
+    'session.quotaSettlement = apikeypolicy.QuotaUsageSettlementFromContext',
 )
 
 realtime_sideband_source = ROOT / 'internal/client/codex/live/sideband.go'
@@ -3188,16 +3188,16 @@ replace_once(
 )
 replace_once(
     usage_helpers,
-    '''\t\treasoning:   usage.ReasoningEffortFromContext(ctx),
-\t\tserviceTier: usage.ServiceTierFromContext(ctx),
-\t\tgenerate:    usage.GenerateFromContext(ctx),
+    '''\t\treporter.accessTokenHash = authAccessTokenSHA256(auth)
+\t}
+\treturn reporter
 ''',
-    '''\t\treasoning:   usage.ReasoningEffortFromContext(ctx),
-\t\tserviceTier: usage.ServiceTierFromContext(ctx),
-\t\tspeed:       usage.SpeedFromContext(ctx),
-\t\tgenerate:    usage.GenerateFromContext(ctx),
+    '''\t\treporter.accessTokenHash = authAccessTokenSHA256(auth)
+\t}
+\treporter.speed = usage.SpeedFromContext(ctx)
+\treturn reporter
 ''',
-    'speed:       usage.SpeedFromContext(ctx)',
+    'reporter.speed = usage.SpeedFromContext(ctx)',
 )
 replace_once(
     usage_helpers,
@@ -3815,12 +3815,6 @@ replace_once(
 ''',
     'prepareUsageRecordForPublish(ctx, &record)',
 )
-replace_once(
-    usage_helpers,
-    '\tinternallogging "' + import_path('internal/logging') + '"\n',
-    '',
-)
-
 config_defaults = ROOT / 'internal/config/config_defaults.go'
 replace_once(
     config_defaults,
@@ -4739,11 +4733,8 @@ replace_once(
 )
 replace_once(
     redisqueue_plugin,
-    '''\tclientRequestMetadata := internallogging.GetClientRequestMetadata(ctx)
-
-\tusageDetail := coreusage.EnsureTokenBreakdownForProvider''',
-    '''\tclientRequestMetadata := internallogging.GetClientRequestMetadata(ctx)
-\tpolicyDecision, hasPolicyDecision := apikeypolicy.DecisionFromContext(ctx)
+    '''\tusageDetail := coreusage.EnsureTokenBreakdownForProvider''',
+    '''\tpolicyDecision, hasPolicyDecision := apikeypolicy.DecisionFromContext(ctx)
 \tpolicyMode := ""
 \tapiKeyPolicyID := ""
 \tprofileID := ""
