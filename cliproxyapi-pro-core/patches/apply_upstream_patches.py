@@ -5014,12 +5014,12 @@ handler = ROOT / 'internal/api/handlers/management/handler.go'
 add_go_import(handler, '"net/http"\n', '\t"net/url"\n')
 replace_once(
     handler,
-    '''\tpluginReleaseCacheMu    sync.Mutex
-\tpluginReleaseCache      map[string]pluginReleaseCacheEntry
+    '''\tpluginStoreRateLimiter  *pluginstore.GitHubRateLimiter
+\tpluginReleases          pluginReleaseCache
 }
 ''',
-    '''\tpluginReleaseCacheMu    sync.Mutex
-\tpluginReleaseCache      map[string]pluginReleaseCacheEntry
+    '''\tpluginStoreRateLimiter  *pluginstore.GitHubRateLimiter
+\tpluginReleases          pluginReleaseCache
 \tproAuthMutationMu       sync.Mutex
 \tlifecycleContext        context.Context
 \tlifecycleCancel         context.CancelFunc
