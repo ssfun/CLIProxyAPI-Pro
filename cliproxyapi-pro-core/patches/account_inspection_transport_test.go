@@ -835,3 +835,156 @@ func TestTransientDeepProbeErrorCodeTakesPriorityOverHTTPStatus(t *testing.T) {
 		}
 	}
 }
+
+type inspectionProbeRefreshDue bool
+
+func (due inspectionProbeRefreshDue) ShouldRefresh(time.Time, *coreauth.Auth) bool { return bool(due) }
+
+type inspectionProbeRefreshExecutor struct {
+	coreauth.ProviderExecutor
+	provider string
+	refresh  func(*coreauth.Auth) (*coreauth.Auth, error)
+}
+
+func (e inspectionProbeRefreshExecutor) Identifier() string { return e.provider }
+func (e inspectionProbeRefreshExecutor) Refresh(_ context.Context, auth *coreauth.Auth) (*coreauth.Auth, error) {
+	return e.refresh(auth)
+}
+
+func TestOAuthInspectionUsesPreparedToken(t *testing.T) {
+	for _, provider := range []string{"claude", "codex", "kimi"} {
+		for _, alias := range []string{"canonical", "camel", "mixed"} {
+			for _, refresh := range []bool{false, true} {
+				for _, used := range []int{10, 100} {
+					t.Run(fmt.Sprintf("%s/%s/refresh=%v/used=%d", provider, alias, refresh, used), func(t *testing.T) {
+						ctx := context.Background()
+						manager := coreauth.NewManager(nil, nil, nil)
+						metadata := map[string]any{"access_token": "original-token", "refresh_token": "test-refresh", "account_id": "test-account"}
+						if alias == "camel" {
+							delete(metadata, "access_token")
+							metadata["accessToken"] = "original-token"
+						}
+						if alias == "mixed" {
+							metadata["accessToken"] = "stale-alias"
+						}
+						registered, err := manager.Register(ctx, &coreauth.Auth{ID: "probe-token", FileName: "probe-token.json", Provider: provider, Metadata: metadata, Runtime: inspectionProbeRefreshDue(refresh)})
+						if err != nil {
+							t.Fatal(err)
+						}
+						refreshes := 0
+						manager.RegisterExecutor(inspectionProbeRefreshExecutor{provider: provider, refresh: func(auth *coreauth.Auth) (*coreauth.Auth, error) {
+							refreshes++
+							auth.Metadata["access_token"] = "refreshed-token"
+							return auth, nil
+						}})
+						wantToken := "original-token"
+						if refresh {
+							wantToken = "refreshed-token"
+						}
+						var probes atomic.Int32
+						server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+							probes.Add(1)
+							w.Header().Set("Content-Type", "application/json")
+							if r.Header.Get("Authorization") != "Bearer "+wantToken {
+								t.Error("probe used a stale token")
+								w.WriteHeader(http.StatusUnauthorized)
+								_, _ = w.Write([]byte(`{"error":"invalid_token"}`))
+								return
+							}
+							switch r.URL.Path {
+							case "/api/oauth/usage":
+								_, _ = fmt.Fprintf(w, `{"five_hour":{"utilization":%d}}`, used)
+							case "/api/oauth/profile":
+								_, _ = w.Write([]byte(`{}`))
+							case "/backend-api/wham/usage":
+								_, _ = fmt.Fprintf(w, `{"rate_limit":{"primary_window":{"limit_window_seconds":18000,"used_percent":%d}}}`, used)
+							case "/coding/v1/usages":
+								_, _ = fmt.Fprintf(w, `{"limits":[{"name":"Weekly","limit":100,"used":%d}]}`, used)
+							default:
+								t.Errorf("unexpected path %s", r.URL.Path)
+								w.WriteHeader(http.StatusNotFound)
+							}
+						}))
+						defer server.Close()
+						transport := server.Client().Transport.(*http.Transport).Clone()
+						transport.TLSClientConfig.ServerName = "example.com"
+						transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+							return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+						}
+						previous := http.DefaultTransport
+						http.DefaultTransport = transport
+						defer func() { http.DefaultTransport = previous; transport.CloseIdleConnections() }()
+						scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
+						settings := proinspection.DefaultSettings()
+						settings.UsedPercentThreshold = 95
+						settings.AutoExecuteAccountInvalidAction = accountInspectionActionDisable
+						settings.AutoExecuteRequestErrorAction = accountInspectionActionDisable
+						settings.AutoExecuteQuotaLimitDisable = true
+						result := scheduler.inspectAccount(ctx, accountFromAuth(registered), settings)
+						results := []accountInspectionResult{result}
+						scheduler.applyAutomaticActions(ctx, results, settings)
+						current, _ := manager.GetByID(registered.ID)
+						if result.Error != "" || result.UsedPercent == nil || *result.UsedPercent != float64(used) || result.IsQuota != (used >= 95) {
+							t.Fatalf("quota result: used=%v quota=%v error=%s", result.UsedPercent, result.IsQuota, result.Error)
+						}
+						if current.Disabled != (used >= 95) || results[0].Executed != (used >= 95) {
+							t.Fatalf("action: executed=%v disabled=%v", results[0].Executed, current.Disabled)
+						}
+						if result.AccessTokenSHA256 != coreauth.AccessTokenSHA256(current) || result.TokenRefreshTriggered != refresh {
+							t.Fatal("result is not bound to the prepared token")
+						}
+						expectedRefreshes := 0
+						if refresh {
+							expectedRefreshes = 1
+						}
+						expectedProbes := int32(1)
+						if provider == "claude" {
+							expectedProbes = 2
+						}
+						if refreshes != expectedRefreshes || probes.Load() != expectedProbes {
+							t.Fatalf("refreshes=%d probes=%d", refreshes, probes.Load())
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestOAuthInspectionSkipsReauthenticatedAccount(t *testing.T) {
+	for _, provider := range []string{"claude", "codex", "kimi", "gemini-cli", "xai"} {
+		for _, fails := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/fails=%v", provider, fails), func(t *testing.T) {
+				ctx := context.Background()
+				manager := coreauth.NewManager(nil, nil, nil)
+				registered, err := manager.Register(ctx, &coreauth.Auth{ID: "changed-auth", FileName: "changed.json", Provider: provider, Metadata: map[string]any{"access_token": "old-token"}, Runtime: inspectionProbeRefreshDue(true)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				manager.RegisterExecutor(inspectionProbeRefreshExecutor{provider: provider, refresh: func(auth *coreauth.Auth) (*coreauth.Auth, error) {
+					current, _ := manager.GetByID(auth.ID)
+					current.Metadata["access_token"] = "new-login-token"
+					if _, err := manager.Update(ctx, current); err != nil {
+						t.Fatal(err)
+					}
+					auth.Metadata["access_token"] = "old-refresh-result"
+					if fails {
+						return nil, &coreauth.Error{HTTPStatus: 401, Message: "old refresh failed"}
+					}
+					return auth, nil
+				}})
+				scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
+				settings := proinspection.DefaultSettings()
+				settings.AutoExecuteAccountInvalidAction = accountInspectionActionDisable
+				settings.AutoExecuteRequestErrorAction = accountInspectionActionDisable
+				result := scheduler.inspectAccount(ctx, accountFromAuth(registered), settings)
+				results := []accountInspectionResult{result}
+				scheduler.applyAutomaticActions(ctx, results, settings)
+				current, _ := manager.GetByID(registered.ID)
+				if result.ErrorCode != "inspection_identity_changed" || results[0].Executed || current.Disabled || current.Unavailable || current.Metadata["access_token"] != "new-login-token" {
+					t.Fatalf("identity change: code=%s executed=%v disabled=%v unavailable=%v", result.ErrorCode, results[0].Executed, current.Disabled, current.Unavailable)
+				}
+			})
+		}
+	}
+}

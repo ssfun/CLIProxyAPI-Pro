@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -744,5 +745,62 @@ func TestMergeTokenRefreshResultUpdatesErrorCodeAndHealthCounts(t *testing.T) {
 	}
 	if scheduler.healthCounts.Healthy != 1 || scheduler.healthCounts.InspectionError != 0 || scheduler.status.Summary.ErrorCount != 0 {
 		t.Fatalf("after successful refresh health=%+v summary=%+v, want healthy and no summary error", scheduler.healthCounts, scheduler.status.Summary)
+	}
+}
+
+func TestManualRefreshSkipsChangedIdentity(t *testing.T) {
+	for _, mutation := range []string{"refresh-token", "access-token", "recreate"} {
+		for _, fails := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/fails=%v", mutation, fails), func(t *testing.T) {
+				ctx := context.Background()
+				manager := coreauth.NewManager(nil, nil, nil)
+				registered, err := manager.Register(ctx, &coreauth.Auth{ID: "manual-refresh", FileName: "manual.json", Provider: "codex", Status: coreauth.StatusActive,
+					Metadata: map[string]any{"access_token": "original-token", "refresh_token": "original-refresh"},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				manager.RegisterExecutor(inspectionProbeRefreshExecutor{provider: "codex", refresh: func(candidate *coreauth.Auth) (*coreauth.Auth, error) {
+					current, _ := manager.GetByID(candidate.ID)
+					switch mutation {
+					case "refresh-token":
+						current.Metadata["refresh_token"] = "new-refresh"
+					case "access-token":
+						current.Metadata["access_token"] = "new-token"
+					}
+					if mutation == "recreate" {
+						_, err = manager.Register(ctx, current)
+					} else {
+						_, err = manager.Update(ctx, current)
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					candidate.Metadata["access_token"] = "stale-refresh-token"
+					if fails {
+						return nil, &coreauth.Error{HTTPStatus: 401, Message: "old refresh rejected"}
+					}
+					return candidate, nil
+				}})
+				account := accountFromAuth(registered)
+				scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}, status: accountInspectionStatus{Results: []accountInspectionResult{account.baseResult()}}}
+				result, refreshErr := scheduler.refreshTokenNow(ctx, accountInspectionActionItem{Key: account.Key})
+				current, _ := manager.GetByID(registered.ID)
+				if !errors.Is(refreshErr, coreauth.ErrInspectionAuthChanged) || result.ErrorCode != "inspection_identity_changed" || result.AccessTokenSHA256 != account.AccessTokenSHA256 || !result.TokenRefreshTriggered {
+					t.Fatalf("stale refresh: code=%s err=%v", result.ErrorCode, refreshErr)
+				}
+				if current.Disabled || current.Unavailable || current.LastError != nil || current.Status != coreauth.StatusActive {
+					t.Fatal("manual refresh polluted replacement credentials")
+				}
+				settings := proinspection.DefaultSettings()
+				settings.AutoExecuteRequestErrorAction = accountInspectionActionDisable
+				settings.AutoExecuteAccountInvalidAction = accountInspectionActionDisable
+				results := []accountInspectionResult{result}
+				scheduler.applyAutomaticActions(ctx, results, settings)
+				if results[0].Executed {
+					t.Fatal("identity-change result executed an automatic action")
+				}
+			})
+		}
 	}
 }

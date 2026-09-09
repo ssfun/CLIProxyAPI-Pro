@@ -292,6 +292,7 @@ new_customization_paths = (
 	'sdk/cliproxy/auth/codex_retry_after_headers_test.go',
 	'sdk/cliproxy/auth/scheduler_runtime_state.go',
     'sdk/cliproxy/auth/inspection_refresh.go',
+    'sdk/cliproxy/auth/inspection_refresh_test.go',
     'sdk/cliproxy/auth/pinned_execution.go',
     'sdk/cliproxy/pro_features_service_test.go',
 )
@@ -5192,6 +5193,7 @@ insert_before_nth(
 )
 
 queue_go_source('sdk/cliproxy/auth/inspection_refresh.go')
+queue_go_source('sdk/cliproxy/auth/inspection_refresh_test.go')
 queue_go_source('sdk/cliproxy/auth/pinned_execution.go')
 
 auth_types = ROOT / 'sdk/cliproxy/auth/types.go'
@@ -5270,6 +5272,9 @@ replace_once(
 \t}
 \tif mode == updateModeRefresh || mode == updateModeInspectionRefresh {
 \t\tmerged := MergeRefreshedAuth(base, existing, auth)
+\t\tif mode == updateModeInspectionRefresh {
+\t\t\treconcileInspectionRefreshStatus(base, existing, merged)
+\t\t}
 ''',
     'mode == updateModeInspectionRefresh && !inspectionRefreshIdentityMatches',
 )

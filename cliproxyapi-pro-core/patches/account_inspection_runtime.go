@@ -1002,6 +1002,17 @@ func (s *accountInspectionScheduler) refreshTokenNow(ctx context.Context, item a
 		}
 		s.appendLog("info", fmt.Sprintf("主动刷新令牌 %s", account.identity()))
 		updated, refreshed, refreshErr := s.h.authManager.ForceRefreshForInspection(ctx, account.Auth.ID)
+		if errors.Is(refreshErr, coreauth.ErrInspectionAuthChanged) {
+			// Keep the original observation and never write this control-flow
+			// outcome into the replacement credential's authentication status.
+			result.TokenRefreshStatus = "failed"
+			result.TokenRefreshError = refreshErr.Error()
+			result.Error = refreshErr.Error()
+			result.ErrorCode = "inspection_identity_changed"
+			result.ActionReason = "账号凭据已变化，跳过本次刷新结果"
+			s.appendLog("warning", fmt.Sprintf("%s 凭据已变化，跳过本次刷新结果", account.identity()))
+			return result, refreshErr
+		}
 		if updated != nil {
 			account = accountFromAuth(updated)
 			result = account.baseResult()

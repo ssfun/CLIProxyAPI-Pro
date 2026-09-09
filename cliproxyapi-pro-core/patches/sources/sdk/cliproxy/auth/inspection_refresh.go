@@ -29,13 +29,48 @@ func (m *Manager) CommitInspectionRefresh(ctx context.Context, base, updated *Au
 	return saved, err
 }
 
+// reconcileInspectionRefreshStatus runs under the manager lock after the
+// three-way merge. Successful refresh clears the observed error, but must not
+// erase a newer error (even one with the same message) or an active cooldown.
+func reconcileInspectionRefreshStatus(base, current, merged *Auth) {
+	if base == nil || current == nil || merged == nil {
+		return
+	}
+	if !reflect.DeepEqual(base.LastError, current.LastError) {
+		merged.LastError = current.LastError
+		if current.LastError != nil {
+			merged.Unavailable = current.Unavailable
+			if !merged.Disabled {
+				merged.Status = current.Status
+				merged.StatusMessage = current.StatusMessage
+			}
+		}
+		return
+	}
+	merged.LastError = nil
+	if reflect.DeepEqual(base.Metadata["last_error"], current.Metadata["last_error"]) {
+		delete(merged.Metadata, "last_error")
+	}
+	if merged.Disabled {
+		return
+	}
+	now := time.Now()
+	if (current.Quota.Exceeded && current.Quota.Reason == "credential_quota" && current.Quota.NextRecoverAt.After(now)) ||
+		(current.Unavailable && current.NextRetryAfter.After(now)) {
+		return
+	}
+	merged.Status = StatusActive
+	merged.Unavailable = false
+	merged.StatusMessage = ""
+}
+
 func inspectionRefreshIdentityMatches(base, current *Auth) bool {
 	if base == nil || current == nil || base.ID != current.ID || base.Index != current.Index ||
 		base.Provider != current.Provider || base.FileName != current.FileName ||
 		base.RegistrationEpoch != current.RegistrationEpoch || AccessTokenSHA256(base) != AccessTokenSHA256(current) {
 		return false
 	}
-	for _, key := range []string{"refresh_token", "id_token", "session_id"} {
+	for _, key := range []string{"access_token", "accessToken", "token", "Token", "refresh_token", "refreshToken", "id_token", "idToken", "session_id"} {
 		if !reflect.DeepEqual(base.Metadata[key], current.Metadata[key]) {
 			return false
 		}
@@ -101,25 +136,6 @@ func (m *Manager) shouldRefreshForInspection(a *Auth, now time.Time) bool {
 	return true
 }
 
-func (m *Manager) markRefreshPendingForInspection(id string, now time.Time, force bool) bool {
-	m.mu.Lock()
-	auth, ok := m.auths[id]
-	if !ok || auth == nil {
-		m.mu.Unlock()
-		return false
-	}
-	if !force && !auth.NextRefreshAfter.IsZero() && now.Before(auth.NextRefreshAfter) {
-		m.mu.Unlock()
-		return false
-	}
-	auth.NextRefreshAfter = now.Add(refreshPendingBackoff)
-	m.auths[id] = auth
-	m.mu.Unlock()
-
-	m.queueRefreshReschedule(id)
-	return true
-}
-
 func (m *Manager) RefreshIfDueForInspection(ctx context.Context, id string) (*Auth, bool, error) {
 	return m.refreshForInspection(ctx, id, false)
 }
@@ -133,48 +149,28 @@ func (m *Manager) refreshForInspection(ctx context.Context, id string, force boo
 		ctx = context.Background()
 	}
 	now := time.Now()
-	m.mu.RLock()
+	// Select the executor, snapshot credentials and reserve the refresh together.
+	// No later lookup may switch this refresh to a newly registered credential.
+	m.mu.Lock()
 	auth := m.auths[id]
 	if auth == nil {
-		m.mu.RUnlock()
+		m.mu.Unlock()
 		return nil, false, nil
 	}
-	current := auth.Clone()
 	accountType, _ := auth.AccountInfo()
-	if accountType == "api_key" || (!force && !m.shouldRefreshForInspection(auth, now)) {
-		m.mu.RUnlock()
-		return current, false, nil
-	}
 	exec := m.executors[auth.Provider]
-	m.mu.RUnlock()
-	if exec == nil {
+	if accountType == "api_key" || exec == nil || (!force && !m.shouldRefreshForInspection(auth, now)) {
+		current := auth.Clone()
+		m.mu.Unlock()
 		return current, false, nil
 	}
-	if !m.markRefreshPendingForInspection(id, now, force) {
-		m.mu.RLock()
-		defer m.mu.RUnlock()
-		if latest := m.auths[id]; latest != nil {
-			return latest.Clone(), false, nil
-		}
-		return nil, false, nil
-	}
+	auth.NextRefreshAfter = now.Add(refreshPendingBackoff)
+	base := auth.Clone()
+	m.mu.Unlock()
+	m.queueRefreshReschedule(id)
 
-	m.mu.RLock()
-	auth = m.auths[id]
-	if auth == nil {
-		m.mu.RUnlock()
-		return nil, false, nil
-	}
-	exec = m.executors[auth.Provider]
-	cloned := auth.Clone()
-	preservedDisabled := auth.Disabled
-	preservedStatus := auth.Status
-	preservedStatusMessage := auth.StatusMessage
-	m.mu.RUnlock()
-	if exec == nil {
-		return cloned, false, nil
-	}
-
+	// Executors may mutate their input even on error; keep base immutable.
+	cloned := base.Clone()
 	updated, err := exec.Refresh(ctx, cloned)
 	if err != nil && errors.Is(err, context.Canceled) {
 		return cloned, false, err
@@ -183,6 +179,10 @@ func (m *Manager) refreshForInspection(ctx context.Context, id string, force boo
 	if err != nil {
 		unauthorized := isUnauthorizedError(err)
 		m.mu.Lock()
+		if !inspectionRefreshIdentityMatches(base, m.auths[id]) {
+			m.mu.Unlock()
+			return base, false, ErrInspectionAuthChanged
+		}
 		if current := m.auths[id]; current != nil {
 			current.LastError = refreshErrorFromError(err)
 			if unauthorized {
@@ -204,12 +204,12 @@ func (m *Manager) refreshForInspection(ctx context.Context, id string, force boo
 		updated = cloned
 	}
 	if updated.Runtime == nil {
-		updated.Runtime = auth.Runtime
+		updated.Runtime = base.Runtime
 	}
-	updated.Disabled = preservedDisabled
-	if preservedDisabled {
-		updated.Status = preservedStatus
-		updated.StatusMessage = preservedStatusMessage
+	updated.Disabled = base.Disabled
+	if base.Disabled {
+		updated.Status = base.Status
+		updated.StatusMessage = base.StatusMessage
 	}
 	updated.LastRefreshedAt = now
 	updated.NextRefreshAfter = time.Time{}
@@ -221,7 +221,7 @@ func (m *Manager) refreshForInspection(ctx context.Context, id string, force boo
 	if m.shouldRefreshForInspection(updated, now) {
 		updated.NextRefreshAfter = now.Add(refreshIneffectiveBackoff)
 	}
-	saved, err := m.Update(ctx, updated)
+	saved, err := m.CommitInspectionRefresh(ctx, base, updated)
 	if err != nil {
 		return updated, false, err
 	}

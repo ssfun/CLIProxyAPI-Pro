@@ -91,17 +91,14 @@ func (s *accountInspectionScheduler) apiCall(ctx context.Context, auth *coreauth
 	for key, value := range headers {
 		if strings.Contains(value, "$TOKEN$") {
 			if !tokenResolved {
-				if auth != nil && strings.EqualFold(strings.TrimSpace(auth.Provider), "antigravity") {
-					// Preparation already refreshed and bound this token. Refreshing
-					// here would detach quota/deep-probe evidence from its identity.
-					token = coreauth.InspectionAccessToken(auth)
-				} else {
-					token, err = s.h.resolveTokenForAuth(reqCtx, auth)
+				// Use the same token as the observation fingerprint for every OAuth
+				// provider. Preparation owns refresh; probes must not rotate it.
+				token = coreauth.InspectionAccessToken(auth)
+				if token == "" {
+					// Preserve API-key and legacy non-OAuth token formats.
+					token = tokenValueForAuth(auth)
 				}
 				tokenResolved = true
-				if err != nil {
-					return accountInspectionHTTPResult{}, err
-				}
 			}
 			value = strings.ReplaceAll(value, "$TOKEN$", token)
 		}
