@@ -323,6 +323,9 @@ func IsRequestErrorResult(result Result) bool {
 }
 
 func AutoActionForResult(result Result, settings Settings) Action {
+	if result.ErrorCode == "inspection_identity_changed" {
+		return ActionNone
+	}
 	if IsAccountInvalidResult(result) {
 		return AutoActionForError(result, settings.AutoExecuteAccountInvalidAction)
 	}

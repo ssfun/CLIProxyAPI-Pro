@@ -295,9 +295,18 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 		result.ErrorCode = "missing_auth_index"
 		return result
 	}
-	if refreshed, refreshTriggered, refreshErr := s.refreshAccountIfDue(ctx, account); refreshErr != nil {
+	if refreshed, refreshTriggered, refreshErr := s.refreshAccountIfDue(ctx, account, settings); refreshErr != nil {
 		result.TokenRefreshTriggered = refreshTriggered
 		result.NextRefreshAt = account.nextRefreshAtMillis()
+		if errors.Is(refreshErr, coreauth.ErrInspectionAuthChanged) {
+			result.TokenRefreshStatus = "failed"
+			result.TokenRefreshError = refreshErr.Error()
+			result.Error = refreshErr.Error()
+			result.ErrorCode = "inspection_identity_changed"
+			result.ActionReason = "账号凭据已变化，跳过本次巡检动作"
+			s.appendLog("warning", fmt.Sprintf("%s 凭据已变化，跳过本次巡检动作", account.identity()))
+			return result
+		}
 		if errors.Is(refreshErr, context.Canceled) || errors.Is(refreshErr, context.DeadlineExceeded) {
 			result.Error = refreshErr.Error()
 			result.ActionReason = "巡检已取消，保留账号"
@@ -389,9 +398,20 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 	return result
 }
 
-func (s *accountInspectionScheduler) refreshAccountIfDue(ctx context.Context, account accountInspectionAccount) (accountInspectionAccount, bool, error) {
+func (s *accountInspectionScheduler) refreshAccountIfDue(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) (accountInspectionAccount, bool, error) {
 	if account.Auth == nil || account.Auth.ID == "" || s == nil || s.h == nil || s.h.authManager == nil {
 		return account, false, nil
+	}
+	if account.Provider == "antigravity" {
+		current, ok := s.h.authManager.GetByID(account.Auth.ID)
+		if !ok || current == nil {
+			return account, false, coreauth.ErrInspectionAuthChanged
+		}
+		prepared, refreshed, err := s.prepareAntigravityInspectionAccount(ctx, accountFromAuth(current), settings)
+		if err == nil && refreshed {
+			s.appendLog("success", fmt.Sprintf("%s 刷新令牌成功", prepared.identity()))
+		}
+		return prepared, refreshed, err
 	}
 	updated, refreshed, err := s.h.authManager.RefreshIfDueForInspection(ctx, account.Auth.ID)
 	if err != nil {

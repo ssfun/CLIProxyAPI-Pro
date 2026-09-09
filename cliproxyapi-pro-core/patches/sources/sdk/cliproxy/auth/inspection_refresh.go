@@ -3,9 +3,39 @@ package auth
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"time"
 )
+
+var ErrInspectionAuthChanged = errors.New("account credentials changed during inspection refresh")
+
+// CommitInspectionRefresh validates the observed credential under the same lock
+// used to merge the refresh. User changes unrelated to credentials are retained.
+func (m *Manager) CommitInspectionRefresh(ctx context.Context, base, updated *Auth) (*Auth, error) {
+	if base == nil || updated == nil || base.ID != updated.ID {
+		return nil, ErrInspectionAuthChanged
+	}
+	saved, err := m.updateInternal(ctx, base, updated, updateModeInspectionRefresh)
+	if err == nil && saved == nil {
+		err = ErrInspectionAuthChanged
+	}
+	return saved, err
+}
+
+func inspectionRefreshIdentityMatches(base, current *Auth) bool {
+	if base == nil || current == nil || base.ID != current.ID || base.Index != current.Index ||
+		base.Provider != current.Provider || base.FileName != current.FileName ||
+		base.RegistrationEpoch != current.RegistrationEpoch || AccessTokenSHA256(base) != AccessTokenSHA256(current) {
+		return false
+	}
+	for _, key := range []string{"refresh_token", "id_token", "session_id"} {
+		if !reflect.DeepEqual(base.Metadata[key], current.Metadata[key]) {
+			return false
+		}
+	}
+	return true
+}
 
 func (m *Manager) shouldRefreshForInspection(a *Auth, now time.Time) bool {
 	if a == nil {

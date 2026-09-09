@@ -30,6 +30,43 @@ func intPtr(value int) *int {
 	return &value
 }
 
+func (s *accountInspectionScheduler) prepareAntigravityInspectionAccount(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) (accountInspectionAccount, bool, error) {
+	if tokenValueForAuth(account.Auth) != "" && !antigravityTokenNeedsRefresh(account.Auth.Metadata) {
+		return account, false, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timeout := settings.Timeout
+	if timeout <= 0 {
+		timeout = accountInspectionDefaultTimeoutMS
+	}
+	// Reuse upstream OAuth parsing and proxy selection without its unconditional
+	// manager.Update. Each attempt modifies only a private copy of the observation.
+	resolver := &Handler{cfg: s.h.cfg}
+	var updated *coreauth.Auth
+	_, err := s.withRetry(ctx, settings.Retries, func() (accountInspectionHTTPResult, error) {
+		attemptCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
+		defer cancel()
+		candidate := account.Auth.Clone()
+		_, err := resolver.resolveTokenForAuth(attemptCtx, candidate, "")
+		if err == nil {
+			updated = candidate
+		}
+		return accountInspectionHTTPResult{}, err
+	})
+	if err != nil {
+		return account, true, err
+	}
+	updated.LastRefreshedAt = time.Now()
+	updated.NextRefreshAfter = time.Time{}
+	saved, err := s.h.authManager.CommitInspectionRefresh(ctx, account.Auth, updated)
+	if err != nil {
+		return account, true, err
+	}
+	return accountFromAuth(saved), true, nil
+}
+
 func (s *accountInspectionScheduler) apiCall(ctx context.Context, auth *coreauth.Auth, method string, url string, headers map[string]string, data string, timeoutMS int) (accountInspectionHTTPResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -53,7 +90,13 @@ func (s *accountInspectionScheduler) apiCall(ctx context.Context, auth *coreauth
 	for key, value := range headers {
 		if strings.Contains(value, "$TOKEN$") {
 			if !tokenResolved {
-				token, err = s.h.resolveTokenForAuth(reqCtx, auth)
+				if auth != nil && strings.EqualFold(strings.TrimSpace(auth.Provider), "antigravity") {
+					// Preparation already refreshed and bound this token. Refreshing
+					// here would detach quota/deep-probe evidence from its identity.
+					token = tokenValueForAuth(auth)
+				} else {
+					token, err = s.h.resolveTokenForAuth(reqCtx, auth)
+				}
 				tokenResolved = true
 				if err != nil {
 					return accountInspectionHTTPResult{}, err

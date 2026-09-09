@@ -5257,6 +5257,24 @@ replace_once(
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_lifecycle.go'
 replace_once(
     auth_conductor,
+    '\tupdateModePrepare\n)',
+    '\tupdateModePrepare\n\tupdateModeInspectionRefresh\n)',
+    '\tupdateModeInspectionRefresh\n)',
+)
+replace_once(
+    auth_conductor,
+    '\tif mode == updateModeRefresh {\n\t\tmerged := MergeRefreshedAuth(base, existing, auth)\n',
+    '''\tif mode == updateModeInspectionRefresh && !inspectionRefreshIdentityMatches(base, existing) {
+\t\tm.mu.Unlock()
+\t\treturn nil, ErrInspectionAuthChanged
+\t}
+\tif mode == updateModeRefresh || mode == updateModeInspectionRefresh {
+\t\tmerged := MergeRefreshedAuth(base, existing, auth)
+''',
+    'mode == updateModeInspectionRefresh && !inspectionRefreshIdentityMatches',
+)
+replace_once(
+    auth_conductor,
     '''func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 	if auth == nil {
 		return nil, nil

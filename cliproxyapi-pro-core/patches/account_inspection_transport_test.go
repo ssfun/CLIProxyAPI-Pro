@@ -6,14 +6,229 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	proinspection "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/inspection"
 	proquota "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/quota"
 )
+
+func TestAntigravityInspectionBindsPreparedTokenToAutomaticAction(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		remaining        float64
+		disabled         bool
+		validToken       bool
+		refreshFails     bool
+		reauthenticate   bool
+		refreshMutation  string
+		transientRefresh bool
+		timeoutRefresh   bool
+	}{
+		{name: "weekly exhausted", remaining: 0},
+		{name: "fractional remaining exceeds threshold", remaining: 0.0001},
+		{name: "recovery with deep probe", remaining: 0.9, disabled: true},
+		{name: "valid token needs no refresh", remaining: 0, validToken: true},
+		{name: "refresh failure keeps account", remaining: 0, refreshFails: true},
+		{name: "reauthentication during probe rejects action", remaining: 0, reauthenticate: true},
+		{name: "credential upload during refresh", remaining: 0, refreshMutation: "credentials"},
+		{name: "refresh token replacement during refresh", remaining: 0, refreshMutation: "refresh-token"},
+		{name: "recreated account during refresh", remaining: 0, refreshMutation: "recreate"},
+		{name: "concurrent note survives refresh", remaining: 0, refreshMutation: "note"},
+		{name: "transient refresh is retried", remaining: 0.9, transientRefresh: true},
+		{name: "refresh honors configured timeout", remaining: 0, timeoutRefresh: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			manager := coreauth.NewManager(nil, nil, nil)
+			expiry := time.Now().Add(-time.Hour)
+			if tc.validToken {
+				expiry = time.Now().Add(time.Hour)
+			}
+			registered, err := manager.Register(ctx, &coreauth.Auth{
+				ID: "antigravity-prepared-token", FileName: "prepared-token.json", Provider: "antigravity",
+				Disabled: tc.disabled,
+				Metadata: map[string]any{
+					"access_token": "old-test-token", "refresh_token": "test-refresh-token",
+					"expired": expiry.Format(time.RFC3339),
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var refreshes, probes, deepProbes atomic.Int32
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/token" {
+					n := refreshes.Add(1)
+					if tc.refreshMutation != "" {
+						current, _ := manager.GetByID(registered.ID)
+						switch tc.refreshMutation {
+						case "credentials", "recreate":
+							current.Metadata["access_token"] = "uploaded-test-token"
+							current.Metadata["refresh_token"] = "uploaded-refresh-token"
+						case "refresh-token":
+							current.Metadata["refresh_token"] = "uploaded-refresh-token"
+						case "note":
+							current.Metadata["note"] = "concurrent note"
+						}
+						if tc.refreshMutation == "recreate" {
+							if _, err := manager.Register(ctx, current); err != nil {
+								t.Error(err)
+							}
+						} else if err := (&Handler{authManager: manager}).upsertAuthRecord(ctx, current); err != nil {
+							t.Error(err)
+						}
+					}
+					if tc.transientRefresh && n == 1 {
+						w.WriteHeader(http.StatusServiceUnavailable)
+						_, _ = w.Write([]byte(`{"error":"temporarily_unavailable"}`))
+						return
+					}
+					if tc.timeoutRefresh {
+						select {
+						case <-r.Context().Done():
+							return
+						case <-time.After(4 * time.Second):
+						}
+					}
+					if tc.refreshFails {
+						w.WriteHeader(http.StatusBadRequest)
+						_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+						return
+					}
+					// The refreshed token is inside the resolver's refresh skew.
+					// Later quota/subscription/deep-probe calls must not refresh it again.
+					_, _ = w.Write([]byte(`{"access_token":"prepared-test-token","expires_in":1}`))
+					return
+				}
+				probes.Add(1)
+				wantToken := "Bearer prepared-test-token"
+				if tc.validToken {
+					wantToken = "Bearer old-test-token"
+				}
+				if r.Header.Get("Authorization") != wantToken {
+					t.Error("request did not use the token bound to the observation")
+				}
+				switch r.URL.Path {
+				case "/v1internal:retrieveUserQuotaSummary":
+					if tc.reauthenticate {
+						current, _ := manager.GetByID(registered.ID)
+						current.Metadata["access_token"] = "reauthenticated-test-token"
+						if _, err := manager.Update(ctx, current); err != nil {
+							t.Error(err)
+						}
+					}
+					_, _ = fmt.Fprintf(w, `{"groups":[{"displayName":"GEMINI Models","buckets":[{"bucketId":"gemini-weekly","window":"weekly","remainingFraction":%g}]},{"displayName":"Claude and GPT models","buckets":[{"remainingFraction":0.99}]}]}`, tc.remaining)
+				case "/v1internal:loadCodeAssist":
+					_, _ = w.Write([]byte(`{"paidTier":{"id":"g1-pro-tier"}}`))
+				case "/v1internal:generateContent":
+					deepProbes.Add(1)
+					_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"OK"}]}}]}`))
+				default:
+					t.Errorf("unexpected request path %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			transport := server.Client().Transport.(*http.Transport).Clone()
+			transport.TLSClientConfig.ServerName = "example.com"
+			transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+			}
+			oldTransport, oldTokenURL := http.DefaultTransport, antigravityOAuthTokenURL
+			http.DefaultTransport, antigravityOAuthTokenURL = transport, server.URL+"/token"
+			defer func() {
+				http.DefaultTransport, antigravityOAuthTokenURL = oldTransport, oldTokenURL
+				transport.CloseIdleConnections()
+			}()
+			scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
+			settings := proinspection.DefaultSettings()
+			settings.UsedPercentThreshold = 95
+			settings.AntigravityQuotaMode = accountInspectionAntigravityQuotaModeMaxUsed
+			settings.AntigravityDeepProbeEnabled = true
+			settings.AutoExecuteQuotaLimitDisable = true
+			settings.AutoExecuteQuotaRecoveryEnable = true
+			settings.AutoExecuteRequestErrorAction = accountInspectionActionDisable
+			if tc.transientRefresh {
+				settings.Retries = 1
+			}
+			if tc.timeoutRefresh {
+				settings.Timeout = 3000
+				settings.Retries = 0
+			}
+			started := time.Now()
+			result := scheduler.inspectAccount(ctx, accountFromAuth(registered), settings)
+			if tc.refreshMutation != "" && tc.refreshMutation != "note" {
+				results := []accountInspectionResult{result}
+				scheduler.applyAutomaticActions(ctx, results, settings)
+				current, _ := manager.GetByID(registered.ID)
+				if result.ErrorCode != "inspection_identity_changed" || probes.Load() != 0 || results[0].Executed || current.Disabled || current.Metadata["refresh_token"] != "uploaded-refresh-token" {
+					t.Fatalf("credential replacement: code:%s probes:%d executed:%v disabled:%v", result.ErrorCode, probes.Load(), results[0].Executed, current.Disabled)
+				}
+				return
+			}
+			if tc.timeoutRefresh {
+				if result.Error == "" || probes.Load() != 0 || time.Since(started) >= 4*time.Second || refreshes.Load() != 1 {
+					t.Fatalf("timeout: error:%s probes:%d elapsed:%s attempts:%d", result.Error, probes.Load(), time.Since(started), refreshes.Load())
+				}
+				return
+			}
+			if tc.refreshFails {
+				if result.TokenRefreshStatus != "failed" || result.ErrorCode != "token_refresh_error" || probes.Load() != 0 {
+					t.Fatalf("refresh failure = status:%s code:%s probes:%d", result.TokenRefreshStatus, result.ErrorCode, probes.Load())
+				}
+				return
+			}
+			wantRefreshes := int32(1)
+			if tc.transientRefresh {
+				wantRefreshes = 2
+			}
+			if tc.validToken {
+				wantRefreshes = 0
+			}
+			if refreshes.Load() != wantRefreshes || result.TokenRefreshTriggered != !tc.validToken {
+				t.Fatalf("refreshes/triggered = %d/%v", refreshes.Load(), result.TokenRefreshTriggered)
+			}
+			if !tc.validToken && result.TokenRefreshStatus != "success" {
+				t.Fatalf("refresh status = %s", result.TokenRefreshStatus)
+			}
+			if result.Error != "" || result.UsedPercent == nil || result.IsQuota != (tc.remaining <= 0.05) {
+				t.Fatalf("unexpected quota result: used:%v quota:%v error:%s", result.UsedPercent, result.IsQuota, result.Error)
+			}
+			if tc.disabled && (deepProbes.Load() != 1 || result.DeepProbeStatus != "success") {
+				t.Fatalf("deep probes/status = %d/%s", deepProbes.Load(), result.DeepProbeStatus)
+			}
+			results := []accountInspectionResult{result}
+			scheduler.applyAutomaticActions(ctx, results, settings)
+			current, _ := manager.GetByID(registered.ID)
+			if tc.refreshMutation == "note" && current.Metadata["note"] != "concurrent note" {
+				t.Fatal("concurrent note was overwritten")
+			}
+			if tc.reauthenticate {
+				if results[0].Executed || results[0].ExecuteError != errAccountInspectionResultStale.Error() || current.Disabled {
+					t.Fatalf("stale action: executed:%v error:%s disabled:%v", results[0].Executed, results[0].ExecuteError, current.Disabled)
+				}
+				return
+			}
+			if tc.transientRefresh {
+				if results[0].Executed || current.Disabled || result.Error != "" {
+					t.Fatal("transient failure disabled a healthy account")
+				}
+				return
+			}
+			if !results[0].Executed || results[0].ExecuteError != "" || current.Disabled != !tc.disabled {
+				t.Fatalf("automatic action: executed:%v error:%s disabled:%v", results[0].Executed, results[0].ExecuteError, current.Disabled)
+			}
+		})
+	}
+}
 
 func TestAccountInspectionDeepProbesUnknownXAIQuota(t *testing.T) {
 	decision := accountInspectionDecision{Action: accountInspectionActionKeep}
