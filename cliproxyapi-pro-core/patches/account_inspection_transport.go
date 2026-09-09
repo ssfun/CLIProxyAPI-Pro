@@ -31,7 +31,7 @@ func intPtr(value int) *int {
 }
 
 func (s *accountInspectionScheduler) prepareAntigravityInspectionAccount(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) (accountInspectionAccount, bool, error) {
-	if tokenValueForAuth(account.Auth) != "" && !antigravityTokenNeedsRefresh(account.Auth.Metadata) {
+	if coreauth.InspectionAccessToken(account.Auth) != "" && !antigravityTokenNeedsRefresh(account.Auth.Metadata) {
 		return account, false, nil
 	}
 	if ctx == nil {
@@ -49,8 +49,9 @@ func (s *accountInspectionScheduler) prepareAntigravityInspectionAccount(ctx con
 		attemptCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 		defer cancel()
 		candidate := account.Auth.Clone()
-		_, err := resolver.resolveTokenForAuth(attemptCtx, candidate, "")
+		token, err := resolver.resolveTokenForAuth(attemptCtx, candidate, "")
 		if err == nil {
+			candidate.Metadata["access_token"] = strings.TrimSpace(token)
 			updated = candidate
 		}
 		return accountInspectionHTTPResult{}, err
@@ -93,7 +94,7 @@ func (s *accountInspectionScheduler) apiCall(ctx context.Context, auth *coreauth
 				if auth != nil && strings.EqualFold(strings.TrimSpace(auth.Provider), "antigravity") {
 					// Preparation already refreshed and bound this token. Refreshing
 					// here would detach quota/deep-probe evidence from its identity.
-					token = tokenValueForAuth(auth)
+					token = coreauth.InspectionAccessToken(auth)
 				} else {
 					token, err = s.h.resolveTokenForAuth(reqCtx, auth)
 				}

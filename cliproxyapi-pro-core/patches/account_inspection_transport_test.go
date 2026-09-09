@@ -25,6 +25,7 @@ func TestAntigravityInspectionBindsPreparedTokenToAutomaticAction(t *testing.T) 
 		remaining        float64
 		disabled         bool
 		validToken       bool
+		tokenAliases     string
 		refreshFails     bool
 		reauthenticate   bool
 		refreshMutation  string
@@ -32,6 +33,12 @@ func TestAntigravityInspectionBindsPreparedTokenToAutomaticAction(t *testing.T) 
 		timeoutRefresh   bool
 	}{
 		{name: "weekly exhausted", remaining: 0},
+		{name: "camelCase refreshed exhausted", remaining: 0, tokenAliases: "camel"},
+		{name: "camelCase refreshed healthy", remaining: 0.9, tokenAliases: "camel"},
+		{name: "camelCase refreshed recovery", remaining: 0.9, disabled: true, tokenAliases: "camel"},
+		{name: "camelCase valid", remaining: 0, validToken: true, tokenAliases: "camel"},
+		{name: "mixed aliases refreshed", remaining: 0, tokenAliases: "mixed"},
+		{name: "mixed aliases valid", remaining: 0, validToken: true, tokenAliases: "mixed"},
 		{name: "fractional remaining exceeds threshold", remaining: 0.0001},
 		{name: "recovery with deep probe", remaining: 0.9, disabled: true},
 		{name: "valid token needs no refresh", remaining: 0, validToken: true},
@@ -51,13 +58,20 @@ func TestAntigravityInspectionBindsPreparedTokenToAutomaticAction(t *testing.T) 
 			if tc.validToken {
 				expiry = time.Now().Add(time.Hour)
 			}
+			metadata := map[string]any{
+				"access_token": "old-test-token", "refresh_token": "test-refresh-token",
+				"expired": expiry.Format(time.RFC3339),
+			}
+			if tc.tokenAliases == "camel" {
+				delete(metadata, "access_token")
+				metadata["accessToken"] = "old-test-token"
+			} else if tc.tokenAliases == "mixed" {
+				metadata["accessToken"] = "stale-alias-test-token"
+			}
 			registered, err := manager.Register(ctx, &coreauth.Auth{
 				ID: "antigravity-prepared-token", FileName: "prepared-token.json", Provider: "antigravity",
 				Disabled: tc.disabled,
-				Metadata: map[string]any{
-					"access_token": "old-test-token", "refresh_token": "test-refresh-token",
-					"expired": expiry.Format(time.RFC3339),
-				},
+				Metadata: metadata,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -115,6 +129,9 @@ func TestAntigravityInspectionBindsPreparedTokenToAutomaticAction(t *testing.T) 
 				}
 				if r.Header.Get("Authorization") != wantToken {
 					t.Error("request did not use the token bound to the observation")
+					w.WriteHeader(http.StatusUnauthorized)
+					_, _ = w.Write([]byte(`{"error":"invalid_token"}`))
+					return
 				}
 				switch r.URL.Path {
 				case "/v1internal:retrieveUserQuotaSummary":
@@ -217,9 +234,9 @@ func TestAntigravityInspectionBindsPreparedTokenToAutomaticAction(t *testing.T) 
 				}
 				return
 			}
-			if tc.transientRefresh {
+			if tc.remaining > 0.05 && !tc.disabled {
 				if results[0].Executed || current.Disabled || result.Error != "" {
-					t.Fatal("transient failure disabled a healthy account")
+					t.Fatal("inspection disabled a healthy account")
 				}
 				return
 			}

@@ -10,6 +10,12 @@ import (
 
 var ErrInspectionAuthChanged = errors.New("account credentials changed during inspection refresh")
 
+// InspectionAccessToken selects the same OAuth token as AccessTokenSHA256 so
+// inspection requests and their guarded automatic actions share one identity.
+func InspectionAccessToken(auth *Auth) string {
+	return accessTokenForFingerprint(auth)
+}
+
 // CommitInspectionRefresh validates the observed credential under the same lock
 // used to merge the refresh. User changes unrelated to credentials are retained.
 func (m *Manager) CommitInspectionRefresh(ctx context.Context, base, updated *Auth) (*Auth, error) {
