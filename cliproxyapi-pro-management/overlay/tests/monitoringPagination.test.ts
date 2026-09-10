@@ -9,18 +9,20 @@ import {
 describe('monitoring pagination', () => {
   test('defaults to 20 rows and exposes only the supported sizes', () => {
     expect(DEFAULT_PRO_PAGE_SIZE).toBe(20);
-    expect(PRO_PAGE_SIZE_OPTIONS).toEqual([20, 50, 100]);
+    expect(PRO_PAGE_SIZE_OPTIONS).toEqual([20, 50, 100, 500]);
   });
 
   test('normalizes select values to a supported page size', () => {
     expect(normalizeProPageSize('50')).toBe(50);
     expect(normalizeProPageSize(100)).toBe(100);
+    expect(normalizeProPageSize('500')).toBe(500);
     expect(normalizeProPageSize('25')).toBe(DEFAULT_PRO_PAGE_SIZE);
   });
 
   test('provides localized fallback copy when runtime locale keys are unavailable', () => {
     expect(resolveProPaginationCopy('zh-CN').pageSizeLabel).toBe('每页条数');
     expect(resolveProPaginationCopy('zh-CN').pageSizeValue(20)).toBe('20 条/页');
+    expect(resolveProPaginationCopy('zh-CN').pageSizeValue(500)).toBe('500 条/页');
     expect(resolveProPaginationCopy('zh-TW').pageSizeValue(50)).toBe('50 筆/頁');
     expect(resolveProPaginationCopy('en-US').pageSizeValue(100)).toBe('100 / page');
   });

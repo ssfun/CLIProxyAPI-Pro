@@ -5,6 +5,37 @@
   padding-top: 2px;
 }
 
+.usageSummaryTimestamp {
+  min-height: 1.5em;
+  line-height: 1.5;
+}
+
+.analyticsLoadingState {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 24px;
+  min-height: 0;
+  color: var(--monitor-muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.analyticsLoadingBars {
+  display: grid;
+  gap: 18px;
+  padding: 0 12%;
+
+  span {
+    height: 12px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--monitor-line) 58%, transparent);
+  }
+
+  span:nth-child(2) { width: 80%; }
+  span:nth-child(3) { width: 60%; }
+}
+
 .usageStatsGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

@@ -1,4 +1,4 @@
-export const PRO_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
+export const PRO_PAGE_SIZE_OPTIONS = [20, 50, 100, 500] as const;
 
 export type ProPageSize = (typeof PRO_PAGE_SIZE_OPTIONS)[number];
 

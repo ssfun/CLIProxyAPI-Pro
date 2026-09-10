@@ -108,7 +108,10 @@ export function UsageTrendHeader({
   );
 }
 
-export function TopUsageStats({ cards }: { cards: UsageMetricCard[] }) {
+export function TopUsageStats({ cards, pending = false }: {
+  cards: UsageMetricCard[];
+  pending?: boolean;
+}) {
   return (
     <section className={styles.usageStatsGrid} aria-label="Usage statistics">
       {cards.map((card) => (
@@ -119,13 +122,13 @@ export function TopUsageStats({ cards }: { cards: UsageMetricCard[] }) {
           </div>
           <div className={styles.usageStatsBody}>
             <span>{card.label}</span>
-            <strong>{card.value}</strong>
+            <strong>{pending ? '--' : card.value}</strong>
           </div>
           <div className={styles.usageStatsFooter}>
             {card.footer.map((item) => (
               <div key={item.label}>
                 <span>{item.label}</span>
-                <strong>{item.value}</strong>
+                <strong>{pending ? '--' : item.value}</strong>
               </div>
             ))}
           </div>
@@ -135,20 +138,36 @@ export function TopUsageStats({ cards }: { cards: UsageMetricCard[] }) {
   );
 }
 
+function AnalyticsLoadingState({ label }: { label: string }) {
+  return (
+    <div className={styles.analyticsLoadingState} role="status">
+      <span>{label}</span>
+      <div className={styles.analyticsLoadingBars} aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
+    </div>
+  );
+}
+
 export function UsageTrendPanel({
   points,
   durationMinutes,
   hasPrices,
   emptyText,
+  loading = false,
   t,
 }: {
   points: TrendPoint[];
   durationMinutes: number;
   hasPrices: boolean;
   emptyText: string;
+  loading?: boolean;
   t: TFunction;
 }) {
   const chartPoints = aggregateTrendPointsForDisplay(points);
+  const hasChartData = chartPoints.length > 0;
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const chartViewBoxHeight = 310;
@@ -271,7 +290,7 @@ export function UsageTrendPanel({
     const observer = new ResizeObserver(updateViewBoxWidth);
     observer.observe(svg);
     return () => observer.disconnect();
-  }, [chartViewBoxHeight]);
+  }, [chartViewBoxHeight, hasChartData, loading]);
 
   return (
     <Card className={`${styles.usageTrendChartCard} ${styles.usageTrendLineCard}`}>
@@ -284,12 +303,14 @@ export function UsageTrendPanel({
           {headerStats.map((item) => (
             <div key={item.key}>
               <span>{item.label}</span>
-              <strong>{item.value}</strong>
+              <strong>{loading ? '--' : item.value}</strong>
             </div>
           ))}
         </div>
       </div>
-      {chartPoints.length > 0 ? (
+      {loading ? (
+        <AnalyticsLoadingState label={t('common.loading')} />
+      ) : hasChartData ? (
         <div className={styles.professionalChartShell}>
           <div className={styles.trendSummaryStrip}>
             {summaryItems.map((item) => (
@@ -429,12 +450,14 @@ export function TokenDistributionPanel({
   points,
   durationMinutes,
   emptyText,
+  loading = false,
   hasPrices,
   t,
 }: {
   points: TokenDistributionPoint[];
   durationMinutes: number;
   emptyText: string;
+  loading?: boolean;
   hasPrices: boolean;
   t: TFunction;
 }) {
@@ -474,10 +497,12 @@ export function TokenDistributionPanel({
         </div>
         <div className={styles.tokenCostBadge}>
           <span>{t('monitoring.token_cost')}</span>
-          <strong>{hasPrices ? formatUsd(totals.totalCost) : '--'}</strong>
+          <strong>{!loading && hasPrices ? formatUsd(totals.totalCost) : '--'}</strong>
         </div>
       </div>
-      {hasData ? (
+      {loading ? (
+        <AnalyticsLoadingState label={t('common.loading')} />
+      ) : hasData ? (
         <div className={styles.tokenStatCardList}>
           {rows.map((row) => {
             const share = row.base > 0 ? row.value / row.base : 0;
@@ -505,6 +530,7 @@ export function TokenDistributionPanel({
 }
 
 type RankingPanelProps = {
+  loading?: boolean;
   title: string;
   subtitle: string;
   rows: MonitoringAccountRow[];
@@ -524,6 +550,7 @@ export function ModelStatsPanel({
   metricTotal,
   onMetricChange,
   emptyText,
+  loading = false,
   hasPrices,
   t,
 }: RankingPanelProps) {
@@ -565,7 +592,9 @@ export function ModelStatsPanel({
         </div>
         <RankingMetricSwitch value={metric} onChange={onMetricChange} disabledCost={!hasPrices} t={t} />
       </div>
-      {rows.length > 0 ? (
+      {loading ? (
+        <AnalyticsLoadingState label={t('common.loading')} />
+      ) : rows.length > 0 ? (
         <div className={styles.modelStatsLayout}>
           <div className={styles.modelStatsList}>
             {rows.map((row) => {
@@ -647,6 +676,7 @@ export function ApiKeyRankingPanel({
   metricTotal,
   onMetricChange,
   emptyText,
+  loading = false,
   hasPrices,
   t,
 }: RankingPanelProps) {
@@ -670,7 +700,9 @@ export function ApiKeyRankingPanel({
             <small>{t('monitoring.api_keys_count', { count: rows.length })}</small>
           </div>
         ) : null}
-        {rows.length > 0 ? (
+        {loading ? (
+          <AnalyticsLoadingState label={t('common.loading')} />
+        ) : rows.length > 0 ? (
           <div className={styles.apiKeyRankingScroll}>
             {rows.map((row, index) => {
               const rowValue = getRankingMetricValue(row, metric);

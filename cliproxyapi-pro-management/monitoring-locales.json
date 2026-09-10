@@ -16,6 +16,7 @@
       "stop_takeover": "Stop takeover"
     },
     "common": {
+      "retry": "Retry",
       "enabled": "Enabled",
       "disabled": "Disabled"
     },
@@ -1572,6 +1573,7 @@
       "stop_takeover": "Остановить перехват"
     },
     "common": {
+      "retry": "Повторить",
       "enabled": "Включено",
       "disabled": "Отключено"
     },
@@ -2795,6 +2797,7 @@
       "stop_takeover": "停止接管"
     },
     "common": {
+      "retry": "重试",
       "enabled": "已启用",
       "disabled": "未启用"
     },
@@ -4490,6 +4493,7 @@
       "stop_takeover": "停止接管"
     },
     "common": {
+      "retry": "重試",
       "enabled": "已啟用",
       "disabled": "未啟用"
     },
