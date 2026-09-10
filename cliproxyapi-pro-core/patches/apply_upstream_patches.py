@@ -357,26 +357,15 @@ for flag, variable in (
     )
 
 codex_terminal = ROOT / 'internal/runtime/executor/codex_executor_terminal.go'
-replace_go_function(
+insert_before(
     codex_terminal,
-    'func newCodexStatusErr(statusCode int, body []byte) statusErr',
-    '''func newCodexStatusErr(statusCode int, body []byte) statusErr {
-	return newCodexStatusErrWithHeaders(statusCode, body, nil)
-}
-
-func newCodexStatusErrWithHeaders(statusCode int, body []byte, responseHeaders http.Header) statusErr {
-	errCode := statusCode
-	credentialScoped := isCodexUsageLimitError(body)
-	if isCodexModelCapacityError(body) || credentialScoped {
-		errCode = http.StatusTooManyRequests
+    'func newCodexStatusErrWithCooling(',
+    '''func newCodexStatusErrWithHeaders(statusCode int, body []byte, responseHeaders http.Header, modelLevelCooling bool) statusErr {
+	err := newCodexStatusErrWithCooling(statusCode, body, modelLevelCooling)
+	if err.retryAfter == nil && err.code == http.StatusTooManyRequests {
+		err.retryAfter = parseCodexRetryAfterHeader(responseHeaders.Get("Retry-After"), time.Now())
 	}
-	body = classifyCodexStatusError(errCode, body)
-	now := time.Now()
-	retryAfter := parseCodexRetryAfter(errCode, body, now)
-	if retryAfter == nil && errCode == http.StatusTooManyRequests && responseHeaders != nil {
-		retryAfter = parseCodexRetryAfterHeader(responseHeaders.Get("Retry-After"), now)
-	}
-	return statusErr{code: errCode, msg: string(body), retryAfter: retryAfter, credentialScoped: credentialScoped}
+	return err
 }
 
 func parseCodexRetryAfterHeader(raw string, now time.Time) *time.Duration {
@@ -405,6 +394,7 @@ func parseCodexRetryAfterHeader(raw string, now time.Time) *time.Duration {
 	}
 	return nil
 }
+
 ''',
     'func newCodexStatusErrWithHeaders(',
 )
@@ -412,66 +402,51 @@ func parseCodexRetryAfterHeader(raw string, now time.Time) *time.Duration {
 codex_execute = ROOT / 'internal/runtime/executor/codex_executor_execute.go'
 replace_all_exact(
     codex_execute,
-    'newCodexStatusErr(httpResp.StatusCode, b)',
-    'newCodexStatusErrWithHeaders(httpResp.StatusCode, b, httpResp.Header)',
+    'newCodexStatusErrWithCooling(httpResp.StatusCode, b, e.modelLevelCooling())',
+    'newCodexStatusErrWithHeaders(httpResp.StatusCode, b, httpResp.Header, e.modelLevelCooling())',
     2,
 )
 
 codex_images = ROOT / 'internal/runtime/executor/codex_openai_images.go'
 replace_all_exact(
     codex_images,
-    'newCodexStatusErr(httpResp.StatusCode, data)',
-    'newCodexStatusErrWithHeaders(httpResp.StatusCode, data, httpResp.Header)',
+    'newCodexStatusErrWithCooling(httpResp.StatusCode, data, e.modelLevelCooling())',
+    'newCodexStatusErrWithHeaders(httpResp.StatusCode, data, httpResp.Header, e.modelLevelCooling())',
     4,
 )
 
 codex_stream = ROOT / 'internal/runtime/executor/codex_executor_stream.go'
 replace_all_exact(
     codex_stream,
-    'newCodexStatusErr(httpResp.StatusCode, data)',
-    'newCodexStatusErrWithHeaders(httpResp.StatusCode, data, httpResp.Header)',
+    'newCodexStatusErrWithCooling(httpResp.StatusCode, data, e.modelLevelCooling())',
+    'newCodexStatusErrWithHeaders(httpResp.StatusCode, data, httpResp.Header, e.modelLevelCooling())',
     1,
 )
 
 codex_websocket_execute = ROOT / 'internal/runtime/executor/codex_websockets_execute.go'
 replace_all_exact(
     codex_websocket_execute,
-    'newCodexStatusErr(respHS.StatusCode, bodyErr)',
-    'newCodexStatusErrWithHeaders(respHS.StatusCode, bodyErr, respHS.Header)',
+    'newCodexStatusErrWithCooling(respHS.StatusCode, bodyErr, e.modelLevelCooling())',
+    'newCodexStatusErrWithHeaders(respHS.StatusCode, bodyErr, respHS.Header, e.modelLevelCooling())',
     1,
 )
 
 codex_websocket_stream = ROOT / 'internal/runtime/executor/codex_websockets_stream.go'
 replace_all_exact(
     codex_websocket_stream,
-    'newCodexStatusErr(respHS.StatusCode, bodyErr)',
-    'newCodexStatusErrWithHeaders(respHS.StatusCode, bodyErr, respHS.Header)',
+    'newCodexStatusErrWithCooling(respHS.StatusCode, bodyErr, e.modelLevelCooling())',
+    'newCodexStatusErrWithHeaders(respHS.StatusCode, bodyErr, respHS.Header, e.modelLevelCooling())',
     1,
 )
 
 codex_websocket_errors = ROOT / 'internal/runtime/executor/codex_websockets_errors.go'
-replace_go_function(
+replace_once(
     codex_websocket_errors,
-    'func parseCodexWebsocketError(payload []byte) (error, bool)',
-    '''func parseCodexWebsocketError(payload []byte) (error, bool) {
-	if len(payload) == 0 {
-		return nil, false
-	}
-	if strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "error" {
-		return nil, false
-	}
-	status := int(gjson.GetBytes(payload, "status").Int())
-	if status == 0 {
-		status = int(gjson.GetBytes(payload, "status_code").Int())
-	}
-	if status <= 0 {
-		return nil, false
-	}
-
-	out := buildCodexWebsocketErrorPayload(payload, status)
-	headers := parseCodexWebsocketErrorHeaders(payload)
-	statusError := statusErr{code: status, msg: string(out), credentialScoped: isCodexUsageLimitError(out)}
-	now := time.Now()
+    '''	if retryAfter := parseCodexRetryAfter(status, out, time.Now()); retryAfter != nil {
+		statusError.retryAfter = retryAfter
+	} else if isCodexWebsocketConnectionLimitError(payload) {
+''',
+    '''	now := time.Now()
 	if retryAfter := parseCodexRetryAfter(status, out, now); retryAfter != nil {
 		statusError.retryAfter = retryAfter
 	} else if status == http.StatusTooManyRequests {
@@ -482,14 +457,6 @@ replace_go_function(
 			statusError.retryAfter = &retryAfter
 		}
 	} else if isCodexWebsocketConnectionLimitError(payload) {
-		retryAfter := time.Duration(0)
-		statusError.retryAfter = &retryAfter
-	}
-	return statusErrWithHeaders{
-		statusErr: statusError,
-		headers:   headers,
-	}, true
-}
 ''',
     'parseCodexRetryAfterHeader(headers.Get("Retry-After"), now)',
 )
@@ -3367,16 +3334,15 @@ replace_once(
 replace_once(
     claude_execute,
     '''\t\tlines := bytes.Split(data, []byte("\\n"))
+\t\tvar streamUsage helps.StreamUsageBuffer
 \t\tfor i, line := range lines {
-\t\t\tif detail, ok := helps.ParseClaudeStreamUsage(line); ok {
-\t\t\t\treporter.Publish(ctx, detail)
-\t\t\t}
+\t\t\tstreamUsage.ObserveClaudeStream(line)
 ''',
     '''\t\tlines := bytes.Split(data, []byte("\\n"))
 \t\tfor i, line := range lines {
-\t\t\tresponseUsageBuffer.ObserveClaude(helps.ParseClaudeStreamUsage(line))
+\t\t\tresponseUsageBuffer.ObserveClaudeStream(line)
 ''',
-    'responseUsageBuffer.ObserveClaude(',
+    'responseUsageBuffer.ObserveClaudeStream(',
 )
 replace_once(
     claude_execute,
@@ -3384,6 +3350,7 @@ replace_once(
 \t\t\tif errRestore != nil {
 \t\t\t\terrRestore = fmt.Errorf("restore Claude OAuth tool name from streaming response: %w", errRestore)
 \t\t\t\thelps.RecordAPIResponseError(ctx, e.cfg, errRestore)
+\t\t\t\tstreamUsage.PublishFailure(ctx, reporter, errRestore)
 \t\t\t\treturn resp, wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, errRestore)
 \t\t\t}
 ''',
@@ -3418,15 +3385,9 @@ replace_once(
 )
 replace_once(
     claude_execute,
-    '''\t\t\tlines[i] = restoredLine
-\t\t}
-\t\tdata = bytes.Join(lines, []byte("\\n"))
-''',
-    '''\t\t\tlines[i] = restoredLine
-\t\t}
-\t\tdata = bytes.Join(lines, []byte("\\n"))
-''',
-    'responseUsageBuffer.ObserveClaude(',
+    '\t\tstreamUsage.Publish(ctx, reporter)\n',
+    '',
+    'responseUsageBuffer.Publish(ctx, reporter)',
 )
 replace_once(
     claude_execute,
@@ -3632,28 +3593,12 @@ replace_once(
 )
 
 claude_stream = ROOT / 'internal/runtime/executor/claude_executor_stream.go'
-replace_once(
+replace_all_exact(
     claude_stream,
-    '''\t\t\tvar event bytes.Buffer
-\t\t\tvar upstreamMessageID string
-''',
-    '''\t\t\tvar event bytes.Buffer
-\t\t\tvar usageBuffer helps.StreamUsageBuffer
-\t\t\tvar upstreamMessageID string
-''',
-    'var usageBuffer helps.StreamUsageBuffer',
+    'streamUsage.ObserveClaudeStream(line)',
+    'usageBuffer.ObserveClaudeStream(line)',
+    2,
 )
-stream_publish_block = '''\t\t\t\tif detail, ok := helps.ParseClaudeStreamUsage(line); ok {
-\t\t\t\t\treporter.Publish(ctx, detail)
-\t\t\t\t}
-'''
-stream_observe_block = '''\t\t\t\tusageBuffer.ObserveClaude(helps.ParseClaudeStreamUsage(line))
-'''
-stream_text = read(claude_stream)
-if stream_observe_block not in stream_text:
-    if stream_text.count(stream_publish_block) != 1:
-        raise SystemExit('expected one native Claude stream usage publish block')
-    write(claude_stream, stream_text.replace(stream_publish_block, stream_observe_block, 1))
 replace_once(
     claude_stream,
     '''\t\t\tif upstreamCompleted {
@@ -3671,30 +3616,6 @@ replace_once(
 )
 replace_once(
     claude_stream,
-    '''\t\tvar param any
-\t\tvar upstreamMessageID string
-''',
-    '''\t\tvar param any
-\t\tvar usageBuffer helps.StreamUsageBuffer
-\t\tvar upstreamMessageID string
-''',
-    'var param any\n\t\tvar usageBuffer helps.StreamUsageBuffer',
-)
-stream_publish_block = '''\t\t\tif detail, ok := helps.ParseClaudeStreamUsage(line); ok {
-\t\t\t\treporter.Publish(ctx, detail)
-\t\t\t}
-'''
-stream_observe_block = '''\t\t\tusageBuffer.ObserveClaude(helps.ParseClaudeStreamUsage(line))
-'''
-stream_text = read(claude_stream)
-if stream_publish_block in stream_text:
-    if stream_text.count(stream_publish_block) != 1:
-        raise SystemExit('expected one translated Claude stream usage publish block')
-    write(claude_stream, stream_text.replace(stream_publish_block, stream_observe_block, 1))
-elif stream_text.count(stream_observe_block) < 2:
-    raise SystemExit('translated Claude stream usage buffer patch missing')
-replace_once(
-    claude_stream,
     '''\t\tif upstreamCompleted {
 \t\t\tcommitClaudeContinuity(diagnosticsState, upstreamMessageID, helps.HeaderValueCaseInsensitive(httpResp.Header, "request-id"))
 \t\t}
@@ -3708,13 +3629,15 @@ replace_once(
 ''',
     'terminal.publishSuccess(&usageBuffer)\n\t}()',
 )
-claude_failure_helpers_old = '''\t\temitCancellation := func(cause error) bool {
+claude_failure_helpers_old = '''\t\tvar streamUsage helps.StreamUsageBuffer
+\t\tdefer streamUsage.Publish(ctx, reporter)
+\t\temitCancellation := func(cause error) bool {
 \t\t\tcancelErr := newClaudeOAuthCancellationError(ctx, fp.OAuthCancellation, cause)
 \t\t\tif cancelErr == nil {
 \t\t\t\treturn false
 \t\t\t}
 \t\t\thelps.RecordAPIResponseError(ctx, e.cfg, cancelErr)
-\t\t\treporter.PublishFailure(ctx, cancelErr)
+\t\t\tstreamUsage.PublishFailure(ctx, reporter, cancelErr)
 \t\t\tselect {
 \t\t\tcase out <- cliproxyexecutor.StreamChunk{Err: cancelErr}:
 \t\t\tdefault:
@@ -3724,14 +3647,15 @@ claude_failure_helpers_old = '''\t\temitCancellation := func(cause error) bool {
 \t\temitResponseError := func(errResponse error) {
 \t\t\terrResponse = wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, errResponse)
 \t\t\thelps.RecordAPIResponseError(ctx, e.cfg, errResponse)
-\t\t\treporter.PublishFailure(ctx, errResponse)
+\t\t\tstreamUsage.PublishFailure(ctx, reporter, errResponse)
 \t\t\tselect {
 \t\t\tcase out <- cliproxyexecutor.StreamChunk{Err: errResponse}:
 \t\t\tcase <-ctx.Done():
 \t\t\t}
 \t\t}
 '''
-claude_terminal_init = '''\t\tterminal := claudeStreamTerminal{
+claude_terminal_init = '''\t\tvar usageBuffer helps.StreamUsageBuffer
+\t\tterminal := claudeStreamTerminal{
 \t\t\tctx: ctx, cfg: e.cfg, reporter: reporter, out: out,
 \t\t\tstatusCode: httpResp.StatusCode, fastRequest: fastRequest,
 \t\t\toauthCancellation: fp.OAuthCancellation,
@@ -3795,7 +3719,7 @@ native_scanner_outcome = '''\t\t\tif emitCancellation(scanner.Err()) {
 \t\t\tif errScan := scanner.Err(); errScan != nil {
 \t\t\t\terrScan = wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, errScan)
 \t\t\t\thelps.RecordAPIResponseError(ctx, e.cfg, errScan)
-\t\t\t\treporter.PublishFailure(ctx, errScan)
+\t\t\t\tstreamUsage.PublishFailure(ctx, reporter, errScan)
 \t\t\t\tselect {
 \t\t\t\tcase out <- cliproxyexecutor.StreamChunk{Err: errScan}:
 \t\t\t\tcase <-ctx.Done():
@@ -3816,7 +3740,7 @@ translated_scanner_outcome = '''\t\tif emitCancellation(scanner.Err()) {
 \t\tif errScan := scanner.Err(); errScan != nil {
 \t\t\terrScan = wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, errScan)
 \t\t\thelps.RecordAPIResponseError(ctx, e.cfg, errScan)
-\t\t\treporter.PublishFailure(ctx, errScan)
+\t\t\tstreamUsage.PublishFailure(ctx, reporter, errScan)
 \t\t\tselect {
 \t\t\tcase out <- cliproxyexecutor.StreamChunk{Err: errScan}:
 \t\t\tcase <-ctx.Done():
