@@ -88,6 +88,15 @@ describe('monitoring analytics', () => {
     expect(hasCompleteUsageAnalyticsSource(false, false, false)).toBe(false);
   });
 
+  test('waits for server aggregates before using the initial client snapshot', () => {
+    expect(hasCompleteUsageAnalyticsSource(false, true, false, false)).toBe(false);
+    expect(hasCompleteUsageAnalyticsSource(true, true, false, false)).toBe(true);
+    // A failed aggregate request can fall back only to fully rendered, complete details.
+    expect(hasCompleteUsageAnalyticsSource(false, false, false, true)).toBe(false);
+    expect(hasCompleteUsageAnalyticsSource(false, true, true, true)).toBe(false);
+    expect(hasCompleteUsageAnalyticsSource(false, true, false, true)).toBe(true);
+  });
+
   test('keeps every aggregate bucket for the all-time range', () => {
     const start = new Date(2026, 0, 1).getTime();
     const aggregates = {

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 
 // Isolate React/module mocks and the fake clock from the rest of the test suite.
 for (const scenario of [
+  'bootstrap',
   'idle',
   'coalesce',
   'manual',

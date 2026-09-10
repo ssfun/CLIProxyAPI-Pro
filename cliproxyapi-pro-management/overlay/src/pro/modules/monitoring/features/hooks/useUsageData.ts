@@ -41,6 +41,7 @@ export interface UseUsageDataReturn {
   latestId: number;
   syncStatus: UsageSyncStatus;
   modelPrices: Record<string, ModelPrice>;
+  modelPricesReady: boolean;
   setModelPrices: (prices: Record<string, ModelPrice>) => void;
   refreshUsage: () => Promise<void>;
   loadEventPage: (filters: UsageEventPageFilters) => Promise<UsageEventPage>;
@@ -584,6 +585,7 @@ export function useUsageData(): UseUsageDataReturn {
   const [snapshotReady, setSnapshotReady] = useState(false);
   const [pageVisible, setPageVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden');
   const [modelPrices, setModelPricesState] = useState<Record<string, ModelPrice>>({});
+  const [modelPricesReady, setModelPricesReady] = useState(false);
   const apiBase = useAuthStore((state) => state.apiBase);
   const managementKey = useAuthStore((state) => state.managementKey);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
@@ -742,6 +744,7 @@ export function useUsageData(): UseUsageDataReturn {
     setError('');
     setRefreshing(false);
     setSnapshotReady(false);
+    setModelPricesReady(false);
 
     if (connectionStatus !== 'connected' || !apiBase || !managementKey) {
       setLoading(false);
@@ -773,6 +776,8 @@ export function useUsageData(): UseUsageDataReturn {
         }
       } catch (err) {
         console.error('Failed to sync model prices with sqlite:', err);
+      } finally {
+        if (!cancelled) setModelPricesReady(true);
       }
     };
 
@@ -888,6 +893,7 @@ export function useUsageData(): UseUsageDataReturn {
     latestId,
     syncStatus,
     modelPrices,
+    modelPricesReady,
     setModelPrices,
     refreshUsage,
     loadEventPage,

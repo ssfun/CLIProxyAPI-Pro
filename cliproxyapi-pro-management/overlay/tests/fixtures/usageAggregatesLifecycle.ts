@@ -6,6 +6,7 @@ const root = fileURLToPath(new URL('../../', import.meta.url)).replace(/\/$/, ''
 const scenario = process.argv[2];
 let connected = true,
   generation = 1;
+let enabled = true;
 let now = Date.UTC(2026, 8, 5, 8),
   serverCount = 0,
   latestId = 0,
@@ -112,6 +113,7 @@ async function settle() {
       effects = [];
       // eslint-disable-next-line react-hooks/rules-of-hooks -- Exercise the production hook through the slot runner.
       result = useUsageAggregates({
+        enabled,
         latestId,
         generation,
         timeRange: range,
@@ -141,6 +143,37 @@ async function advance(ms: number) {
 
 const summary = () => result.data?.allSummary[0]?.totalRequests;
 const unmount = () => slots.forEach((slot) => slot?.cleanup?.());
+if (scenario === 'bootstrap') {
+  // The page enables aggregates only once the initial usage response establishes
+  // its generation (or fails). No generation-0 result should be published first.
+  enabled = false;
+  generation = 0;
+  await advance(1000);
+  assert.equal(calls.length, 0);
+  assert.equal(result.data, null);
+
+  enabled = true;
+  generation = 7;
+  latestId = 125;
+  serverCount = 125;
+  holdRequests = true;
+  dirty = true;
+  await advance(0);
+  assert.equal(calls.length, 5);
+  assert.equal(result.data, null);
+  await advance(1000);
+  assert.equal(calls.length, 5);
+  releases.forEach((resolve) => resolve());
+  await settle();
+  assert.equal(summary(), 125);
+  assert.equal(result.loading, false);
+  assert.equal(timers.size, 0);
+  await advance(5000);
+  assert.equal(summary(), 125);
+  assert.equal(calls.length, 5);
+  unmount();
+  process.exit(0);
+}
 await advance(0);
 assert.equal(summary(), 0);
 assert.equal(calls.length, 5);

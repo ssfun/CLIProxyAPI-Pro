@@ -417,6 +417,7 @@ export function MonitoringCenterPage() {
     error: usageError,
 		latestId,
 		modelPrices,
+    modelPricesReady,
 		refreshUsage,
     loadEventPage,
   } = useUsageData();
@@ -448,7 +449,9 @@ export function MonitoringCenterPage() {
     generation: Number(usage?.generation) || 0,
     timeRange,
     apiKeyHash: usageTrendApiKey,
-    enabled: connectionStatus === 'connected',
+    // Establish the dataset generation before querying its aggregates. Otherwise the
+    // first usage response invalidates statistics that may already be on screen.
+    enabled: connectionStatus === 'connected' && (Boolean(usage) || Boolean(usageError)),
   });
 
   const searchMatchedAuthIndexFilter = useMemo(() => {
@@ -670,10 +673,11 @@ export function MonitoringCenterPage() {
     allRows, usageAggregates, timeRange, timeRangeKey, usageTrendApiKey, modelPrices, apiKeyOptions,
     allKeysLabel: t('monitoring.filter_all_api_keys'), unattributedLabel: t('monitoring.api_key_unattributed'),
   });
-  const usageTrendDataReady = hasCompleteUsageAnalyticsSource(
+  const usageTrendDataReady = modelPricesReady && hasCompleteUsageAnalyticsSource(
     aggregateTrendScopeMatches,
-    Boolean(usage),
-    usage?.details_limited === true
+    Boolean(deferredUsage),
+    deferredUsage?.details_limited === true,
+    Boolean(usageAggregatesError)
   );
   const currentUsageTrendAnalytics = useMemo(() => {
     if (!serverUsageTrendAnalytics || !aggregateTrendScopeMatches) {
@@ -695,10 +699,11 @@ export function MonitoringCenterPage() {
     : staleUsageTrendAnalytics ?? currentUsageTrendAnalytics;
   const usageTrendHasDisplayData = usageTrendDataReady || Boolean(staleUsageTrendAnalytics);
   const usageTrendInitialLoading = !usageTrendHasDisplayData && !usageAggregatesError;
-  const usageSummaryPending = !hasCompleteUsageAnalyticsSource(
+  const usageSummaryPending = !modelPricesReady || !hasCompleteUsageAnalyticsSource(
     Boolean(usageAggregates),
     Boolean(deferredUsage),
-    deferredUsage?.details_limited === true
+    deferredUsage?.details_limited === true,
+    Boolean(usageAggregatesError)
   );
   const usageTrendDataRefreshing = usageTrendHasDisplayData
     && (usageAggregatesRefreshing || !usageTrendDataReady);

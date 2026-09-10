@@ -69,8 +69,9 @@ export type UsageTrendAnalytics = {
 export const hasCompleteUsageAnalyticsSource = (
   aggregateScopeMatches: boolean,
   clientDetailsLoaded: boolean,
-  clientDetailsLimited: boolean
-): boolean => aggregateScopeMatches || (clientDetailsLoaded && !clientDetailsLimited);
+  clientDetailsLimited: boolean,
+  allowClientFallback = true
+): boolean => aggregateScopeMatches || (allowClientFallback && clientDetailsLoaded && !clientDetailsLimited);
 
 
 type MonitoringSummaryAccumulator = {
