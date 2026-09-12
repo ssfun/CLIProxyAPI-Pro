@@ -22,6 +22,8 @@ src/features/quota/logic.ts
 src/features/quota/providers/index.ts
 src/features/quota/providers/types.ts
 src/features/quota/providers/xai/data.ts
+src/pages/LoginPage.module.scss
+src/pages/LoginPage.tsx
 src/pages/SystemPage.tsx
 src/router/MainRoutes.tsx
 src/services/api/apiCall.ts

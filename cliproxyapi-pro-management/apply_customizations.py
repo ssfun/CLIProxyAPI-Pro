@@ -1140,6 +1140,35 @@ def patch_api_client_connection_isolation(target: Path) -> None:
 
 def patch_routes(target: Path) -> None:
     # The self-service page must not pass through Management authentication.
+    login = target / 'src/pages/LoginPage.tsx'
+    replace_once(login,
+        "import { Navigate, useNavigate, useLocation } from 'react-router-dom';\n",
+        "import { Link, Navigate, useNavigate, useLocation } from 'react-router-dom';\n")
+    replace_once(login,
+        "              {error && <div className={styles.errorBox}>{error}</div>}\n",
+        "              {error && <div className={styles.errorBox}>{error}</div>}\n\n"
+        "              <Link to=\"/usage\" className={styles.selfUsageLink}>\n"
+        "                {t('login.self_usage_link')} <span aria-hidden=\"true\">→</span>\n"
+        "              </Link>\n")
+    replace_once(target / 'src/pages/LoginPage.module.scss',
+        '.errorBox {\n',
+        '.selfUsageLink {\n'
+        '  align-self: center;\n'
+        '  padding: 4px 8px;\n'
+        '  color: var(--text-secondary);\n'
+        '  font-size: 13px;\n'
+        '  font-weight: 400;\n'
+        '  border-radius: 4px;\n\n'
+        '  &:hover {\n'
+        '    color: var(--text-primary);\n'
+        '    text-decoration: underline;\n'
+        '    text-underline-offset: 3px;\n'
+        '  }\n\n'
+        '  &:focus-visible {\n'
+        '    outline: 2px solid var(--primary-color);\n'
+        '    outline-offset: 2px;\n'
+        '  }\n'
+        '}\n\n.errorBox {\n')
     app = target / 'src/App.tsx'
     replace_once(app,
         "import { LoginPage } from '@/pages/LoginPage';\n",
@@ -1638,6 +1667,12 @@ def patch_locales(target: Path) -> None:
     for locale_name in ('en.json', 'ru.json', 'zh-CN.json', 'zh-TW.json'):
         additions = json.loads(json.dumps(monitoring.get(locale_name, {})))
         data = additions
+        data.setdefault('login', {})['self_usage_link'] = {
+            'en.json': 'API key usage',
+            'ru.json': 'Использование API-ключа',
+            'zh-CN.json': '密钥用量查询',
+            'zh-TW.json': '金鑰用量查詢',
+        }[locale_name]
         proxy_pool_nav = PROXY_POOL_NAV_LOCALE_KEYS.get(
             locale_name,
             PROXY_POOL_NAV_LOCALE_KEYS['en.json'],
