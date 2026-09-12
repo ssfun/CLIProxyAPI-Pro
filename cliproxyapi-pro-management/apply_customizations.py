@@ -1478,6 +1478,36 @@ def patch_auth_file_connection_test(target: Path) -> None:
     )
 
 
+def patch_management_models(target: Path) -> None:
+    for relative in ('src/pages/SystemPage.tsx', 'src/features/dashboard/hooks/useDashboardOverview.ts'):
+        path = target / relative
+        replace_once(path,
+                     "import { useApiKeysForModels } from '@/hooks/useApiKeysForModels';\n",
+                     "import { useManagementModelsStore } from '@/pro/system/useManagementModelsStore';\n")
+        source = read(path)
+        source = source.replace('  useModelsStore,\n', '').replace(', useModelsStore }', ' }')
+        source = source.replace('useModelsStore((state)', 'useManagementModelsStore((state)')
+        source = source.replace('  const resolveApiKeysForModels = useApiKeysForModels();\n', '')
+        write(path, source)
+    replace_once(target / 'src/pages/SystemPage.tsx',
+                 '      const apiKeys = await resolveApiKeysForModels({ force: forceRefresh });\n      const primaryKey = apiKeys[0];\n      const list = await fetchModelsFromStore(auth.apiBase, primaryKey, forceRefresh);',
+                 '      const list = await fetchModelsFromStore(auth.apiBase, forceRefresh);')
+    replace_once(target / 'src/features/dashboard/hooks/useDashboardOverview.ts',
+                 '      const apiKeys = await resolveApiKeysForModels();\n      await fetchModelsFromStore(apiBase, apiKeys[0]);',
+                 '      await fetchModelsFromStore(apiBase);')
+    path = target / 'src/features/dashboard/hooks/useDashboardOverview.ts'
+    write(path, read(path).replace('apiBase, resolveApiKeysForModels, fetchModelsFromStore', 'apiBase, fetchModelsFromStore'))
+    path = target / 'src/stores/useAuthStore.ts'
+    insert_once(path, "import { useModelsStore } from './useModelsStore';\n",
+                "import { useModelsStore } from './useModelsStore';\nimport { useManagementModelsStore } from '@/pro/system/useManagementModelsStore';\n",
+                "import { useManagementModelsStore }")
+    source = read(path)
+    if 'useManagementModelsStore.getState().clearCache()' not in source:
+        source = source.replace('useModelsStore.getState().clearCache();',
+                                'useModelsStore.getState().clearCache();\n        useManagementModelsStore.getState().clearCache();')
+    write(path, source)
+
+
 def patch_management_update_check(target: Path) -> None:
     page_path = target / 'src/pages/SystemPage.tsx'
     insert_once(
@@ -2059,6 +2089,7 @@ def main() -> None:
     patch_account_usage_feature(target)
     patch_auth_file_connection_test(target)
     patch_management_update_check(target)
+    patch_management_models(target)
     patch_api_client_connection_isolation(target)
     patch_supporting_api_and_types(target)
     patch_locales(target)

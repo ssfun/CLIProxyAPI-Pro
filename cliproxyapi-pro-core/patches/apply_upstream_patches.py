@@ -230,6 +230,8 @@ new_customization_paths = (
 	'internal/api/api_key_policy_models_test.go',
     'internal/api/handlers/management/account_inspection_host.go',
     'internal/api/handlers/management/api_key_policy.go',
+    'internal/api/handlers/management/models.go',
+    'internal/api/handlers/management/models_test.go',
     'internal/api/handlers/management/api_key_policy_test.go',
 	'internal/api/handlers/management/auth_file_metadata.go',
     'internal/api/handlers/management/api_tools_executor_proxy_test.go',
@@ -310,6 +312,8 @@ queue_go_source('internal/api/self_query.go')
 queue_go_source('internal/api/self_query_test.go')
 queue_go_source('internal/api/api_key_policy_models_test.go')
 queue_go_source('internal/api/handlers/management/api_key_policy.go')
+queue_go_source('internal/api/handlers/management/models.go')
+queue_go_source('internal/api/handlers/management/models_test.go')
 queue_go_source('internal/api/handlers/management/api_key_policy_test.go')
 queue_go_source('internal/api/handlers/management/auth_file_metadata.go')
 queue_go_source('internal/api/server_model_policy.go')
@@ -4414,7 +4418,7 @@ server_management = ROOT / 'internal/api/server_management.go'
 replace_once(
     server_management,
     '\t\tmgmt.POST("/api-call", s.mgmt.APICall)\n',
-    '\t\tmgmt.POST("/api-call", s.mgmt.APICall)\n\t\ts.mgmt.RegisterAPIKeyPolicyRoutes(mgmt)\n',
+    '\t\tmgmt.POST("/api-call", s.mgmt.APICall)\n\t\tmgmt.GET("/models", s.mgmt.GetManagementModels)\n\t\ts.mgmt.RegisterAPIKeyPolicyRoutes(mgmt)\n',
     's.mgmt.RegisterAPIKeyPolicyRoutes(mgmt)',
 )
 auth_files = ROOT / 'internal/api/handlers/management/auth_files.go'
@@ -5849,6 +5853,8 @@ format_go_writes([
     ],
     'internal/api/handlers/management/account_inspection_host.go',
     'internal/api/handlers/management/api_key_policy.go',
+    'internal/api/handlers/management/models.go',
+    'internal/api/handlers/management/models_test.go',
     'internal/api/handlers/management/auth_file_connection.go',
     'internal/api/handlers/management/auth_file_connection_test.go',
     'internal/api/handlers/management/auth_file_metadata.go',

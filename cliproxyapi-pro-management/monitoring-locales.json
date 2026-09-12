@@ -1,5 +1,8 @@
 {
   "en.json": {
+    "system_info": {
+      "models_desc": "Shows the server’s available models, independent of API key policies."
+    },
     "nav": {
       "monitoring_center": "Request Monitoring",
       "data_management": "Data Management",
@@ -1560,6 +1563,9 @@
     }
   },
   "ru.json": {
+    "system_info": {
+      "models_desc": "Доступные модели сервера независимо от политик API-ключей."
+    },
     "nav": {
       "monitoring_center": "Мониторинг запросов",
       "data_management": "Управление данными",
@@ -2787,6 +2793,9 @@
     }
   },
   "zh-CN.json": {
+    "system_info": {
+      "models_desc": "展示服务器当前可用的全局模型，不受密钥策略影响。"
+    },
     "nav": {
       "monitoring_center": "请求监控",
       "data_management": "数据管理",
@@ -4486,6 +4495,9 @@
     }
   },
   "zh-TW.json": {
+    "system_info": {
+      "models_desc": "顯示伺服器目前可用的全域模型，不受金鑰策略影響。"
+    },
     "nav": {
       "monitoring_center": "請求監控",
       "data_management": "資料管理",
