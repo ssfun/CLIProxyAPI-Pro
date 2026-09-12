@@ -388,20 +388,22 @@ func BuildPayload(events []Event) Payload {
 			AccountingQuality:    event.AccountingQuality,
 			TokenBreakdown:       event.TokenBreakdown,
 			Failed:               event.Failed,
-			Tokens: Tokens{
-				InputTokens:      event.InputTokens,
-				OutputTokens:     event.OutputTokens,
-				ReasoningTokens:  event.ReasoningTokens,
-				CachedTokens:     event.CachedTokens,
-				CacheTokens:      event.CacheTokens,
-				CacheReadTokens:  event.CacheReadTokens,
-				CacheWriteTokens: event.CacheWriteTokens,
-				CacheInputTokens: cacheInputTokens(event),
-				TotalTokens:      event.TotalTokens,
-			},
+			Tokens:               EventTokens(event),
 		})
 	}
 	return payload
+}
+
+// EventTokens is shared by Management and public key-scoped usage views.
+// Preserve the accounting-quality gate for the cache hit-rate denominator.
+func EventTokens(event Event) Tokens {
+	return Tokens{
+		InputTokens: event.InputTokens, OutputTokens: event.OutputTokens,
+		ReasoningTokens: event.ReasoningTokens, CachedTokens: event.CachedTokens,
+		CacheTokens: event.CacheTokens, CacheReadTokens: event.CacheReadTokens,
+		CacheWriteTokens: event.CacheWriteTokens, CacheInputTokens: cacheInputTokens(event),
+		TotalTokens: event.TotalTokens,
+	}
 }
 
 func readTokenBreakdown(record map[string]any) coreusage.TokenBreakdown {

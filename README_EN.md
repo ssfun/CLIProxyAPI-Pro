@@ -382,3 +382,11 @@ Special thanks to:
 ## Maintenance boundaries
 
 Pro contains static business modules and an upstream customization layer. Minimal patching refers to the host integration surface, not a small overall codebase. See [PATCH_MAINTENANCE.md](PATCH_MAINTENANCE.md) for ownership, retirement criteria, and validation requirements.
+
+### Public API key usage page
+
+Open `/management.html#/usage` without a Management login and enter a configured API key to query only its own quota, retained usage statistics (24 hours / 7 days / 30 days), and paginated request logs. Update both Core and Management. The page uses the existing Management static-asset delivery and keeps the key only in memory until refresh or sign-out.
+
+Read-only endpoints require `Authorization: Bearer <API_KEY>` independently of Management authentication: `GET /v0/self/quota`, `GET /v0/self/stats?days=7`, `GET /v0/self/events?days=7`, and `GET /v0/self/stream`. The events endpoint returns at most 50 rows; pass the last row's `timestampMs` and `id` as `before_ms` and `before_id` for older records. SSE checks for key-scoped changes every three seconds and revalidates the key while connected. Clients refresh their scoped snapshot on a `change` event and reconnect after disconnection. Notifications received during a query are coalesced into an immediate follow-up. Dataset resets or restores emit `reset`, clearing historical pages and reloading the latest data. Statistics, events and notifications carry `generation`; queries crossing a reset return HTTP 409 so clients discard stale responses and retry.
+
+Exhausted keys can still query without consuming quota. Public logs use a standalone layout and styles for reasoning effort, token breakdown (total / input / output / reasoning), and cache reads with hit rate, alongside time, model, status, latency, TTFT and estimated cost; they exclude upstream accounts, credentials, raw errors and request bodies. Legacy records without a reliable cache-input denominator show `--` for hit rate. Unattributed records are excluded. Records become visible after completion and usage persistence. Statistics reflect retained logs; quota balances come from the separate quota ledger. Reverse proxies can expose the static panel file and `/v0/self/*` while retaining Management API access controls.

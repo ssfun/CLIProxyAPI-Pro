@@ -1139,6 +1139,14 @@ def patch_api_client_connection_isolation(target: Path) -> None:
 
 
 def patch_routes(target: Path) -> None:
+    # The self-service page must not pass through Management authentication.
+    app = target / 'src/App.tsx'
+    replace_once(app,
+        "import { LoginPage } from '@/pages/LoginPage';\n",
+        "import { LoginPage } from '@/pages/LoginPage';\nimport { SelfUsagePage } from '@/pro/pages/SelfUsagePage';\n")
+    replace_once(app,
+        "      { path: '/login', element: <LoginPage /> },\n",
+        "      { path: '/login', element: <LoginPage /> },\n      { path: '/usage', element: <SelfUsagePage /> },\n")
     path = target / 'src/router/MainRoutes.tsx'
     replace_once(
         path,

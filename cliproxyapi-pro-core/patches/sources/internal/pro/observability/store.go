@@ -572,6 +572,7 @@ func (s *Store) init() error {
 		`create index if not exists idx_usage_events_auth_index_timestamp on usage_events(auth_index, timestamp_ms, id)`,
 		`create index if not exists idx_usage_events_api_key_timestamp on usage_events(api_key_hash, timestamp_ms)`,
 		`create index if not exists idx_usage_events_api_key_recent on usage_events(api_key_hash, timestamp_ms desc, id desc)`,
+		`create index if not exists idx_usage_events_api_key_cursor on usage_events(api_key_hash, id)`,
 		`create table if not exists usage_summary (
 			id integer primary key check (id = 1),
 			latest_event_id integer not null default 0,

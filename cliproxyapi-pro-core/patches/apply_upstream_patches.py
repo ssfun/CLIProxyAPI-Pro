@@ -225,6 +225,8 @@ if customization_sentinel.exists():
 new_customization_paths = (
     'internal/pro',
     'internal/api/api_key_policy_middleware_test.go',
+    'internal/api/self_query.go',
+    'internal/api/self_query_test.go',
 	'internal/api/api_key_policy_models_test.go',
     'internal/api/handlers/management/account_inspection_host.go',
     'internal/api/handlers/management/api_key_policy.go',
@@ -304,6 +306,8 @@ for relative_path in new_customization_paths:
 queue_tree(PATCH_SOURCE_DIR / 'internal/pro', ROOT / 'internal/pro')
 queue_tree(PATCH_SOURCE_DIR / 'sdk/proxyutil', ROOT / 'sdk/proxyutil')
 queue_go_source('internal/api/api_key_policy_middleware_test.go')
+queue_go_source('internal/api/self_query.go')
+queue_go_source('internal/api/self_query_test.go')
 queue_go_source('internal/api/api_key_policy_models_test.go')
 queue_go_source('internal/api/handlers/management/api_key_policy.go')
 queue_go_source('internal/api/handlers/management/api_key_policy_test.go')
@@ -1559,6 +1563,12 @@ replace_once(
 )
 
 server_routes_source = ROOT / 'internal/api/server_routes.go'
+replace_once(
+    server_routes_source,
+    '\ts.engine.GET("/management.html", s.serveManagementControlPanel)\n',
+    '\ts.engine.GET("/management.html", s.serveManagementControlPanel)\n\ts.registerSelfQueryRoutes()\n',
+    's.registerSelfQueryRoutes()',
+)
 routes_text = read(server_routes_source)
 routes_text = routes_text.replace('AuthMiddleware(s.accessManager)', 'AuthMiddleware(s.accessManager, s.apiKeyPolicy)')
 routes_text = routes_text.replace('realtimeAuthMiddleware(s.accessManager, s.codexLiveHandler)', 'realtimeAuthMiddleware(s.accessManager, s.apiKeyPolicy, s.codexLiveHandler)')
@@ -5826,6 +5836,8 @@ format_go_writes([
     'cmd/server/main.go',
     'internal/api/server.go',
     'internal/api/api_key_policy_middleware_test.go',
+    'internal/api/self_query.go',
+    'internal/api/self_query_test.go',
     'internal/api/server_middleware.go',
     'internal/api/server_options.go',
     'internal/api/server_routes.go',
