@@ -77,6 +77,13 @@ export interface DataRestoreDomainPreview {
 }
 
 export interface PolicyBackupPreview {
+  currentDisabledKeys?: number;
+  targetDisabledKeys?: number;
+  addedDisabledKeys?: number;
+  removedDisabledKeys?: number;
+  newlyBlockedKeys?: number;
+  newlyAllowedKeys?: number;
+
   hasPolicies: boolean;
   replacePolicies: number;
   preservePolicies: number;
@@ -225,3 +232,8 @@ export const dataManagementApi = {
     return apiClient.post<DataStatisticsResetResult>('/data/statistics/reset', { confirm: true });
   },
 };
+
+// Older Core builds omit these counts; do not fabricate a state change.
+export const hasKeyStateRestoreChanges = (preview?: PolicyBackupPreview): boolean =>
+  Boolean(preview && [preview.addedDisabledKeys, preview.removedDisabledKeys,
+    preview.newlyBlockedKeys, preview.newlyAllowedKeys].some((count) => (count ?? 0) > 0));

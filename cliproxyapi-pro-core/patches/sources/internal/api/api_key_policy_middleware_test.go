@@ -362,3 +362,45 @@ func TestRealtimeClientSecretReDecidesAtEveryConnectionAndFreezesConnectedSnapsh
 		t.Fatalf("unavailable status=%d body=%s", unavailable.Code, unavailable.Body.String())
 	}
 }
+
+func TestDisabledAPIKeyEnforcementFollowsTakeover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := newAPIKeyPolicyMiddlewareService(t)
+	identity, err := apikeypolicy.NewAuthenticatedAPIKeyIdentity("disabled-request-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SetTakeover(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	manager := sdkaccess.NewManager()
+	manager.SetProviders([]sdkaccess.Provider{apiKeyPolicyAccessProvider{provider: sdkaccess.DefaultAccessProviderName, principal: "disabled-request-key"}})
+	router := gin.New()
+	router.Use(AuthMiddleware(manager, service))
+	router.GET("/test", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	if err := service.SetKeyDisabled(context.Background(), identity, true, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, takeover := range []bool{false, true, false, true} {
+		if err := service.SetTakeover(context.Background(), takeover); err != nil {
+			t.Fatal(err)
+		}
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/test", nil))
+		if takeover {
+			if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), "api_key_disabled") {
+				t.Fatalf("disabled response: %d %s", recorder.Code, recorder.Body.String())
+			}
+		} else if recorder.Code != http.StatusNoContent {
+			t.Fatalf("stopped takeover response: %d", recorder.Code)
+		}
+	}
+	if err := service.SetKeyDisabled(context.Background(), identity, false, true); err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/test", nil))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("enabled response: %d", recorder.Code)
+	}
+}

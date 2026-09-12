@@ -63,6 +63,7 @@ func (s *Store) Close() error {
 
 func (s *Store) init(ctx context.Context) error {
 	return prostorage.ApplySchema(ctx, s.db, prostorage.Schema{Create: []string{
+		`create table if not exists api_key_disabled_keys (api_key_hash text primary key)`,
 		`create table if not exists api_key_policies (
 			id text primary key,
 			api_key_hash text not null unique,

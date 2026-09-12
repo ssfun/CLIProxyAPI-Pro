@@ -87,6 +87,7 @@ export interface APIKeyPolicy {
 }
 
 export interface APIKeyPolicyBinding {
+  disabled?: boolean;
   maskedKey: string;
   keyRef: string;
   state: APIKeyPolicyState;
@@ -355,6 +356,14 @@ const normalizePolicy = (policy: APIKeyPolicy): APIKeyPolicy => ({
 });
 
 export const apiKeyPolicyApi = {
+  readKey(keyRef: string): Promise<{ key: string }> {
+    return apiClient.post('/api-key-policy-key', { keyRef });
+  },
+
+  setKeyDisabled(keyRef: string, disabled: boolean, expectedDisabled: boolean): Promise<{ disabled: boolean }> {
+    return apiClient.put('/api-key-policy-key-state', { keyRef, disabled, expectedDisabled });
+  },
+
   async bindings(): Promise<APIKeyPolicyBindingPage> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {

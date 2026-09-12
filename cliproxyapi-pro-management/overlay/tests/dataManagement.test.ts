@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { normalizeDataDomainInventory, normalizeDataManagementOverview } from '../src/pro/modules/dataManagement/dataManagement';
+import { hasKeyStateRestoreChanges, type PolicyBackupPreview, normalizeDataDomainInventory, normalizeDataManagementOverview } from '../src/pro/modules/dataManagement/dataManagement';
 
 describe('data-management destructive-operation fencing', () => {
   test('executes cleanup against the previewed domains, cutoff, and record counts', () => {
@@ -104,5 +104,21 @@ describe('data-management destructive-operation fencing', () => {
       expect(locales[locale]?.common?.disabled).toBeTruthy();
       expect(locales[locale]?.data_management?.restore_from_webdav).toBeTruthy();
     }
+  });
+});
+
+describe('disabled-key restore confirmation', () => {
+  test('warns for changed key identities even when the totals match', () => {
+    expect(hasKeyStateRestoreChanges({ currentDisabledKeys: 1, targetDisabledKeys: 1,
+      addedDisabledKeys: 1, removedDisabledKeys: 1 } as PolicyBackupPreview)).toBe(true);
+  });
+  test('warns for an effective change caused only by takeover', () => {
+    expect(hasKeyStateRestoreChanges({ newlyBlockedKeys: 1 } as PolicyBackupPreview)).toBe(true);
+    expect(hasKeyStateRestoreChanges({ newlyAllowedKeys: 1 } as PolicyBackupPreview)).toBe(true);
+  });
+  test('retained settings and older Core responses do not fabricate changes', () => {
+    expect(hasKeyStateRestoreChanges({ currentDisabledKeys: 2, targetDisabledKeys: 2 } as PolicyBackupPreview)).toBe(false);
+    expect(hasKeyStateRestoreChanges({} as PolicyBackupPreview)).toBe(false);
+    expect(hasKeyStateRestoreChanges(undefined)).toBe(false);
   });
 });

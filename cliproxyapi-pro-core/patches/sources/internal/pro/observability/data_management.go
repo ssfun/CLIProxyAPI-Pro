@@ -782,6 +782,8 @@ func (s *Server) policyRestorePreview(ctx context.Context, data []byte, allowLeg
 		}
 		preview.PreservePolicies = currentPreview.TargetPolicies
 		preview.PreserveProfiles = currentPreview.TargetProfiles
+		preview.CurrentDisabledKeys = currentPreview.CurrentDisabledKeys
+		preview.TargetDisabledKeys = currentPreview.CurrentDisabledKeys
 		preview.CurrentTakeoverEnabled = currentPreview.CurrentTakeoverEnabled
 		preview.TargetTakeoverEnabled = currentPreview.CurrentTakeoverEnabled
 	}
@@ -897,7 +899,7 @@ func (s *Server) previewBackupData(ctx context.Context, data []byte, allowLegacy
 		return DataRestorePreview{}, err
 	}
 	if policyPreview.HasPolicies {
-		backupCounts["api-key-policy"] = int64(policyPreview.TargetPolicies + policyPreview.TargetProfiles)
+		backupCounts["api-key-policy"] = int64(policyPreview.TargetPolicies + policyPreview.TargetProfiles + policyPreview.TargetDisabledKeys)
 	}
 	current, err := s.store.listDataDomains(ctx, contributors)
 	if err != nil {

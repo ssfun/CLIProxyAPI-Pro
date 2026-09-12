@@ -35,6 +35,9 @@
       "order_error": "The start time must not be later than the end time."
     },
     "data_management": {
+      "restore_confirm_key_states": "Restore and apply key states",
+      "restore_disabled_key_settings": "Saved disabled keys: {{current}} → {{target}}; {{added}} added, {{removed}} removed.",
+      "restore_disabled_key_effects": "For currently configured keys, {{blocked}} gain and {{allowed}} lose the disabled-key block, accounting for takeover changes. Other policy restrictions may still apply.",
       "restore_from_webdav": "Restore"
     },
     "proxy_pool": {
@@ -1592,6 +1595,9 @@
       "order_error": "Время начала не может быть позже времени окончания."
     },
     "data_management": {
+      "restore_confirm_key_states": "Восстановить и применить состояния ключей",
+      "restore_disabled_key_settings": "Отключённые ключи: {{current}} → {{target}}; добавлено {{added}}, удалено {{removed}}.",
+      "restore_disabled_key_effects": "С учётом управления политиками: {{blocked}} настроенных ключей будут заблокированы, {{allowed}} — разблокированы. Другие ограничения политик могут сохраняться.",
       "restore_from_webdav": "Восстановить"
     },
     "proxy_pool": {
@@ -2816,6 +2822,9 @@
       "order_error": "开始时间不能晚于结束时间。"
     },
     "data_management": {
+      "restore_confirm_key_states": "确认恢复并应用密钥状态",
+      "restore_disabled_key_settings": "保存的禁用密钥：{{current}} → {{target}}；新增 {{added}} 项，解除 {{removed}} 项。",
+      "restore_disabled_key_effects": "按当前上游密钥和接管开关计算：{{blocked}} 个新增禁用拦截，{{allowed}} 个解除禁用拦截；其他策略限制仍可能生效。",
       "title": "数据管理",
       "subtitle": "统一管理 Pro 数据存储、备份恢复、保留策略和维护操作。",
       "state_ready": "运行正常",
@@ -4512,6 +4521,9 @@
       "order_error": "開始時間不能晚於結束時間。"
     },
     "data_management": {
+      "restore_confirm_key_states": "確認還原並套用金鑰狀態",
+      "restore_disabled_key_settings": "儲存的停用金鑰：{{current}} → {{target}}；新增 {{added}} 項，解除 {{removed}} 項。",
+      "restore_disabled_key_effects": "依目前上游金鑰與接管開關計算：{{blocked}} 個新增停用攔截，{{allowed}} 個解除停用攔截；其他策略限制仍可能生效。",
       "restore_from_webdav": "還原"
     },
     "proxy_pool": {

@@ -114,7 +114,7 @@ func New(ctx context.Context, configFilePath, baseProxyURL string) (*App, error)
 				domain.Available, domain.Error = false, err.Error()
 				return domain
 			}
-			domain.Records = int64(preview.TargetPolicies + preview.TargetProfiles)
+			domain.Records = int64(preview.TargetPolicies + preview.TargetProfiles + preview.TargetDisabledKeys)
 			return domain
 		},
 		BackupRecordTypes: []string{"api_key_policies"},

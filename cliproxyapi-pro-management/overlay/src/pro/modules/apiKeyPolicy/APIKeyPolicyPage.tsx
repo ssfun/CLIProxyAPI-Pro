@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { copyToClipboard } from '@/utils/clipboard';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -362,6 +363,11 @@ export function APIKeyPolicyPage() {
   const [workspaceTarget, setWorkspaceTarget] = useState<WorkspaceTarget | null>(null);
   const [draft, setDraft] = useState<WorkspaceDraft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [revealedKeys, setRevealedKeys] = useState<Record<string, string>>({});
+  const [keyActionBusy, setKeyActionBusy] = useState(false);
+  const keyActionBusyRef = useRef(false);
+  const keyActionSessionRef = useRef(0);
+  const keyControlsSupported = snapshot?.capabilities.features.includes('key_lifecycle_controls') === true;
 	const [takeoverOpen, setTakeoverOpen] = useState(false);
 	const [takeoverBusy, setTakeoverBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
@@ -423,6 +429,7 @@ export function APIKeyPolicyPage() {
   }, [errorMessage, showNotification, t]);
 
   const load = useCallback(async () => {
+    setRevealedKeys({});
     if (connectionStatus !== 'connected') {
       setLoading(false);
       setCapability('checking');
@@ -460,8 +467,11 @@ export function APIKeyPolicyPage() {
   }, [connectionStatus]);
 
   useEffect(() => {
+    setKeyActionBusy(false);
     void load();
     return () => {
+      keyActionSessionRef.current += 1;
+      keyActionBusyRef.current = false;
       requestRevisionRef.current += 1;
       saveRevisionRef.current += 1;
       dangerRevisionRef.current += 1;
@@ -471,6 +481,43 @@ export function APIKeyPolicyPage() {
       quotaBusyRef.current = false;
     };
   }, [load]);
+
+  const keyAction = async (binding: APIKeyPolicyBinding, action: 'reveal' | 'copy' | 'toggle') => {
+    if (keyActionBusyRef.current || loading || connectionStatus !== 'connected') return;
+    if (action === 'reveal' && revealedKeys[binding.keyRef]) {
+      setRevealedKeys((current) => { const next = { ...current }; delete next[binding.keyRef]; return next; });
+      return;
+    }
+    keyActionBusyRef.current = true;
+    setKeyActionBusy(true);
+    const revision = requestRevisionRef.current;
+    const session = keyActionSessionRef.current;
+    try {
+      if (action === 'toggle') {
+        await apiKeyPolicyApi.setKeyDisabled(binding.keyRef, !binding.disabled, binding.disabled === true);
+        if (session !== keyActionSessionRef.current) return;
+        showNotification(t(binding.disabled ? 'api_key_policy.key_enabled_done' : takeoverStatus?.takeoverEnabled ? 'api_key_policy.key_disabled_done' : 'api_key_policy.key_disabled_pending'), 'success');
+        await load();
+      } else {
+        const key = revealedKeys[binding.keyRef] ?? (await apiKeyPolicyApi.readKey(binding.keyRef)).key;
+        if (session !== keyActionSessionRef.current || revision !== requestRevisionRef.current) return;
+        if (action === 'reveal') setRevealedKeys((current) => ({ ...current, [binding.keyRef]: key }));
+        else {
+          const copied = await copyToClipboard(key);
+          showNotification(t(copied ? 'api_key_policy.key_copied' : 'api_key_policy.key_copy_failed'), copied ? 'success' : 'error');
+        }
+      }
+    } catch (error) {
+      if (session !== keyActionSessionRef.current || (action !== 'toggle' && revision !== requestRevisionRef.current)) return;
+      showNotification(errorMessage(error), 'error');
+      if (apiKeyPolicyErrorCode(error) === 'api_key_reference_stale' || apiKeyPolicyErrorCode(error) === 'config_version_conflict') await load();
+    } finally {
+      if (session === keyActionSessionRef.current) {
+        keyActionBusyRef.current = false;
+        setKeyActionBusy(false);
+      }
+    }
+  };
 
   const {
     quotaSummaries, quotaSnapshotAt, quotaLoading, quotaError,
@@ -482,6 +529,7 @@ export function APIKeyPolicyPage() {
   );
 
   const refreshPage = useCallback(async () => {
+    if (keyActionBusyRef.current) return;
     await Promise.all([load(), loadQuotaSummaries()]);
   }, [load, loadQuotaSummaries]);
 
@@ -1001,7 +1049,7 @@ export function APIKeyPolicyPage() {
 			icon={<IconKey size={20} />}
 			active={takeoverActive}
 			loading={loading}
-			actionBusy={takeoverBusy}
+			actionBusy={takeoverBusy || keyActionBusy}
 			actionDisabled={takeoverActionDisabled}
 			onRefresh={() => void refreshPage()}
 			onToggle={() => setTakeoverOpen(true)}
@@ -1076,12 +1124,18 @@ export function APIKeyPolicyPage() {
                   <div className={styles.cardTop}>
                     <div className={styles.cardIdentity}>
                       <span><IconKey size={18} /></span>
-                      <div><strong>{policy?.displayName || binding.maskedKey}</strong><code>{binding.maskedKey}</code></div>
+                      <div><strong>{policy?.displayName || binding.maskedKey}</strong><code className={revealedKeys[binding.keyRef] ? styles.revealedKey : undefined}>{revealedKeys[binding.keyRef] ?? binding.maskedKey}</code></div>
                     </div>
-                    <PolicyBadge state={binding.state}>{t(`api_key_policy.state.${binding.state}`)}</PolicyBadge>
+                    <PolicyBadge state={binding.disabled ? takeoverActive ? 'key_disabled' : 'unconfigured' : binding.state}>{t(binding.disabled ? takeoverActive ? 'api_key_policy.key_disabled' : 'api_key_policy.key_disabled_pending' : `api_key_policy.state.${binding.state}`)}</PolicyBadge>
                   </div>
+                  {keyControlsSupported ? <div className={styles.keyControls}>
+                    <span className={binding.disabled ? takeoverActive ? styles.keyDisabled : styles.keyPending : styles.keyEnabled}>{t(binding.disabled ? takeoverActive ? 'api_key_policy.key_disabled' : 'api_key_policy.key_disabled_pending' : 'api_key_policy.key_enabled')}</span>
+                    <Button variant="ghost" size="sm" disabled={keyActionBusy || loading} onClick={() => void keyAction(binding, 'reveal')}>{t(revealedKeys[binding.keyRef] ? 'api_key_policy.hide_key' : 'api_key_policy.reveal_key')}</Button>
+                    <Button variant="ghost" size="sm" disabled={keyActionBusy || loading} onClick={() => void keyAction(binding, 'copy')}>{t('api_key_policy.copy_key')}</Button>
+                    <Button variant={binding.disabled ? 'secondary' : 'danger'} size="sm" disabled={keyActionBusy || loading} onClick={() => void keyAction(binding, 'toggle')}>{t(binding.disabled ? 'api_key_policy.enable_key' : 'api_key_policy.disable_key')}</Button>
+                  </div> : null}
                   <p className={styles.cardSummary}>
-                    {policy
+                    {binding.disabled ? t(takeoverActive ? 'api_key_policy.key_disabled_hint' : 'api_key_policy.key_disabled_pending_hint') : policy
 							? activeProfile
 							  ? t(takeoverActive ? 'api_key_policy.configured_summary' : 'api_key_policy.configured_inactive_summary', { profile: activeProfile.name, count: policy.profiles.length })
 							  : t(takeoverActive ? 'api_key_policy.configured_no_profile_summary' : 'api_key_policy.configured_no_profile_inactive_summary')
@@ -1492,8 +1546,9 @@ export function APIKeyPolicyPage() {
 					<ul>
 						{takeoverScopeReady ? (
 							<>
-								<li>{t('api_key_policy.takeover_configured_count', { count: statusCounts.configured })}</li>
-								<li>{t('api_key_policy.takeover_passthrough_count', { count: statusCounts.unconfigured })}</li>
+								<li>{t('api_key_policy.takeover_configured_count', { count: snapshot?.bindings.items.filter((binding) => binding.policy && !binding.disabled).length ?? 0 })}</li>
+								<li>{t('api_key_policy.takeover_passthrough_count', { count: snapshot?.bindings.items.filter((binding) => !binding.policy && !binding.disabled).length ?? 0 })}</li>
+                <li>{t('api_key_policy.takeover_disabled_count', { count: snapshot?.bindings.items.filter((binding) => binding.disabled).length ?? 0 })}</li>
 							</>
 						) : <li>{t('api_key_policy.takeover_scope_unavailable')}</li>}
 						<li>{t('api_key_policy.takeover_new_requests_only')}</li>

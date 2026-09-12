@@ -80,7 +80,7 @@ func TestUsageImportPreviewReportsPolicyReplacementAssociationAndLegacyPreservat
 		func(context.Context, []byte) error { return nil },
 		func(_ context.Context, payload []byte) (probackup.PolicyBackupPreview, error) {
 			if bytes.Equal(payload, current) {
-				return probackup.PolicyBackupPreview{TargetPolicies: 1, TargetProfiles: 3, CurrentTakeoverEnabled: true, TargetTakeoverEnabled: true}, nil
+				return probackup.PolicyBackupPreview{CurrentDisabledKeys: 2, TargetDisabledKeys: 2, TargetPolicies: 1, TargetProfiles: 3, CurrentTakeoverEnabled: true, TargetTakeoverEnabled: true}, nil
 			}
 			if !bytes.Equal(payload, target) {
 				t.Fatalf("preview payload = %s", payload)
@@ -107,7 +107,7 @@ func TestUsageImportPreviewReportsPolicyReplacementAssociationAndLegacyPreservat
 
 	legacyRecorder := httptest.NewRecorder()
 	testUsageRouter(openTestStore(t)).ServeHTTP(legacyRecorder, httptest.NewRequest(http.MethodPost, "/usage/import/preview?allow_legacy=1", strings.NewReader(`{"model":"old"}`)))
-	if legacyRecorder.Code != http.StatusOK || !strings.Contains(legacyRecorder.Body.String(), `"preservePolicies":1`) || !strings.Contains(legacyRecorder.Body.String(), `"preserveProfiles":3`) || !strings.Contains(legacyRecorder.Body.String(), `"currentTakeoverEnabled":true`) || !strings.Contains(legacyRecorder.Body.String(), `"targetTakeoverEnabled":true`) {
+	if legacyRecorder.Code != http.StatusOK || !strings.Contains(legacyRecorder.Body.String(), `"preservePolicies":1`) || !strings.Contains(legacyRecorder.Body.String(), `"preserveProfiles":3`) || !strings.Contains(legacyRecorder.Body.String(), `"currentDisabledKeys":2`) || !strings.Contains(legacyRecorder.Body.String(), `"targetDisabledKeys":2`) || !strings.Contains(legacyRecorder.Body.String(), `"removedDisabledKeys":0`) || !strings.Contains(legacyRecorder.Body.String(), `"currentTakeoverEnabled":true`) || !strings.Contains(legacyRecorder.Body.String(), `"targetTakeoverEnabled":true`) {
 		t.Fatalf("legacy preview response = %d %s", legacyRecorder.Code, legacyRecorder.Body.String())
 	}
 }

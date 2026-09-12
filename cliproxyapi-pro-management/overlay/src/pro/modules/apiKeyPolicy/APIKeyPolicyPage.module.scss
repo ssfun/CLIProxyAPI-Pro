@@ -349,3 +349,13 @@
 	.sheetFooter > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.sheetFooter > div :global(.btn) { width: 100%; }
 }
+
+.cardIdentity code.revealedKey { white-space: normal; overflow-wrap: anywhere; }
+.keyControls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.keyEnabled, .keyDisabled { font-size: 12px; font-weight: 600; margin-right: auto; }
+.keyEnabled { color: var(--success-color); }
+.keyDisabled { color: var(--danger-color); }
+
+.badge_key_disabled { color: var(--danger-color); border-color: color-mix(in srgb, var(--danger-color) 34%, var(--border-color)); }
+
+.keyPending { color: var(--text-secondary); font-size: 12px; font-weight: 600; margin-right: auto; }

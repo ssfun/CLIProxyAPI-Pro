@@ -1,3 +1,4 @@
+import { hasKeyStateRestoreChanges } from './dataManagement';
 import {
   useCallback,
   useEffect,
@@ -724,7 +725,7 @@ export function DataManagementPage() {
         <div className={styles.dialogBody}><p>{restoreFileName}</p><label><span>{t('data_management.passphrase', { defaultValue: 'Passphrase' })}</span><Input type="password" value={restorePassphrase} onChange={(event) => setRestorePassphrase(event.target.value)} autoComplete="current-password" /></label></div>
       </ProTaskDialog>
 
-      <ProWorkspaceSheet open={restorePreviewOpen} onClose={() => !restoreBusy && setRestorePreviewOpen(false)} title={t('data_management.restore_preview_title', { defaultValue: 'Review backup restore' })} description={restoreFileName} closeDisabled={restoreBusy} footer={<div className={styles.sheetFooter}><Button variant="secondary" onClick={() => setRestorePreviewOpen(false)} disabled={restoreBusy}>{t('common.cancel')}</Button><Button variant={restorePreview?.legacyBackup ? 'danger' : 'primary'} onClick={() => void executeRestore()} loading={restoreBusy}>{t('data_management.restore_confirm', { defaultValue: 'Restore backup' })}</Button></div>}>
+      <ProWorkspaceSheet open={restorePreviewOpen} onClose={() => !restoreBusy && setRestorePreviewOpen(false)} title={t('data_management.restore_preview_title', { defaultValue: 'Review backup restore' })} description={restoreFileName} closeDisabled={restoreBusy} footer={<div className={styles.sheetFooter}><Button variant="secondary" onClick={() => setRestorePreviewOpen(false)} disabled={restoreBusy}>{t('common.cancel')}</Button><Button variant={restorePreview?.legacyBackup || hasKeyStateRestoreChanges(restorePreview?.policyBackup) ? 'danger' : 'primary'} onClick={() => void executeRestore()} loading={restoreBusy}>{hasKeyStateRestoreChanges(restorePreview?.policyBackup) ? t('data_management.restore_confirm_key_states') : t('data_management.restore_confirm', { defaultValue: 'Restore backup' })}</Button></div>}>
         <div className={styles.restorePreview}>
           <div className={restorePreview?.integrityProtected ? styles.integrityGood : styles.integrityWarning}>{restorePreview?.integrityProtected ? <IconCheckCircle2 size={17} /> : <IconAlertTriangle size={17} />}<span>{restorePreview?.integrityProtected ? t('data_management.integrity_verified', { defaultValue: 'Backup manifest and content hash verified' }) : t('data_management.legacy_warning', { defaultValue: 'Legacy backup without an integrity manifest. Continue only if the source is trusted.' })}</span></div>
           {restorePreview?.encrypted ? <div className={styles.integrityGood}><IconShield size={17} /><span>{t('data_management.encrypted_verified', { defaultValue: 'AES-256-GCM authentication succeeded' })}</span></div> : null}
@@ -746,6 +747,20 @@ export function DataManagementPage() {
                     policies: formatCount(restorePreview.policyBackup.preservePolicies),
                     profiles: formatCount(restorePreview.policyBackup.preserveProfiles),
                   })}</span>
+                {typeof restorePreview.policyBackup.currentDisabledKeys === 'number' && typeof restorePreview.policyBackup.targetDisabledKeys === 'number' ? (
+                  <div role="note">
+                    <p>{t('data_management.restore_disabled_key_settings', {
+                      current: formatCount(restorePreview.policyBackup.currentDisabledKeys),
+                      target: formatCount(restorePreview.policyBackup.targetDisabledKeys),
+                      added: formatCount(restorePreview.policyBackup.addedDisabledKeys ?? 0),
+                      removed: formatCount(restorePreview.policyBackup.removedDisabledKeys ?? 0),
+                    })}</p>
+                    <p>{t('data_management.restore_disabled_key_effects', {
+                      blocked: formatCount(restorePreview.policyBackup.newlyBlockedKeys ?? 0),
+                      allowed: formatCount(restorePreview.policyBackup.newlyAllowedKeys ?? 0),
+                    })}</p>
+                  </div>
+                ) : null}
                 {restorePreview.policyBackup.currentTakeoverEnabled !== restorePreview.policyBackup.targetTakeoverEnabled ? (
                   <small>{t('data_management.policy_takeover_change', {
                     defaultValue: 'Takeover changes from {{current}} to {{target}}.',

@@ -867,3 +867,35 @@ func TestAPIKeyPolicyOrphanedPurgeRequiresMatchingVersionAndConfigGeneration(t *
 		t.Fatalf("purge status=%d body=%s", purged.Code, purged.Body.String())
 	}
 }
+
+func TestAPIKeyCardControlsProtectReferencesAndPreserveBindings(t *testing.T) {
+	h, router := newAPIKeyPolicyManagementHarness(t, []string{"card-control-secret-123456"})
+	listed := policyRequest(t, router, http.MethodGet, "/v0/management/api-key-policy-bindings", "session-a", nil)
+	binding := bindingResponse(t, listed).Items[0]
+	read := func(session string) *httptest.ResponseRecorder {
+		return policyRequest(t, router, http.MethodPost, "/v0/management/api-key-policy-key", session, map[string]any{"keyRef": binding.KeyRef})
+	}
+	if got := read("session-b"); got.Code != 409 {
+		t.Fatalf("cross session reveal: %d", got.Code)
+	}
+	if got := read("session-a"); got.Code != 200 || got.Header().Get("Cache-Control") != "no-store" || !strings.Contains(got.Body.String(), "card-control-secret-123456") {
+		t.Fatalf("reveal failed: %d", got.Code)
+	}
+	for _, disabled := range []bool{true, false} {
+		got := policyRequest(t, router, http.MethodPut, "/v0/management/api-key-policy-key-state", "session-a", map[string]any{"keyRef": binding.KeyRef, "disabled": disabled, "expectedDisabled": !disabled})
+		if got.Code != 200 {
+			t.Fatalf("toggle failed: %d %s", got.Code, got.Body.String())
+		}
+		listed = policyRequest(t, router, http.MethodGet, "/v0/management/api-key-policy-bindings", "session-a", nil)
+		current := bindingResponse(t, listed).Items[0]
+		if current.Disabled != disabled || current.Policy != nil || strings.Contains(listed.Body.String(), "card-control-secret-123456") {
+			t.Fatal("binding state or secret boundary changed")
+		}
+	}
+	h.mu.Lock()
+	h.configGeneration++
+	h.mu.Unlock()
+	if got := read("session-a"); got.Code != 409 {
+		t.Fatalf("stale reveal: %d", got.Code)
+	}
+}

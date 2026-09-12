@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +19,7 @@ import (
 )
 
 type runtimeIndex struct {
+	disabledKeys    map[string]bool
 	healthy         bool
 	takeoverEnabled bool
 	generation      uint64
@@ -38,6 +40,7 @@ type backupPolicy struct {
 }
 
 type backupDocument struct {
+	DisabledKeys            []string                  `json:"disabled_keys,omitempty"`
 	SchemaVersion           int                       `json:"schema_version"`
 	TakeoverEnabled         bool                      `json:"takeover_enabled"`
 	Policies                []backupPolicy            `json:"policies"`
@@ -139,13 +142,22 @@ func (s *Service) ExportBackup(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(backupDocument{SchemaVersion: 8, TakeoverEnabled: takeoverEnabled, Policies: policiesToBackup(policies), Audits: audits, QuotaAdmissions: admissions, QuotaEvents: events, PendingQuotaSettlements: pending})
+	disabledKeys, err := listDisabledKeys(ctx, s.store.db)
+	if err != nil {
+		return nil, err
+	}
+	hashes := make([]string, 0, len(disabledKeys))
+	for hash := range disabledKeys {
+		hashes = append(hashes, hash)
+	}
+	sort.Strings(hashes)
+	return json.Marshal(backupDocument{SchemaVersion: 9, DisabledKeys: hashes, TakeoverEnabled: takeoverEnabled, Policies: policiesToBackup(policies), Audits: audits, QuotaAdmissions: admissions, QuotaEvents: events, PendingQuotaSettlements: pending})
 }
 
 func decodeBackup(payload []byte) ([]Policy, []AuditRecord, []backupQuotaAdmission, []backupQuotaEvent, []backupPendingSettlement, bool, error) {
 	var document backupDocument
 	if err := json.Unmarshal(payload, &document); err == nil && document.SchemaVersion != 0 {
-		if document.SchemaVersion < 2 || document.SchemaVersion > 8 {
+		if document.SchemaVersion < 2 || document.SchemaVersion > 9 {
 			return nil, nil, nil, nil, nil, false, fmt.Errorf("unsupported API key policy backup schema %d", document.SchemaVersion)
 		}
 		return backupToPolicies(document.Policies, document.SchemaVersion), document.Audits, document.QuotaAdmissions, document.QuotaEvents, document.PendingQuotaSettlements, document.SchemaVersion >= 3 && document.TakeoverEnabled, nil
@@ -313,7 +325,7 @@ func profileCount(policies []Policy) int {
 // as import, then derives association counts from the committed config key
 // fingerprints supplied by the Management handler.
 func (s *Service) PreviewBackup(ctx context.Context, payload []byte, configuredHashes []string) (probackup.PolicyBackupPreview, error) {
-	policies, _, _, _, _, targetTakeoverEnabled, _, err := s.stageBackup(payload)
+	policies, _, _, _, _, targetTakeoverEnabled, targetIndex, err := s.stageBackup(payload)
 	if err != nil {
 		return probackup.PolicyBackupPreview{}, err
 	}
@@ -327,11 +339,17 @@ func (s *Service) PreviewBackup(ctx context.Context, payload []byte, configuredH
 	if err != nil {
 		return probackup.PolicyBackupPreview{}, err
 	}
+	currentDisabled, err := listDisabledKeys(ctx, s.store.db)
+	if err != nil {
+		return probackup.PolicyBackupPreview{}, err
+	}
 	configured := make(map[string]struct{}, len(configuredHashes))
 	for _, hash := range configuredHashes {
 		configured[hash] = struct{}{}
 	}
 	preview := probackup.PolicyBackupPreview{
+		CurrentDisabledKeys:    len(currentDisabled),
+		TargetDisabledKeys:     len(targetIndex.disabledKeys),
 		HasPolicies:            true,
 		ReplacePolicies:        len(current),
 		ReplaceProfiles:        profileCount(current),
@@ -339,6 +357,27 @@ func (s *Service) PreviewBackup(ctx context.Context, payload []byte, configuredH
 		TargetProfiles:         profileCount(policies),
 		CurrentTakeoverEnabled: currentTakeoverEnabled,
 		TargetTakeoverEnabled:  targetTakeoverEnabled,
+	}
+	for hash := range targetIndex.disabledKeys {
+		if !currentDisabled[hash] {
+			preview.AddedDisabledKeys++
+		}
+	}
+	for hash := range currentDisabled {
+		if !targetIndex.disabledKeys[hash] {
+			preview.RemovedDisabledKeys++
+		}
+	}
+	// Effective changes apply only to keys still present in upstream config.
+	for hash := range configured {
+		wasBlocked := currentTakeoverEnabled && currentDisabled[hash]
+		willBeBlocked := targetTakeoverEnabled && targetIndex.disabledKeys[hash]
+		if willBeBlocked && !wasBlocked {
+			preview.NewlyBlockedKeys++
+		}
+		if wasBlocked && !willBeBlocked {
+			preview.NewlyAllowedKeys++
+		}
 	}
 	for _, policy := range policies {
 		if _, ok := configured[policy.APIKeyHash]; ok {
@@ -389,6 +428,14 @@ func (s *Service) ImportBackup(ctx context.Context, payload []byte) (err error) 
 	}
 	if _, err := tx.ExecContext(ctx, `delete from api_key_policies`); err != nil {
 		return err
+	}
+	if _, err := tx.ExecContext(ctx, `delete from api_key_disabled_keys`); err != nil {
+		return err
+	}
+	for hash := range next.disabledKeys {
+		if _, err := tx.ExecContext(ctx, `insert into api_key_disabled_keys(api_key_hash) values (?)`, hash); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `delete from api_key_policy_audit`); err != nil {
 		return err
@@ -455,18 +502,16 @@ func (s *Service) ImportBackup(ctx context.Context, payload []byte) (err error) 
 	if err != nil {
 		return err
 	}
-	if _, err := buildRuntimeIndex(loaded, takeoverEnabled); err != nil {
+	loadedIndex, err := buildRuntimeIndex(loaded, takeoverEnabled)
+	if err != nil {
 		return err
 	}
+	loadedIndex.disabledKeys = next.disabledKeys
 	if owned {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		next, err = buildRuntimeIndex(loaded, takeoverEnabled)
-		if err != nil {
-			return err
-		}
-		s.publishNextLocked(next)
+		s.publishNextLocked(loadedIndex)
 		s.quotaRuntimeGeneration.Add(1)
 	} else {
 		probackup.AfterCommit(ctx, func() {
@@ -502,6 +547,17 @@ func (s *Service) stageBackup(payload []byte) ([]Policy, []AuditRecord, []backup
 	next, err := buildRuntimeIndex(policies, takeoverEnabled)
 	if err != nil {
 		return nil, nil, nil, nil, nil, false, nil, err
+	}
+	var document backupDocument
+	if json.Unmarshal(payload, &document) == nil && document.SchemaVersion >= 9 {
+		next.disabledKeys = make(map[string]bool)
+		for _, hash := range document.DisabledKeys {
+			decoded, err := hex.DecodeString(hash)
+			if err != nil || len(decoded) != 32 || hash != strings.ToLower(hash) {
+				return nil, nil, nil, nil, nil, false, nil, errors.New("invalid disabled API key hash")
+			}
+			next.disabledKeys[hash] = true
+		}
 	}
 	return policies, audits, admissions, events, pending, takeoverEnabled, next, nil
 }
@@ -967,7 +1023,11 @@ func (s *Service) MarkUnavailable() {
 		if current != nil {
 			generation = current.generation
 		}
-		s.index.Store(&runtimeIndex{healthy: false, takeoverEnabled: takeoverEnabled, generation: generation})
+		var disabledKeys map[string]bool
+		if current != nil {
+			disabledKeys = current.disabledKeys
+		}
+		s.index.Store(&runtimeIndex{healthy: false, takeoverEnabled: takeoverEnabled, generation: generation, disabledKeys: disabledKeys})
 	}
 }
 
@@ -992,6 +1052,11 @@ func (s *Service) reloadLocked(ctx context.Context) error {
 		return err
 	}
 	index, err := buildRuntimeIndex(policies, takeoverEnabled)
+	if err != nil {
+		s.MarkUnavailable()
+		return err
+	}
+	index.disabledKeys, err = listDisabledKeys(ctx, s.store.db)
 	if err != nil {
 		s.MarkUnavailable()
 		return err
@@ -1085,6 +1150,9 @@ func (s *Service) Decide(identity AuthenticatedAPIKeyIdentity) (RequestPolicyDec
 	}
 	if index == nil || !index.healthy {
 		return RequestPolicyDecision{}, ErrUnavailable
+	}
+	if index != nil && index.disabledKeys[identity.Hash()] {
+		return RequestPolicyDecision{}, &PolicyError{Code: "api_key_disabled", Message: "API key is disabled"}
 	}
 	snapshot, found := index.items[identity.Hash()]
 	if !found {
@@ -1863,6 +1931,7 @@ func (s *Service) PolicyGeneration() uint64 {
 // SetTakeover changes the runtime enforcement boundary for new requests. An
 // in-flight request keeps its immutable decision; disabling takeover makes all
 // subsequent authenticated upstream keys use normal passthrough behavior.
+// Disabled-key settings are retained and enforced again when takeover resumes.
 func (s *Service) SetTakeover(ctx context.Context, enabled bool) error {
 	return s.setTakeover(ctx, enabled, 0, 0, false)
 }
@@ -1925,6 +1994,10 @@ func (s *Service) setTakeover(ctx context.Context, enabled bool, expectedPolicyG
 				next.healthy = current.healthy
 				next.items = current.items
 			}
+		}
+		next.disabledKeys, err = listDisabledKeys(ctx, tx)
+		if err != nil {
+			return err
 		}
 		if err = tx.Commit(); err != nil {
 			return err
@@ -2626,6 +2699,10 @@ func (s *Service) write(ctx context.Context, operation func(context.Context, *sq
 		if err != nil {
 			return err
 		}
+		next.disabledKeys, err = listDisabledKeys(ctx, tx)
+		if err != nil {
+			return err
+		}
 		if err := tx.Commit(); err != nil {
 			return err
 		}
@@ -2653,4 +2730,53 @@ func randomID(prefix string) (string, error) {
 		return "", err
 	}
 	return prefix + hex.EncodeToString(raw), nil
+}
+
+func listDisabledKeys(ctx context.Context, queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}) (map[string]bool, error) {
+	rows, err := queryer.QueryContext(ctx, `select api_key_hash from api_key_disabled_keys`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]bool)
+	for rows.Next() {
+		var hash string
+		if err := rows.Scan(&hash); err != nil {
+			return nil, err
+		}
+		result[hash] = true
+	}
+	return result, rows.Err()
+}
+
+func (s *Service) KeyDisabled(identity AuthenticatedAPIKeyIdentity) bool {
+	if s == nil {
+		return false
+	}
+	index := s.index.Load()
+	return index != nil && index.disabledKeys[identity.Hash()]
+}
+
+func (s *Service) SetKeyDisabled(ctx context.Context, identity AuthenticatedAPIKeyIdentity, disabled, expectedDisabled bool) error {
+	if !identity.Valid() {
+		return ErrUnavailable
+	}
+	_, err := s.write(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `select exists(select 1 from api_key_disabled_keys where api_key_hash = ?)`, identity.Hash()).Scan(&exists); err != nil {
+			return err
+		}
+		if exists != expectedDisabled {
+			return ErrVersionConflict
+		}
+		if disabled {
+			_, err := tx.ExecContext(ctx, `insert or ignore into api_key_disabled_keys(api_key_hash) values (?)`, identity.Hash())
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `delete from api_key_disabled_keys where api_key_hash = ?`, identity.Hash())
+		return err
+	})
+	return err
 }

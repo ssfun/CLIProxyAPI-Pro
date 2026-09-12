@@ -1592,7 +1592,7 @@ func TestPolicyBackupRestoresPendingQuotaSettlementAndBlockedState(t *testing.T)
 	if err = json.Unmarshal(payload, &document); err != nil {
 		t.Fatal(err)
 	}
-	if document.SchemaVersion != 8 || len(document.PendingQuotaSettlements) != 1 || document.PendingQuotaSettlements[0].Usage.TotalTokens != 20 {
+	if document.SchemaVersion != 9 || len(document.PendingQuotaSettlements) != 1 || document.PendingQuotaSettlements[0].Usage.TotalTokens != 20 {
 		t.Fatalf("pending backup document = %#v", document)
 	}
 	invalid := document
@@ -2255,7 +2255,7 @@ func TestPolicyBackupRoundTripAndValidation(t *testing.T) {
 	if strings.Contains(string(payload), "backup-key") || !strings.Contains(string(payload), identity.Hash()) {
 		t.Fatalf("backup secret/hash boundary = %s", payload)
 	}
-	if !strings.Contains(string(payload), `"schema_version":8`) || !strings.Contains(string(payload), `"profile_enabled":true`) || !strings.Contains(string(payload), `"takeover_enabled":true`) || !strings.Contains(string(payload), `"eventType":"policy_created"`) || !strings.Contains(string(payload), `"requests":25`) || !strings.Contains(string(payload), `"timezone":"Asia/Shanghai"`) {
+	if !strings.Contains(string(payload), `"schema_version":9`) || !strings.Contains(string(payload), `"profile_enabled":true`) || !strings.Contains(string(payload), `"takeover_enabled":true`) || !strings.Contains(string(payload), `"eventType":"policy_created"`) || !strings.Contains(string(payload), `"requests":25`) || !strings.Contains(string(payload), `"timezone":"Asia/Shanghai"`) {
 		t.Fatalf("backup schema/audit record = %s", payload)
 	}
 	if err := service.DeletePolicy(context.Background(), created.ID, created.Version, PassthroughConfirmation); err != nil {
@@ -2457,5 +2457,196 @@ func TestVisibleModelsRequireAllowedProviderAndExposeMappingAliases(t *testing.T
 	}
 	if len(visible) != 2 || visible[0] != (VisibleModel{ID: "gpt-5", EffectiveID: "gpt-5"}) || visible[1] != (VisibleModel{ID: "smart", EffectiveID: "gpt-5"}) {
 		t.Fatalf("visible models = %#v", visible)
+	}
+}
+
+func TestKeyDisabledSurvivesTakeoverMutationsReloadAndBackup(t *testing.T) {
+	ctx := context.Background()
+	service := newTestService(t)
+	identity := testIdentity(t, "disabled-key")
+	other := testIdentity(t, "other-key")
+	if err := service.SetKeyDisabled(ctx, identity, true, false); err != nil {
+		t.Fatal(err)
+	}
+	assertBlocked := func() {
+		t.Helper()
+		_, err := service.Decide(identity)
+		var policyErr *PolicyError
+		if !errors.As(err, &policyErr) || policyErr.Code != "api_key_disabled" {
+			t.Fatalf("expected disabled error, got %v", err)
+		}
+		if _, err := service.Decide(other); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertBlocked()
+	if err := service.SetKeyDisabled(ctx, identity, false, false); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale state accepted: %v", err)
+	}
+	policy, err := service.CreateOptionalProfile(ctx, identity, "Preserved policy", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertBlocked()
+	for _, enabled := range []bool{false, true, false, true} {
+		if err := service.SetTakeover(ctx, enabled); err != nil {
+			t.Fatal(err)
+		}
+		if !service.KeyDisabled(identity) {
+			t.Fatal("takeover erased disabled setting")
+		}
+		if enabled {
+			assertBlocked()
+		} else {
+			decision, err := service.Decide(identity)
+			if err != nil || decision.Mode != ModePassthrough {
+				t.Fatalf("stopped takeover did not pass through: %v", err)
+			}
+		}
+	}
+	if err := service.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertBlocked()
+	payload, err := service.ExportBackup(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SetKeyDisabled(ctx, identity, false, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Decide(identity); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ImportBackup(ctx, payload); err != nil {
+		t.Fatal(err)
+	}
+	assertBlocked()
+	if err := service.DeletePolicy(ctx, policy.ID, policy.Version, PassthroughConfirmation); err != nil {
+		t.Fatal(err)
+	}
+	assertBlocked()
+	service.MarkUnavailable()
+	if _, err := service.Decide(identity); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("unhealthy takeover must fail closed: %v", err)
+	}
+	if err := service.SetTakeover(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Decide(identity); err != nil {
+		t.Fatalf("emergency stop did not pass through: %v", err)
+	}
+}
+
+func TestDisabledKeyPersistsAcrossServiceRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pro.sqlite")
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := testIdentity(t, "restart-key")
+	if err := service.SetKeyDisabled(context.Background(), identity, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err = NewService(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	if !service.KeyDisabled(identity) {
+		t.Fatal("disabled key re-enabled after restart")
+	}
+	if _, err := service.Decide(identity); err != nil {
+		t.Fatalf("stopped takeover blocked after restart: %v", err)
+	}
+	if err := service.SetTakeover(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Decide(identity); err == nil {
+		t.Fatal("disabled key allowed after takeover resumed")
+	}
+}
+
+func TestKeyStateRestorePreviewIncludesSettingsAndEffectiveChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name                            string
+		currentKeys, targetKeys         []string
+		currentTakeover, targetTakeover bool
+		configured                      bool
+		legacySchema                    bool
+		want                            [6]int
+	}{
+		{name: "restore re-enables key without policy", currentKeys: []string{"a"}, currentTakeover: true, targetTakeover: true, configured: true, want: [6]int{1, 0, 0, 1, 0, 1}},
+		{name: "same counts different keys", currentKeys: []string{"a"}, targetKeys: []string{"b"}, currentTakeover: true, targetTakeover: true, configured: true, want: [6]int{1, 1, 1, 1, 1, 1}},
+		{name: "paused settings", currentKeys: []string{"a"}, targetKeys: []string{"b"}, configured: true, want: [6]int{1, 1, 1, 1, 0, 0}},
+		{name: "start takeover", currentKeys: []string{"a"}, targetKeys: []string{"a"}, targetTakeover: true, configured: true, want: [6]int{1, 1, 0, 0, 1, 0}},
+		{name: "stop takeover", currentKeys: []string{"a"}, targetKeys: []string{"a"}, currentTakeover: true, configured: true, want: [6]int{1, 1, 0, 0, 0, 1}},
+		{name: "orphaned keys", currentKeys: []string{"a"}, targetKeys: []string{"b"}, currentTakeover: true, targetTakeover: true, want: [6]int{1, 1, 1, 1, 0, 0}},
+		{name: "schema 8 clears disabled settings", currentKeys: []string{"a"}, currentTakeover: true, targetTakeover: true, configured: true, legacySchema: true, want: [6]int{1, 0, 0, 1, 0, 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			service := newTestService(t)
+			target := newTestService(t)
+			for _, key := range tc.currentKeys {
+				if err := service.SetKeyDisabled(ctx, testIdentity(t, key), true, false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, key := range tc.targetKeys {
+				if err := target.SetKeyDisabled(ctx, testIdentity(t, key), true, false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := service.SetTakeover(ctx, tc.currentTakeover); err != nil {
+				t.Fatal(err)
+			}
+			if err := target.SetTakeover(ctx, tc.targetTakeover); err != nil {
+				t.Fatal(err)
+			}
+			payload, err := target.ExportBackup(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.legacySchema {
+				payload = []byte(strings.Replace(string(payload), `"schema_version":9`, `"schema_version":8`, 1))
+			}
+			var configured []string
+			if tc.configured {
+				configured = []string{testIdentity(t, "a").Hash(), testIdentity(t, "b").Hash()}
+			}
+			preview, err := service.PreviewBackup(ctx, payload, configured)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := [6]int{preview.CurrentDisabledKeys, preview.TargetDisabledKeys, preview.AddedDisabledKeys, preview.RemovedDisabledKeys, preview.NewlyBlockedKeys, preview.NewlyAllowedKeys}
+			if got != tc.want {
+				t.Fatalf("preview counts=%v want %v", got, tc.want)
+			}
+			if preview.TargetPolicies != 0 || preview.ReplacePolicies != 0 {
+				t.Fatal("fixture must have no policies")
+			}
+			if err := service.ImportBackup(ctx, payload); err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{"a", "b"} {
+				_, gotErr := service.Decide(testIdentity(t, key))
+				_, wantErr := target.Decide(testIdentity(t, key))
+				if (gotErr == nil) != (wantErr == nil) {
+					t.Fatalf("restored access for %s mismatch: %v vs %v", key, gotErr, wantErr)
+				}
+			}
+		})
 	}
 }

@@ -30,6 +30,7 @@ type apiKeyReference struct {
 }
 
 type apiKeyPolicyBinding struct {
+	Disabled  bool                 `json:"disabled"`
 	MaskedKey string               `json:"maskedKey"`
 	KeyRef    string               `json:"keyRef"`
 	State     string               `json:"state"`
@@ -72,6 +73,8 @@ func (h *Handler) RegisterAPIKeyPolicyRoutes(group *gin.RouterGroup) {
 	group.GET("/api-key-policy-profile-catalog", h.GetAPIKeyPolicyProfileCatalog)
 	group.GET("/api-key-policy-quota-summaries", h.ListAPIKeyPolicyQuotaSummaries)
 	group.POST("/api-key-policy-usage-target", h.ResolveAPIKeyPolicyUsageTarget)
+	group.POST("/api-key-policy-key", h.ReadAPIKeyPolicyKey)
+	group.PUT("/api-key-policy-key-state", h.UpdateAPIKeyPolicyKeyState)
 	group.GET("/api-key-policy-capabilities", h.GetAPIKeyPolicyCapabilities)
 	group.GET("/api-key-policy-status", h.GetAPIKeyPolicyStatus)
 	group.PUT("/api-key-policy-takeover", h.UpdateAPIKeyPolicyTakeover)
@@ -115,6 +118,7 @@ func (h *Handler) GetAPIKeyPolicyCapabilities(c *gin.Context) {
 			"provider_model_linkage",
 			"optional_profile",
 			"profile_enforcement_toggle",
+			"key_lifecycle_controls",
 		},
 	})
 }
@@ -385,7 +389,7 @@ func (h *Handler) ListAPIKeyPolicyBindings(c *gin.Context) {
 			writeAPIKeyPolicyError(c, apikeypolicy.ErrUnavailable)
 			return
 		}
-		binding := apiKeyPolicyBinding{MaskedKey: maskAPIKey(key.raw), KeyRef: keyRef, State: apikeypolicy.StateUnconfigured, WeakKey: weakAPIKey(key.raw)}
+		binding := apiKeyPolicyBinding{Disabled: service.KeyDisabled(key.identity), MaskedKey: maskAPIKey(key.raw), KeyRef: keyRef, State: apikeypolicy.StateUnconfigured, WeakKey: weakAPIKey(key.raw)}
 		if policy, exists := byHash[key.identity.Hash()]; exists {
 			policy.State = apikeypolicy.StateConfigured
 			binding.State, binding.Policy = apikeypolicy.StateConfigured, &policy
@@ -828,4 +832,65 @@ func writeAPIKeyPolicyError(c *gin.Context, err error) {
 
 func writeAPIKeyPolicyHTTPError(c *gin.Context, status int, code, message string) {
 	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": message}})
+}
+
+// Full secrets are returned only on an explicit authenticated request, never in lists.
+func (h *Handler) ReadAPIKeyPolicyKey(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	var request struct {
+		KeyRef string `json:"keyRef" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeAPIKeyPolicyHTTPError(c, 400, "invalid_api_key_reference", "keyRef is required")
+		return
+	}
+	identity, generation, err := h.resolveAPIKeyReference(c, request.KeyRef)
+	if err != nil {
+		writeAPIKeyPolicyHTTPError(c, 409, "api_key_reference_stale", err.Error())
+		return
+	}
+	keys, current := h.apiKeyConfigSnapshot()
+	if current == generation {
+		for _, key := range keys {
+			candidate, err := apikeypolicy.NewAuthenticatedAPIKeyIdentity(strings.TrimSpace(key))
+			if err == nil && candidate.Hash() == identity.Hash() {
+				c.JSON(200, gin.H{"key": strings.TrimSpace(key)})
+				return
+			}
+		}
+	}
+	writeAPIKeyPolicyHTTPError(c, 409, "api_key_reference_stale", "API key configuration changed")
+}
+
+func (h *Handler) UpdateAPIKeyPolicyKeyState(c *gin.Context) {
+	var request struct {
+		KeyRef           string `json:"keyRef" binding:"required"`
+		Disabled         *bool  `json:"disabled" binding:"required"`
+		ExpectedDisabled *bool  `json:"expectedDisabled" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeAPIKeyPolicyHTTPError(c, 400, "invalid_api_key_reference", "keyRef, disabled and expectedDisabled are required")
+		return
+	}
+	service := h.apiKeyPolicyService()
+	if service == nil || !service.Healthy() {
+		writeAPIKeyPolicyError(c, apikeypolicy.ErrUnavailable)
+		return
+	}
+	identity, generation, err := h.resolveAPIKeyReference(c, request.KeyRef)
+	if err != nil {
+		writeAPIKeyPolicyHTTPError(c, 409, "api_key_reference_stale", err.Error())
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.configGeneration != generation {
+		writeAPIKeyPolicyHTTPError(c, 409, "api_key_reference_stale", "API key configuration changed")
+		return
+	}
+	if err := service.SetKeyDisabled(c.Request.Context(), identity, *request.Disabled, *request.ExpectedDisabled); err != nil {
+		writeAPIKeyPolicyError(c, err)
+		return
+	}
+	c.JSON(200, gin.H{"disabled": *request.Disabled})
 }
