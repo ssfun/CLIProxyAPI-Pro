@@ -28,6 +28,7 @@ import { ProTaskDialog, ProWorkspaceSheet } from '@/pro/shared/ProSurface';
 import { buildMonitoringUsageLocationState } from '@/pro/shared/monitoringNavigation';
 import {
   apiKeyPolicyApi,
+  parseKeyConcurrencyLimit,
   apiKeyPolicyErrorCode,
   apiKeyPolicyErrorTranslationKey,
   buildAPIKeyQuotaTimezoneOptions,
@@ -363,10 +364,13 @@ export function APIKeyPolicyPage() {
   const [workspaceTarget, setWorkspaceTarget] = useState<WorkspaceTarget | null>(null);
   const [draft, setDraft] = useState<WorkspaceDraft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [concurrencyDraft, setConcurrencyDraft] = useState<{ value: string; baseline: number } | null>(null);
   const [revealedKeys, setRevealedKeys] = useState<Record<string, string>>({});
   const [keyActionBusy, setKeyActionBusy] = useState(false);
   const keyActionBusyRef = useRef(false);
   const keyActionSessionRef = useRef(0);
+  const workspaceSessionRef = useRef(0);
+  const concurrencySupported = snapshot?.capabilities.features.includes('workspace_concurrency_limits') === true;
   const keyControlsSupported = snapshot?.capabilities.features.includes('key_lifecycle_controls') === true;
 	const [takeoverOpen, setTakeoverOpen] = useState(false);
 	const [takeoverBusy, setTakeoverBusy] = useState(false);
@@ -385,6 +389,18 @@ export function APIKeyPolicyPage() {
   const quotaRevisionRef = useRef(0);
   const quotaBusyRef = useRef(false);
   const dirty = workspaceIsDirty(workspaceTarget, draft);
+  const workspaceBinding = workspaceTarget?.kind === 'create'
+    ? snapshot?.bindings.items.find((binding) => binding.keyRef === workspaceTarget.binding.keyRef)
+    : workspaceTarget?.kind === 'policy' && !workspaceTarget.readOnly
+      ? snapshot?.bindings.items.find((binding) => binding.policy?.id === workspaceTarget.policy.id)
+      : undefined;
+  const hasConcurrencyEdits = concurrencyDraft !== null && parseKeyConcurrencyLimit(concurrencyDraft.value) !== concurrencyDraft.baseline;
+  const concurrencyValue = hasConcurrencyEdits ? concurrencyDraft.value : String(workspaceBinding?.concurrencyLimit ?? 0);
+  const concurrencyLimit = parseKeyConcurrencyLimit(concurrencyValue);
+  const concurrencyExpectedLimit = hasConcurrencyEdits ? concurrencyDraft.baseline : workspaceBinding?.concurrencyLimit ?? 0;
+  const concurrencyDirty = Boolean(workspaceBinding && concurrencySupported && concurrencyLimit !== concurrencyExpectedLimit);
+  const workspaceDirty = dirty || concurrencyDirty;
+
   const quotaSupported = Boolean(snapshot && supportsAPIKeyQuota(snapshot.capabilities));
   const quotaOverviewSupported = Boolean(snapshot && supportsAPIKeyQuotaOverview(snapshot.capabilities));
   const quotaTimezoneSupported = Boolean(snapshot && supportsAPIKeyQuotaTimezone(snapshot.capabilities));
@@ -403,7 +419,7 @@ export function APIKeyPolicyPage() {
   }, [i18n, t]);
 
   const openPolicyDeletePreview = useCallback(async (policy: APIKeyPolicy) => {
-    if (dangerBusyRef.current) return;
+    if (dangerBusyRef.current || keyActionBusyRef.current) return;
     const revision = ++dangerRevisionRef.current;
     dangerBusyRef.current = true;
     setDangerBusy(true);
@@ -471,6 +487,7 @@ export function APIKeyPolicyPage() {
     void load();
     return () => {
       keyActionSessionRef.current += 1;
+      workspaceSessionRef.current += 1;
       keyActionBusyRef.current = false;
       requestRevisionRef.current += 1;
       saveRevisionRef.current += 1;
@@ -483,7 +500,7 @@ export function APIKeyPolicyPage() {
   }, [load]);
 
   const keyAction = async (binding: APIKeyPolicyBinding, action: 'reveal' | 'copy' | 'toggle') => {
-    if (keyActionBusyRef.current || loading || connectionStatus !== 'connected') return;
+    if (keyActionBusyRef.current || savingRef.current || dangerBusyRef.current || loading || connectionStatus !== 'connected') return;
     if (action === 'reveal' && revealedKeys[binding.keyRef]) {
       setRevealedKeys((current) => { const next = { ...current }; delete next[binding.keyRef]; return next; });
       return;
@@ -510,7 +527,9 @@ export function APIKeyPolicyPage() {
     } catch (error) {
       if (session !== keyActionSessionRef.current || (action !== 'toggle' && revision !== requestRevisionRef.current)) return;
       showNotification(errorMessage(error), 'error');
-      if (apiKeyPolicyErrorCode(error) === 'api_key_reference_stale' || apiKeyPolicyErrorCode(error) === 'config_version_conflict') await load();
+      if (apiKeyPolicyErrorCode(error) === 'api_key_reference_stale' || apiKeyPolicyErrorCode(error) === 'config_version_conflict') {
+        await load();
+      }
     } finally {
       if (session === keyActionSessionRef.current) {
         keyActionBusyRef.current = false;
@@ -543,7 +562,9 @@ export function APIKeyPolicyPage() {
       quotaRevisionRef.current += 1;
       quotaBusyRef.current = false;
       setQuotaBusy(false);
+      workspaceSessionRef.current += 1;
       setWorkspaceTarget(target);
+      setConcurrencyDraft(null);
       draftRevisionRef.current += 1;
       setDraft(workspaceDraftFromTarget(
         target,
@@ -577,6 +598,7 @@ export function APIKeyPolicyPage() {
   }, [errorMessage, load, navigate, showNotification]);
 
   const closeWorkspace = useCallback(() => {
+    workspaceSessionRef.current += 1;
     saveRevisionRef.current += 1;
     draftRevisionRef.current += 1;
     quotaRevisionRef.current += 1;
@@ -589,14 +611,15 @@ export function APIKeyPolicyPage() {
     setQuotaBusy(false);
     setDeletePreview(null);
     setWorkspaceTarget(null);
+    setConcurrencyDraft(null);
     setDraft(null);
     setConflict(false);
   }, []);
 
 	const requestWorkspaceClose = useCallback(async () => {
-		if (dirty && !window.confirm(t('api_key_policy.discard_confirm'))) return;
+		if (workspaceDirty && !window.confirm(t('api_key_policy.discard_confirm'))) return;
 		closeWorkspace();
-	}, [closeWorkspace, dirty, t]);
+	}, [closeWorkspace, workspaceDirty, t]);
 
 	const toggleTakeover = useCallback(async () => {
 		if (!takeoverStatus || takeoverBusy) return;
@@ -648,16 +671,34 @@ export function APIKeyPolicyPage() {
   }, []);
 
   const reloadWorkspace = useCallback(async () => {
-    if (!workspaceTarget || workspaceTarget.kind !== 'policy' || !snapshot) return;
+    if (!workspaceTarget || !snapshot) return;
     const revision = ++saveRevisionRef.current;
     savingRef.current = true;
     setSaving(true);
     try {
-      const policy = await apiKeyPolicyApi.get(workspaceTarget.policy.id);
+      if (workspaceTarget.kind === 'create') {
+        const bindings = await apiKeyPolicyApi.bindings();
+        if (revision !== saveRevisionRef.current) return;
+        const binding = bindings.items.find((item) => item.keyRef === workspaceTarget.binding.keyRef);
+        if (!binding) { closeWorkspace(); await load(); return; }
+        setSnapshot((current) => current ? { ...current, bindings } : current);
+        setWorkspaceTarget(binding.policy
+          ? { kind: 'policy', policy: binding.policy, readOnly: false }
+          : { kind: 'create', binding });
+        setConcurrencyDraft((current) => current ? { ...current, baseline: binding.concurrencyLimit ?? 0 } : null);
+        setConflict(false);
+        return;
+      }
+      const [policy, bindings] = await Promise.all([apiKeyPolicyApi.get(workspaceTarget.policy.id), apiKeyPolicyApi.bindings()]);
       if (revision !== saveRevisionRef.current) return;
       const target = { kind: 'policy' as const, policy, readOnly: policy.state === 'orphaned' };
       setWorkspaceTarget(target);
       replacePolicyInSnapshot(policy);
+      const binding = bindings.items.find((item) => item.policy?.id === policy.id);
+      if (binding) {
+        setSnapshot((current) => current ? { ...current, bindings } : current);
+        setConcurrencyDraft((current) => current ? { ...current, baseline: binding.concurrencyLimit ?? 0 } : null);
+      }
       setConflict(false);
     } catch (error) {
       showNotification(errorMessage(error), 'error');
@@ -667,7 +708,7 @@ export function APIKeyPolicyPage() {
         setSaving(false);
       }
     }
-  }, [errorMessage, replacePolicyInSnapshot, showNotification, snapshot, workspaceTarget]);
+  }, [closeWorkspace, load, errorMessage, replacePolicyInSnapshot, showNotification, snapshot, workspaceTarget]);
 
   const validateDraft = useCallback((validateProfile: boolean): boolean => {
     if (!snapshot || !draft) return false;
@@ -701,7 +742,7 @@ export function APIKeyPolicyPage() {
   }, [draft, quotaSupported, quotaTimezoneSupported, showNotification, snapshot, t]);
 
   const saveWorkspace = useCallback(async () => {
-    if (!workspaceTarget || !draft || savingRef.current) return;
+    if (!workspaceTarget || !draft || savingRef.current || keyActionBusyRef.current || dangerBusyRef.current) return;
     const persisted = workspaceTarget.kind === 'policy'
       ? workspaceTarget.policy.profiles.find((item) => item.id === draft.profileId)
       : undefined;
@@ -712,6 +753,13 @@ export function APIKeyPolicyPage() {
       profileSignature(persisted) !== profileSignature(draft.profile)
     );
     if (!validateDraft(changedProfile)) return;
+    if (concurrencyDirty && concurrencyLimit === null) {
+      showNotification(t('api_key_policy.concurrency_invalid'), 'error');
+      return;
+    }
+    const concurrency = concurrencyDirty && concurrencyLimit !== null
+      ? { limit: concurrencyLimit, expectedLimit: concurrencyExpectedLimit } : undefined;
+    const workspaceSession = workspaceSessionRef.current;
     const persistedQuota = workspaceTarget.kind === 'policy' ? quotaInputFromPolicy(workspaceTarget.policy) : null;
     const periodChanged = Boolean(
       persistedQuota && draft.quota &&
@@ -731,6 +779,7 @@ export function APIKeyPolicyPage() {
           draft.displayName.trim(),
           draft.profileEnabled ? draft.profile : undefined,
           quotaSupported ? draft.quota : undefined,
+          concurrency,
         );
       } else {
         policy = await apiKeyPolicyApi.updateWorkspace(
@@ -743,10 +792,19 @@ export function APIKeyPolicyPage() {
           quotaSupported ? draft.quota : undefined,
           profileEnabledChanged ? draft.profileEnabled : undefined,
           profileEnabledChanged && draft.profileEnabled ? draft.profileId : undefined,
+          concurrency,
         );
       }
-      if (revision !== saveRevisionRef.current) return;
+      if (revision !== saveRevisionRef.current || workspaceSession !== workspaceSessionRef.current) return;
       replacePolicyInSnapshot(policy);
+      if (concurrency) {
+        setSnapshot((current) => current ? {
+          ...current,
+          bindings: { ...current.bindings, items: current.bindings.items.map((item) =>
+            item.keyRef === workspaceBinding?.keyRef ? { ...item, policy, state: policy.state, concurrencyLimit: concurrency.limit } : item) },
+        } : current);
+        setConcurrencyDraft(null);
+      }
       const target = { kind: 'policy' as const, policy, readOnly: false };
       setWorkspaceTarget(target);
       const priorProfileIDs = workspaceTarget.kind === 'policy'
@@ -762,7 +820,7 @@ export function APIKeyPolicyPage() {
       showNotification(t('api_key_policy.saved'), 'success');
       await Promise.all([load(), refreshQuotaAfterMutation()]);
     } catch (error) {
-      if (revision !== saveRevisionRef.current) return;
+      if (revision !== saveRevisionRef.current || workspaceSession !== workspaceSessionRef.current) return;
       if (apiKeyPolicyErrorCode(error) === 'config_version_conflict') {
         setConflict(true);
       } else if (apiKeyPolicyErrorCode(error) === 'api_key_reference_stale') {
@@ -778,7 +836,7 @@ export function APIKeyPolicyPage() {
         setSaving(false);
       }
     }
-  }, [closeWorkspace, draft, errorMessage, load, quotaSupported, refreshQuotaAfterMutation, replacePolicyInSnapshot, showNotification, t, validateDraft, workspaceTarget]);
+  }, [concurrencyDirty, concurrencyLimit, concurrencyExpectedLimit, workspaceBinding, closeWorkspace, draft, errorMessage, load, quotaSupported, refreshQuotaAfterMutation, replacePolicyInSnapshot, showNotification, t, validateDraft, workspaceTarget]);
 
   const resetQuota = useCallback(async () => {
     if (!quotaSupported || !workspaceTarget || workspaceTarget.kind !== 'policy' || quotaBusyRef.current || !workspaceTarget.policy.quota) return;
@@ -873,7 +931,7 @@ export function APIKeyPolicyPage() {
   }, [dirty, draft, errorMessage, replacePolicyInSnapshot, showNotification, t, workspaceTarget]);
 
   const runDangerAction = useCallback(async () => {
-    if (!dangerPolicy || !dangerKind || dangerBusyRef.current) return;
+    if (!dangerPolicy || !dangerKind || dangerBusyRef.current || keyActionBusyRef.current) return;
     if (
       dangerKind === 'profile' &&
       dangerPolicy.profiles.length === 1 &&
@@ -1119,6 +1177,7 @@ export function APIKeyPolicyPage() {
             {visibleItems.associated.map((binding) => {
               const policy = binding.policy;
               const activeProfile = policy?.profiles.find((profile) => profile.id === policy.activeProfileId);
+              const concurrencyOnly = !policy && takeoverActive && (binding.concurrencyLimit ?? 0) > 0;
               return (
                 <article className={styles.card} key={binding.keyRef}>
                   <div className={styles.cardTop}>
@@ -1126,7 +1185,7 @@ export function APIKeyPolicyPage() {
                       <span><IconKey size={18} /></span>
                       <div><strong>{policy?.displayName || binding.maskedKey}</strong><code className={revealedKeys[binding.keyRef] ? styles.revealedKey : undefined}>{revealedKeys[binding.keyRef] ?? binding.maskedKey}</code></div>
                     </div>
-                    <PolicyBadge state={binding.disabled ? takeoverActive ? 'key_disabled' : 'unconfigured' : binding.state}>{t(binding.disabled ? takeoverActive ? 'api_key_policy.key_disabled' : 'api_key_policy.key_disabled_pending' : `api_key_policy.state.${binding.state}`)}</PolicyBadge>
+                    <PolicyBadge state={binding.disabled ? takeoverActive ? 'key_disabled' : 'unconfigured' : concurrencyOnly ? 'configured' : binding.state}>{t(binding.disabled ? takeoverActive ? 'api_key_policy.key_disabled' : 'api_key_policy.key_disabled_pending' : concurrencyOnly ? 'api_key_policy.concurrency_limited' : `api_key_policy.state.${binding.state}`)}</PolicyBadge>
                   </div>
                   {keyControlsSupported ? <div className={styles.keyControls}>
                     <span className={binding.disabled ? takeoverActive ? styles.keyDisabled : styles.keyPending : styles.keyEnabled}>{t(binding.disabled ? takeoverActive ? 'api_key_policy.key_disabled' : 'api_key_policy.key_disabled_pending' : 'api_key_policy.key_enabled')}</span>
@@ -1134,12 +1193,17 @@ export function APIKeyPolicyPage() {
                     <Button variant="ghost" size="sm" disabled={keyActionBusy || loading} onClick={() => void keyAction(binding, 'copy')}>{t('api_key_policy.copy_key')}</Button>
                     <Button variant={binding.disabled ? 'secondary' : 'danger'} size="sm" disabled={keyActionBusy || loading} onClick={() => void keyAction(binding, 'toggle')}>{t(binding.disabled ? 'api_key_policy.enable_key' : 'api_key_policy.disable_key')}</Button>
                   </div> : null}
+                  {concurrencySupported ? <div className={styles.cardConcurrency}>
+                    <span>{t('api_key_policy.concurrency_limit')}</span>
+                    <strong>{(binding.concurrencyLimit ?? 0) > 0 ? binding.concurrencyLimit : t('api_key_policy.concurrency_unlimited')}</strong>
+                    {(binding.concurrencyLimit ?? 0) > 0 && !takeoverActive ? <small className={styles.keyPending}>{t('api_key_policy.concurrency_pending')}</small> : null}
+                  </div> : null}
                   <p className={styles.cardSummary}>
                     {binding.disabled ? t(takeoverActive ? 'api_key_policy.key_disabled_hint' : 'api_key_policy.key_disabled_pending_hint') : policy
 							? activeProfile
 							  ? t(takeoverActive ? 'api_key_policy.configured_summary' : 'api_key_policy.configured_inactive_summary', { profile: activeProfile.name, count: policy.profiles.length })
 							  : t(takeoverActive ? 'api_key_policy.configured_no_profile_summary' : 'api_key_policy.configured_no_profile_inactive_summary')
-                      : t('api_key_policy.passthrough_summary')}
+                      : t((binding.concurrencyLimit ?? 0) > 0 && takeoverActive ? 'api_key_policy.concurrency_only_summary' : 'api_key_policy.passthrough_summary')}
                   </p>
                   {binding.weakKey ? <div className={styles.weakKey}><IconAlertTriangle size={15} /> {t('api_key_policy.weak_key')}</div> : null}
                   {policy && quotaOverviewSupported ? (() => {
@@ -1249,8 +1313,8 @@ export function APIKeyPolicyPage() {
       <ProWorkspaceSheet
         open={Boolean(workspaceTarget && draft)}
 		onClose={closeWorkspace}
-        confirmClose={() => !dirty || window.confirm(t('api_key_policy.discard_confirm'))}
-        closeDisabled={saving}
+        confirmClose={() => !workspaceDirty || window.confirm(t('api_key_policy.discard_confirm'))}
+        closeDisabled={saving || keyActionBusy}
 		size="lg"
 		className={styles.policySheet}
         eyebrow={workspaceTarget?.kind === 'create' ? t('api_key_policy.create_eyebrow') : t('api_key_policy.workspace_eyebrow')}
@@ -1258,12 +1322,12 @@ export function APIKeyPolicyPage() {
         description={readOnly ? t('api_key_policy.orphaned_read_only') : t('api_key_policy.workspace_description')}
 		footer={
 			<div className={styles.sheetFooter}>
-				<span>{dirty ? t('config_management.status_dirty_short') : t('api_key_policy.workspace_saved')}</span>
+				<span>{workspaceDirty ? t('config_management.status_dirty_short') : t('api_key_policy.workspace_saved')}</span>
 				<div>
-					<Button variant="secondary" onClick={() => void requestWorkspaceClose()} disabled={saving}>
+					<Button variant="secondary" onClick={() => void requestWorkspaceClose()} disabled={saving || keyActionBusy}>
 						{readOnly ? t('common.close') : t('common.cancel')}
 					</Button>
-					{!readOnly ? <Button onClick={() => void saveWorkspace()} loading={saving} disabled={!dirty || saving}>{t('common.save')}</Button> : null}
+					{!readOnly ? <Button onClick={() => void saveWorkspace()} loading={saving} disabled={!workspaceDirty || saving || keyActionBusy}>{t('common.save')}</Button> : null}
 				</div>
 			</div>
 		}
@@ -1284,6 +1348,25 @@ export function APIKeyPolicyPage() {
               disabled={readOnly || saving}
               hint={t('api_key_policy.display_name_hint')}
             />
+
+            {concurrencySupported && workspaceBinding && !readOnly ? <section className={styles.quotaSection}>
+              <div className={styles.quotaHeader}>
+                <div><h3>{t('api_key_policy.concurrency_limit')}</h3><p>{t('api_key_policy.concurrency_workspace_hint')}</p></div>
+                <label className={styles.quotaToggle}>
+                  <input type="checkbox" checked={concurrencyValue !== '0'} disabled={saving}
+                    onChange={(event) => setConcurrencyDraft({ value: event.target.checked ? '1' : '0', baseline: concurrencyExpectedLimit })} />
+                  <span>{t('api_key_policy.concurrency_enabled')}</span>
+                </label>
+              </div>
+              {concurrencyValue !== '0' ? <div className={styles.quotaGrid}>
+                <Input label={t('api_key_policy.concurrency_limit')} type="number" min={1} max={1_000_000} step={1}
+                  value={concurrencyValue} disabled={saving}
+                  error={concurrencyLimit === null ? t('api_key_policy.concurrency_invalid') : undefined}
+                  onChange={(event) => setConcurrencyDraft({ value: event.target.value === '0' ? '' : event.target.value, baseline: concurrencyExpectedLimit })} />
+              </div> : null}
+              <p className={styles.quotaPeriodHint}>{t('api_key_policy.concurrency_hint')}</p>
+              {concurrencyValue !== '0' && !takeoverActive ? <p className={styles.keyPending}>{t('api_key_policy.concurrency_pending')}</p> : null}
+            </section> : null}
 
             {quotaSupported ? <section className={styles.quotaSection}>
               <div className={styles.quotaHeader}>
@@ -1525,7 +1608,7 @@ export function APIKeyPolicyPage() {
             {currentPolicy ? (
               <div className={styles.workspaceFooterActions}>
                 {usageTargetSupported ? <Button variant="ghost" size="sm" disabled={!currentBinding || !selectedProfile} onClick={() => { if (currentBinding && selectedProfile) void openUsage(currentBinding, selectedProfile); }}>{t('api_key_policy.view_profile_usage')}</Button> : null}
-                {!readOnly ? <Button variant="danger" size="sm" onClick={() => void openPolicyDeletePreview(currentPolicy)} disabled={saving || dangerBusy}><IconAlertTriangle size={14} /> {t('api_key_policy.delete_policy')}</Button> : null}
+                {!readOnly ? <Button variant="danger" size="sm" onClick={() => void openPolicyDeletePreview(currentPolicy)} disabled={saving || dangerBusy || keyActionBusy}><IconAlertTriangle size={14} /> {t('api_key_policy.delete_policy')}</Button> : null}
               </div>
             ) : null}
           </div>
@@ -1547,7 +1630,8 @@ export function APIKeyPolicyPage() {
 						{takeoverScopeReady ? (
 							<>
 								<li>{t('api_key_policy.takeover_configured_count', { count: snapshot?.bindings.items.filter((binding) => binding.policy && !binding.disabled).length ?? 0 })}</li>
-								<li>{t('api_key_policy.takeover_passthrough_count', { count: snapshot?.bindings.items.filter((binding) => !binding.policy && !binding.disabled).length ?? 0 })}</li>
+								<li>{t('api_key_policy.takeover_passthrough_count', { count: snapshot?.bindings.items.filter((binding) => !binding.policy && !binding.disabled && !(binding.concurrencyLimit ?? 0)).length ?? 0 })}</li>
+                {concurrencySupported ? <li>{t('api_key_policy.takeover_concurrency_count', { count: snapshot?.bindings.items.filter((binding) => !binding.disabled && (binding.concurrencyLimit ?? 0) > 0).length ?? 0 })}</li> : null}
                 <li>{t('api_key_policy.takeover_disabled_count', { count: snapshot?.bindings.items.filter((binding) => binding.disabled).length ?? 0 })}</li>
 							</>
 						) : <li>{t('api_key_policy.takeover_scope_unavailable')}</li>}

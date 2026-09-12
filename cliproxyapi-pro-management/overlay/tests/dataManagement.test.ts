@@ -122,3 +122,9 @@ describe('disabled-key restore confirmation', () => {
     expect(hasKeyStateRestoreChanges(undefined)).toBe(false);
   });
 });
+
+test('restore confirmation includes saved and effective concurrency changes', () => {
+  expect(hasKeyStateRestoreChanges({ changedConcurrencyKeys: 1 } as PolicyBackupPreview)).toBe(true);
+  expect(hasKeyStateRestoreChanges({ effectiveConcurrencyChanges: 1 } as PolicyBackupPreview)).toBe(true);
+  expect(hasKeyStateRestoreChanges({ currentConcurrencyKeys: 1, targetConcurrencyKeys: 1, changedConcurrencyKeys: 0, effectiveConcurrencyChanges: 0 } as PolicyBackupPreview)).toBe(false);
+});

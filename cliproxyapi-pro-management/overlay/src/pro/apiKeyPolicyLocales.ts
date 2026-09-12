@@ -2,6 +2,19 @@ const en = {
   nav: { api_key_policy: 'API Key Policies' },
   nav_meta: { api_key_policy: 'Server-side API Key profiles and access policy' },
   api_key_policy: {
+    concurrency_unlimited: "Unlimited",
+    concurrency_workspace_hint: "Applies to this key across all Profiles. Saved together with the workspace.",
+    concurrency_enabled: "Enable concurrency limit",
+
+    concurrency_limited: "Concurrency limited",
+    takeover_concurrency_count: "{{count}} enabled key(s) will apply their saved concurrency limit.",
+    concurrency_only_summary: "No Profile restrictions. The saved concurrency limit applies to this key.",
+
+    concurrency_limit: "Concurrent request limit",
+    concurrency_hint: "Turn off for unlimited concurrency. Excess requests return 429. Streams and WebSocket connections hold a slot until they end. Limits apply per server instance while takeover is on.",
+    concurrency_invalid: "Enter an integer from 0 to 1,000,000.",
+    concurrency_pending: "Limit saved · takeover off",
+
     takeover_disabled_count: "{{count}} key(s) will be blocked while takeover is on.",
     key_disabled_pending_hint: "The disabled setting is saved but not enforced. Upstream authentication applies until takeover resumes.",
     key_disabled_pending: "Disable configured · takeover off",
@@ -19,7 +32,7 @@ const en = {
     key_disabled_hint: "New requests using this key are blocked while policy takeover is on.",
 
     title: 'API Key Policies',
-    subtitle: "Manage key access, profiles and quotas for existing upstream API keys.",
+    subtitle: "Manage key access, concurrency limits, profiles and quotas for existing upstream API keys.",
     manage_upstream_keys: 'Manage upstream keys',
 		overview: 'Key policy overview',
 		runtime: 'Runtime',
@@ -32,8 +45,8 @@ const en = {
 		takeover_stopped: 'Key policy takeover stopped',
 		start_takeover_title: 'Start key policy takeover?',
 		stop_takeover_title: 'Stop key policy takeover?',
-		start_takeover_body: "Saved disabled-key settings, Profile restrictions and quotas will apply to new requests. Enabled keys without a policy keep upstream passthrough.",
-		stop_takeover_body: "New requests stop applying disabled-key settings, Profile restrictions and quotas, and return to upstream authentication. All settings are retained for the next takeover.",
+		start_takeover_body: "Saved disabled-key settings, concurrency limits, Profile restrictions and quotas will apply to new requests. Keys without saved restrictions keep upstream passthrough.",
+		stop_takeover_body: "New requests stop applying disabled-key settings, concurrency limits, Profile restrictions and quotas, and return to upstream authentication. All settings are retained for the next takeover.",
 		takeover_configured_count: '{{count}} configured key(s) will apply their saved policy while takeover is on.',
 		takeover_passthrough_count: '{{count}} unconfigured key(s) will continue to pass through.',
 		takeover_scope_unavailable: "The current policy scope is unavailable. Stopping takeover still restores normal passthrough for all new requests.",
@@ -214,6 +227,19 @@ const zhCN = {
 	nav: { api_key_policy: '密钥策略' },
   nav_meta: { api_key_policy: '服务端 API Key Profile 与访问策略' },
   api_key_policy: {
+    concurrency_unlimited: "不限",
+    concurrency_workspace_hint: "适用于此密钥的所有 Profile，与工作区配置一起保存。",
+    concurrency_enabled: "启用并发限制",
+
+    concurrency_limited: "并发受限",
+    takeover_concurrency_count: "{{count}} 个未禁用密钥将执行已保存的并发上限。",
+    concurrency_only_summary: "未配置 Profile 限制；此密钥执行已保存的并发上限。",
+
+    concurrency_limit: "并发请求上限",
+    concurrency_hint: "关闭限制表示不限，超限请求返回 429。流式请求和 WebSocket 连接结束后释放名额。仅在接管时生效，按服务实例独立计数。",
+    concurrency_invalid: "请输入 0～1,000,000 之间的整数。",
+    concurrency_pending: "已设置并发上限，尚未接管",
+
     takeover_disabled_count: "接管期间，{{count}} 个密钥将被禁用。",
     key_disabled_pending_hint: "禁用设置已保留，当前不生效；密钥遵循上游鉴权，再次开始接管后执行禁用。",
     key_disabled_pending: "已设置禁用，尚未接管",
@@ -231,7 +257,7 @@ const zhCN = {
     key_disabled_hint: "策略接管期间，此密钥的新请求将被拒绝。",
 
 		title: '密钥策略',
-    subtitle: "管理现有上游 API Key 的启用状态、Profile 和配额。",
+    subtitle: "管理现有上游 API Key 的启用状态、并发上限、Profile 和配额。",
     manage_upstream_keys: '管理上游 Key',
 		overview: '密钥策略概览',
 		runtime: '运行状态',
@@ -244,8 +270,8 @@ const zhCN = {
 		takeover_stopped: '密钥策略已停止接管',
 		start_takeover_title: '开始接管密钥策略？',
 		stop_takeover_title: '停止接管密钥策略？',
-		start_takeover_body: "开始后，新请求将执行已保存的密钥禁用设置、Profile 限制和配额；未禁用且未配置策略的密钥继续上游透传。",
-		stop_takeover_body: "停止后，新请求不再执行密钥禁用设置、Profile 限制和配额，恢复上游鉴权行为；所有设置保留，再次接管时生效。",
+		start_takeover_body: "开始后，新请求将执行已保存的密钥禁用设置、并发上限、Profile 限制和配额；未设置限制的密钥继续上游透传。",
+		stop_takeover_body: "停止后，新请求不再执行密钥禁用设置、并发上限、Profile 限制和配额，恢复上游鉴权行为；所有设置保留，再次接管时生效。",
 		takeover_configured_count: '接管期间，{{count}} 个已配置密钥会执行其已保存策略。',
 		takeover_passthrough_count: '{{count}} 个未配置密钥会继续完整透传。',
 		takeover_scope_unavailable: "当前策略范围不可用；停止接管后，所有新请求仍会恢复上游完整透传。",
@@ -426,6 +452,19 @@ const ru = {
   nav: { api_key_policy: 'Политики API-ключей' },
   nav_meta: { api_key_policy: 'Серверные профили и политики доступа для API-ключей' },
   api_key_policy: {
+    concurrency_unlimited: "Без ограничений",
+    concurrency_workspace_hint: "Применяется ко всем профилям ключа. Сохраняется вместе с рабочей областью.",
+    concurrency_enabled: "Включить лимит параллелизма",
+
+    concurrency_limited: "Лимит одновременных запросов",
+    takeover_concurrency_count: "Для {{count}} включённых ключей будет действовать сохранённый лимит одновременных запросов.",
+    concurrency_only_summary: "Без ограничений профиля. Действует сохранённый лимит одновременных запросов.",
+
+    concurrency_limit: "Лимит одновременных запросов",
+    concurrency_hint: "Отключите лимит для неограниченного параллелизма. При превышении возвращается 429. Потоки и WebSocket занимают слот до завершения. Лимит действует на экземпляр сервера при включённом управлении.",
+    concurrency_invalid: "Введите целое число от 0 до 1 000 000.",
+    concurrency_pending: "Лимит сохранён · управление выключено",
+
     takeover_disabled_count: "При включённом управлении будет заблокировано ключей: {{count}}.",
     key_disabled_pending_hint: "Настройка отключения сохранена, но не применяется. До возобновления управления действует исходная проверка доступа.",
     key_disabled_pending: "Отключение сохранено · управление выключено",
@@ -456,8 +495,8 @@ const ru = {
 		takeover_stopped: 'Управление политиками ключей выключено',
 		start_takeover_title: 'Включить управление политиками ключей?',
 		stop_takeover_title: 'Выключить управление политиками ключей?',
-		start_takeover_body: "К новым запросам будут применяться сохранённые отключения ключей, профили и квоты. Включённые ключи без политики сохранят исходную обработку.",
-		stop_takeover_body: "Новые запросы перестанут применять отключения ключей, профили и квоты. Все настройки сохранятся до возобновления управления.",
+		start_takeover_body: "К новым запросам будут применяться сохранённые отключения ключей, лимиты одновременных запросов, профили и квоты. Ключи без сохранённых ограничений сохранят исходную обработку.",
+		stop_takeover_body: "Новые запросы перестанут применять отключения ключей, лимиты одновременных запросов, профили и квоты. Все настройки сохранятся до возобновления управления.",
 		takeover_configured_count: 'При включённом управлении сохранённую политику применят настроенные ключи: {{count}}.',
 		takeover_passthrough_count: 'Ключи без политики продолжат сквозную обработку: {{count}}.',
 		takeover_scope_unavailable: "Текущий охват политик недоступен. Выключение управления всё равно восстановит обычную сквозную обработку для всех новых запросов.",
@@ -638,6 +677,19 @@ const zhTW = {
 	nav: { api_key_policy: '密鑰策略' },
   nav_meta: { api_key_policy: '伺服器端 API Key Profile 與存取策略' },
   api_key_policy: {
+    concurrency_unlimited: "不限",
+    concurrency_workspace_hint: "適用於此金鑰的所有 Profile，與工作區設定一起儲存。",
+    concurrency_enabled: "啟用並行限制",
+
+    concurrency_limited: "並行受限",
+    takeover_concurrency_count: "{{count}} 個未停用金鑰將執行已儲存的並行上限。",
+    concurrency_only_summary: "未設定 Profile 限制；此金鑰執行已儲存的並行上限。",
+
+    concurrency_limit: "並行請求上限",
+    concurrency_hint: "关闭限制表示不限，超限請求回傳 429。串流請求與 WebSocket 連線結束後釋放名額。僅在接管時生效，按服務執行個體獨立計數。",
+    concurrency_invalid: "請輸入 0～1,000,000 之間的整數。",
+    concurrency_pending: "已設定並行上限，尚未接管",
+
     takeover_disabled_count: "接管期間，{{count}} 個金鑰將被停用。",
     key_disabled_pending_hint: "停用設定已保留，目前不生效；金鑰遵循上游驗證，再次開始接管後執行停用。",
     key_disabled_pending: "已設定停用，尚未接管",
@@ -668,8 +720,8 @@ const zhTW = {
 		takeover_stopped: '密鑰策略已停止接管',
 		start_takeover_title: '開始接管密鑰策略？',
 		stop_takeover_title: '停止接管密鑰策略？',
-		start_takeover_body: "開始後，新請求將執行已儲存的金鑰停用設定、Profile 限制與配額；未停用且未設定策略的金鑰繼續上游透傳。",
-		stop_takeover_body: "停止後，新請求不再執行金鑰停用設定、Profile 限制與配額，恢復上游驗證行為；所有設定保留，再次接管時生效。",
+		start_takeover_body: "開始後，新請求將執行已儲存的金鑰停用設定、並行上限、Profile 限制與配額；未設定限制的金鑰繼續上游透傳。",
+		stop_takeover_body: "停止後，新請求不再執行金鑰停用設定、並行上限、Profile 限制與配額，恢復上游驗證行為；所有設定保留，再次接管時生效。",
 		takeover_configured_count: '接管期間，{{count}} 個已設定密鑰會執行其已儲存策略。',
 		takeover_passthrough_count: '{{count}} 個未設定密鑰會繼續完整透傳。',
 		takeover_scope_unavailable: "目前策略範圍無法使用；停止接管後，所有新請求仍會恢復上游完整透傳。",

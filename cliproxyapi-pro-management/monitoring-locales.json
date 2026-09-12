@@ -38,6 +38,7 @@
       "order_error": "The start time must not be later than the end time."
     },
     "data_management": {
+      "restore_concurrency_limits": "Keys with concurrency limits: {{current}} → {{target}}. Saved limits changed for {{changed}} key(s); effective limits changed for {{effective}} key(s). In-flight requests are retained.",
       "restore_confirm_key_states": "Restore and apply key states",
       "restore_disabled_key_settings": "Saved disabled keys: {{current}} → {{target}}; {{added}} added, {{removed}} removed.",
       "restore_disabled_key_effects": "For currently configured keys, {{blocked}} gain and {{allowed}} lose the disabled-key block, accounting for takeover changes. Other policy restrictions may still apply.",
@@ -1601,6 +1602,7 @@
       "order_error": "Время начала не может быть позже времени окончания."
     },
     "data_management": {
+      "restore_concurrency_limits": "Ключи с лимитами: {{current}} → {{target}}. Настройки изменены для {{changed}} ключей; действующие лимиты — для {{effective}}. Активные запросы сохраняются.",
       "restore_confirm_key_states": "Восстановить и применить состояния ключей",
       "restore_disabled_key_settings": "Отключённые ключи: {{current}} → {{target}}; добавлено {{added}}, удалено {{removed}}.",
       "restore_disabled_key_effects": "С учётом управления политиками: {{blocked}} настроенных ключей будут заблокированы, {{allowed}} — разблокированы. Другие ограничения политик могут сохраняться.",
@@ -2831,6 +2833,7 @@
       "order_error": "开始时间不能晚于结束时间。"
     },
     "data_management": {
+      "restore_concurrency_limits": "设置并发上限的密钥：{{current}} → {{target}}；{{changed}} 个密钥的保存设置变化，{{effective}} 个密钥的实际并发限制变化。在途请求保留。",
       "restore_confirm_key_states": "确认恢复并应用密钥状态",
       "restore_disabled_key_settings": "保存的禁用密钥：{{current}} → {{target}}；新增 {{added}} 项，解除 {{removed}} 项。",
       "restore_disabled_key_effects": "按当前上游密钥和接管开关计算：{{blocked}} 个新增禁用拦截，{{allowed}} 个解除禁用拦截；其他策略限制仍可能生效。",
@@ -4533,6 +4536,7 @@
       "order_error": "開始時間不能晚於結束時間。"
     },
     "data_management": {
+      "restore_concurrency_limits": "設定並行上限的金鑰：{{current}} → {{target}}；{{changed}} 個金鑰的儲存設定變更，{{effective}} 個金鑰的實際並行限制變更。保留進行中的請求。",
       "restore_confirm_key_states": "確認還原並套用金鑰狀態",
       "restore_disabled_key_settings": "儲存的停用金鑰：{{current}} → {{target}}；新增 {{added}} 項，解除 {{removed}} 項。",
       "restore_disabled_key_effects": "依目前上游金鑰與接管開關計算：{{blocked}} 個新增停用攔截，{{allowed}} 個解除停用攔截；其他策略限制仍可能生效。",

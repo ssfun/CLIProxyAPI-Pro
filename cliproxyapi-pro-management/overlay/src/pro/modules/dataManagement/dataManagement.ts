@@ -77,6 +77,10 @@ export interface DataRestoreDomainPreview {
 }
 
 export interface PolicyBackupPreview {
+  currentConcurrencyKeys?: number;
+  targetConcurrencyKeys?: number;
+  changedConcurrencyKeys?: number;
+  effectiveConcurrencyChanges?: number;
   currentDisabledKeys?: number;
   targetDisabledKeys?: number;
   addedDisabledKeys?: number;
@@ -236,4 +240,4 @@ export const dataManagementApi = {
 // Older Core builds omit these counts; do not fabricate a state change.
 export const hasKeyStateRestoreChanges = (preview?: PolicyBackupPreview): boolean =>
   Boolean(preview && [preview.addedDisabledKeys, preview.removedDisabledKeys,
-    preview.newlyBlockedKeys, preview.newlyAllowedKeys].some((count) => (count ?? 0) > 0));
+    preview.newlyBlockedKeys, preview.newlyAllowedKeys, preview.changedConcurrencyKeys, preview.effectiveConcurrencyChanges].some((count) => (count ?? 0) > 0));

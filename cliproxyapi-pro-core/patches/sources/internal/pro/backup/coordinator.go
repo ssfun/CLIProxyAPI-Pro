@@ -29,12 +29,16 @@ type ExportFunc func(context.Context) ([]byte, error)
 // legacy backup) and the staged target's association with the current upstream
 // API-key configuration. It never contains a key or fingerprint.
 type PolicyBackupPreview struct {
-	CurrentDisabledKeys int `json:"currentDisabledKeys"`
-	TargetDisabledKeys  int `json:"targetDisabledKeys"`
-	AddedDisabledKeys   int `json:"addedDisabledKeys"`
-	RemovedDisabledKeys int `json:"removedDisabledKeys"`
-	NewlyBlockedKeys    int `json:"newlyBlockedKeys"`
-	NewlyAllowedKeys    int `json:"newlyAllowedKeys"`
+	CurrentConcurrencyKeys      int `json:"currentConcurrencyKeys"`
+	TargetConcurrencyKeys       int `json:"targetConcurrencyKeys"`
+	ChangedConcurrencyKeys      int `json:"changedConcurrencyKeys"`
+	EffectiveConcurrencyChanges int `json:"effectiveConcurrencyChanges"`
+	CurrentDisabledKeys         int `json:"currentDisabledKeys"`
+	TargetDisabledKeys          int `json:"targetDisabledKeys"`
+	AddedDisabledKeys           int `json:"addedDisabledKeys"`
+	RemovedDisabledKeys         int `json:"removedDisabledKeys"`
+	NewlyBlockedKeys            int `json:"newlyBlockedKeys"`
+	NewlyAllowedKeys            int `json:"newlyAllowedKeys"`
 
 	HasPolicies            bool `json:"hasPolicies"`
 	ReplacePolicies        int  `json:"replacePolicies"`

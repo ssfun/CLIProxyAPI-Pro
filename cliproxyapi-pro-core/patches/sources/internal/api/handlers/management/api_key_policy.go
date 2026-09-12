@@ -30,12 +30,13 @@ type apiKeyReference struct {
 }
 
 type apiKeyPolicyBinding struct {
-	Disabled  bool                 `json:"disabled"`
-	MaskedKey string               `json:"maskedKey"`
-	KeyRef    string               `json:"keyRef"`
-	State     string               `json:"state"`
-	Policy    *apikeypolicy.Policy `json:"policy,omitempty"`
-	WeakKey   bool                 `json:"weakKey"`
+	ConcurrencyLimit int                  `json:"concurrencyLimit"`
+	Disabled         bool                 `json:"disabled"`
+	MaskedKey        string               `json:"maskedKey"`
+	KeyRef           string               `json:"keyRef"`
+	State            string               `json:"state"`
+	Policy           *apikeypolicy.Policy `json:"policy,omitempty"`
+	WeakKey          bool                 `json:"weakKey"`
 }
 
 type apiKeyPolicyCursor struct {
@@ -75,6 +76,7 @@ func (h *Handler) RegisterAPIKeyPolicyRoutes(group *gin.RouterGroup) {
 	group.POST("/api-key-policy-usage-target", h.ResolveAPIKeyPolicyUsageTarget)
 	group.POST("/api-key-policy-key", h.ReadAPIKeyPolicyKey)
 	group.PUT("/api-key-policy-key-state", h.UpdateAPIKeyPolicyKeyState)
+	group.PUT("/api-key-policy-key-concurrency", h.UpdateAPIKeyPolicyKeyConcurrency)
 	group.GET("/api-key-policy-capabilities", h.GetAPIKeyPolicyCapabilities)
 	group.GET("/api-key-policy-status", h.GetAPIKeyPolicyStatus)
 	group.PUT("/api-key-policy-takeover", h.UpdateAPIKeyPolicyTakeover)
@@ -119,6 +121,8 @@ func (h *Handler) GetAPIKeyPolicyCapabilities(c *gin.Context) {
 			"optional_profile",
 			"profile_enforcement_toggle",
 			"key_lifecycle_controls",
+			"key_concurrency_limits",
+			"workspace_concurrency_limits",
 		},
 	})
 }
@@ -389,7 +393,7 @@ func (h *Handler) ListAPIKeyPolicyBindings(c *gin.Context) {
 			writeAPIKeyPolicyError(c, apikeypolicy.ErrUnavailable)
 			return
 		}
-		binding := apiKeyPolicyBinding{Disabled: service.KeyDisabled(key.identity), MaskedKey: maskAPIKey(key.raw), KeyRef: keyRef, State: apikeypolicy.StateUnconfigured, WeakKey: weakAPIKey(key.raw)}
+		binding := apiKeyPolicyBinding{ConcurrencyLimit: service.KeyConcurrencyLimit(key.identity), Disabled: service.KeyDisabled(key.identity), MaskedKey: maskAPIKey(key.raw), KeyRef: keyRef, State: apikeypolicy.StateUnconfigured, WeakKey: weakAPIKey(key.raw)}
 		if policy, exists := byHash[key.identity.Hash()]; exists {
 			policy.State = apikeypolicy.StateConfigured
 			binding.State, binding.Policy = apikeypolicy.StateConfigured, &policy
@@ -458,11 +462,12 @@ func (h *Handler) GetAPIKeyPolicyProfileCatalog(c *gin.Context) {
 }
 
 type createAPIKeyPolicyRequest struct {
-	KeyRef         string                     `json:"keyRef" binding:"required"`
-	DisplayName    string                     `json:"displayName"`
-	InitialProfile *apikeypolicy.ProfileInput `json:"initialProfile"`
-	Quota          *apikeypolicy.QuotaInput   `json:"quota"`
-	ClientFeatures []string                   `json:"clientFeatures"`
+	Concurrency    *apikeypolicy.ConcurrencyUpdate `json:"concurrency"`
+	KeyRef         string                          `json:"keyRef" binding:"required"`
+	DisplayName    string                          `json:"displayName"`
+	InitialProfile *apikeypolicy.ProfileInput      `json:"initialProfile"`
+	Quota          *apikeypolicy.QuotaInput        `json:"quota"`
+	ClientFeatures []string                        `json:"clientFeatures"`
 }
 
 func apiKeyPolicyWriteContext(c *gin.Context, clientFeatures []string) context.Context {
@@ -505,7 +510,7 @@ func (h *Handler) CreateAPIKeyPolicy(c *gin.Context) {
 		writeAPIKeyPolicyHTTPError(c, http.StatusNotFound, "upstream_api_key_not_found", "upstream API key no longer exists")
 		return
 	}
-	policy, err := service.CreateOptionalProfile(apiKeyPolicyWriteContext(c, request.ClientFeatures), identity, request.DisplayName, request.InitialProfile, request.Quota)
+	policy, err := service.CreateWorkspace(apiKeyPolicyWriteContext(c, request.ClientFeatures), identity, request.DisplayName, request.InitialProfile, request.Quota, request.Concurrency)
 	if err != nil {
 		writeAPIKeyPolicyError(c, err)
 		return
@@ -565,16 +570,17 @@ func (h *Handler) UpdateAPIKeyPolicy(c *gin.Context) {
 		return
 	}
 	var request struct {
-		DisplayName     string                     `json:"displayName"`
-		Version         int64                      `json:"version" binding:"required"`
-		ProfileID       string                     `json:"profileId"`
-		Profile         *apikeypolicy.ProfileInput `json:"profile"`
-		CreateProfile   bool                       `json:"createProfile"`
-		ProfileEnabled  *bool                      `json:"profileEnabled"`
-		ActiveProfileID string                     `json:"activeProfileId"`
-		Quota           *apikeypolicy.QuotaInput   `json:"quota"`
-		QuotaPresent    bool                       `json:"-"`
-		ClientFeatures  []string                   `json:"clientFeatures"`
+		Concurrency     *apikeypolicy.ConcurrencyUpdate `json:"concurrency"`
+		DisplayName     string                          `json:"displayName"`
+		Version         int64                           `json:"version" binding:"required"`
+		ProfileID       string                          `json:"profileId"`
+		Profile         *apikeypolicy.ProfileInput      `json:"profile"`
+		CreateProfile   bool                            `json:"createProfile"`
+		ProfileEnabled  *bool                           `json:"profileEnabled"`
+		ActiveProfileID string                          `json:"activeProfileId"`
+		Quota           *apikeypolicy.QuotaInput        `json:"quota"`
+		QuotaPresent    bool                            `json:"-"`
+		ClientFeatures  []string                        `json:"clientFeatures"`
 	}
 	var raw map[string]json.RawMessage
 	body, errRead := io.ReadAll(c.Request.Body)
@@ -584,7 +590,7 @@ func (h *Handler) UpdateAPIKeyPolicy(c *gin.Context) {
 	}
 	_, request.QuotaPresent = raw["quota"]
 	policy, err := service.UpdateWorkspace(apiKeyPolicyWriteContext(c, request.ClientFeatures), c.Param("policyId"), request.Version, apikeypolicy.WorkspaceUpdate{
-		DisplayName: request.DisplayName, ProfileID: request.ProfileID,
+		Concurrency: request.Concurrency, DisplayName: request.DisplayName, ProfileID: request.ProfileID,
 		Profile: request.Profile, CreateProfile: request.CreateProfile,
 		ProfileEnabled: request.ProfileEnabled, ActiveProfileID: request.ActiveProfileID,
 		Quota: apikeypolicy.QuotaUpdate{Present: request.QuotaPresent, Value: request.Quota},
@@ -822,6 +828,8 @@ func writeAPIKeyPolicyError(c *gin.Context, err error) {
 		status, code = 409, "api_key_policy_orphaned"
 	case errors.Is(err, apikeypolicy.ErrNotOrphaned):
 		status, code, message = 409, "api_key_policy_not_orphaned", "policy still belongs to an upstream API key"
+	case errors.Is(err, apikeypolicy.ErrInvalidKeyConcurrency):
+		status, code = 400, "invalid_api_key_concurrency"
 	case errors.Is(err, apikeypolicy.ErrQuotaNotConfigured):
 		status, code = 409, "api_key_quota_not_configured"
 	case errors.Is(err, apikeypolicy.ErrQuotaResetConfirmation):
@@ -893,4 +901,37 @@ func (h *Handler) UpdateAPIKeyPolicyKeyState(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"disabled": *request.Disabled})
+}
+
+func (h *Handler) UpdateAPIKeyPolicyKeyConcurrency(c *gin.Context) {
+	var request struct {
+		KeyRef        string `json:"keyRef" binding:"required"`
+		Limit         *int   `json:"limit" binding:"required"`
+		ExpectedLimit *int   `json:"expectedLimit" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeAPIKeyPolicyHTTPError(c, 400, "invalid_api_key_reference", "keyRef, limit and expectedLimit are required")
+		return
+	}
+	service := h.apiKeyPolicyService()
+	if service == nil || !service.Healthy() {
+		writeAPIKeyPolicyError(c, apikeypolicy.ErrUnavailable)
+		return
+	}
+	identity, generation, err := h.resolveAPIKeyReference(c, request.KeyRef)
+	if err != nil {
+		writeAPIKeyPolicyHTTPError(c, 409, "api_key_reference_stale", err.Error())
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.configGeneration != generation {
+		writeAPIKeyPolicyHTTPError(c, 409, "api_key_reference_stale", "API key configuration changed")
+		return
+	}
+	if err := service.SetKeyConcurrencyLimit(c.Request.Context(), identity, *request.Limit, *request.ExpectedLimit); err != nil {
+		writeAPIKeyPolicyError(c, err)
+		return
+	}
+	c.JSON(200, gin.H{"concurrencyLimit": *request.Limit})
 }

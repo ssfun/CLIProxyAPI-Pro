@@ -462,3 +462,13 @@ Validate only entrypoint syntax:
 ```bash
 sh -n cliproxyapi-pro-core/entrypoint.sh
 ```
+
+### API key concurrency limits
+
+Each API key workspace can set a concurrent request limit without creating a Profile. `0` means unlimited; values up to `1,000,000` are accepted. Limits apply only while policy takeover is enabled. Excess requests return HTTP `429` with `api_key_concurrency_exceeded` before execution or request-quota consumption. A slot lasts until the HTTP handler finishes, including streaming responses and the entire WebSocket connection. Model discovery, public key queries, and management calls are excluded. WebRTC SDP bootstrap counts only its HTTP request, not the subsequent media session.
+
+Counts are local to one server instance, never backed up, and retained across limit changes, takeover changes, and backup restores. Saved limits are persisted independently of Profiles and included in policy backups and restore previews. Restoring a policy backup from before this feature clears the saved limits to unlimited.
+
+`PUT /v0/management/api-key-policy-key-concurrency` uses Management authentication and a session-bound `keyRef`: `{ "keyRef": "...", "limit": 4, "expectedLimit": 0 }`. A stale prior value returns `409`; success returns `concurrencyLimit`.
+
+The concurrency workspace uses the same enable toggle and Save action as API Key quota. Policy create/update accepts optional `concurrency: { limit, expectedLimit }` and commits it atomically with quota and Profile changes. Omitting this field preserves the saved limit. Workspace controls require the `workspace_concurrency_limits` capability.

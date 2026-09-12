@@ -761,6 +761,14 @@ export function DataManagementPage() {
                     })}</p>
                   </div>
                 ) : null}
+                {typeof restorePreview.policyBackup.currentConcurrencyKeys === 'number' ? (
+                  <p>{t('data_management.restore_concurrency_limits', {
+                    current: formatCount(restorePreview.policyBackup.currentConcurrencyKeys),
+                    target: formatCount(restorePreview.policyBackup.targetConcurrencyKeys ?? 0),
+                    changed: formatCount(restorePreview.policyBackup.changedConcurrencyKeys ?? 0),
+                    effective: formatCount(restorePreview.policyBackup.effectiveConcurrencyChanges ?? 0),
+                  })}</p>
+                ) : null}
                 {restorePreview.policyBackup.currentTakeoverEnabled !== restorePreview.policyBackup.targetTakeoverEnabled ? (
                   <small>{t('data_management.policy_takeover_change', {
                     defaultValue: 'Takeover changes from {{current}} to {{target}}.',

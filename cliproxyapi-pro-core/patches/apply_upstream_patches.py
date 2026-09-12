@@ -1558,6 +1558,11 @@ replace_once(
 \t\tcode = "api_key_quota_exceeded"
 \t\tmessage = quotaErr.Error()
 \t}
+\tif err == apikeypolicy.ErrKeyConcurrencyExceeded {
+\t\tstatus = http.StatusTooManyRequests
+\t\tcode = "api_key_concurrency_exceeded"
+\t\tmessage = err.Error()
+\t}
 \tif policyErr, ok := err.(*apikeypolicy.PolicyError); ok {
 \t\tstatus = http.StatusForbidden
 \t\tcode = policyErr.Code
@@ -1654,6 +1659,14 @@ insert_before(
 \t\tif !ok {
 \t\t\tc.Next()
 \t\t\treturn
+\t\t}
+\t\tif identity, hasIdentity := apikeypolicy.IdentityFromContext(c.Request.Context()); hasIdentity {
+\t\t\trelease, err := policy.AcquireKeyRequest(identity)
+\t\t\tif err != nil {
+\t\t\t\twriteAPIKeyPolicyMiddlewareError(c, strings.HasPrefix(path, "/v1/realtime"), err)
+\t\t\t\treturn
+\t\t\t}
+\t\t\tdefer release()
 \t\t}
 \t\tupgrade := strings.EqualFold(strings.TrimSpace(c.GetHeader("Upgrade")), "websocket")
 \t\tdeferredRealtime := c.Request.Method == http.MethodPost && (path == "/v1/realtime" || path == "/v1/realtime/calls")

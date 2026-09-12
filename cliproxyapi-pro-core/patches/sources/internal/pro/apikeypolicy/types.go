@@ -474,7 +474,13 @@ type ProfileInput struct {
 // enforcement without deleting saved Profiles. ActiveProfileID selects the
 // Profile to enforce when resuming. A nil Profile otherwise updates only the
 // display name and quota.
+type ConcurrencyUpdate struct {
+	Limit         int `json:"limit"`
+	ExpectedLimit int `json:"expectedLimit"`
+}
+
 type WorkspaceUpdate struct {
+	Concurrency     *ConcurrencyUpdate
 	DisplayName     string
 	ProfileID       string
 	Profile         *ProfileInput

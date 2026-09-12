@@ -88,6 +88,7 @@ export interface APIKeyPolicy {
 
 export interface APIKeyPolicyBinding {
   disabled?: boolean;
+  concurrencyLimit?: number;
   maskedKey: string;
   keyRef: string;
   state: APIKeyPolicyState;
@@ -319,7 +320,9 @@ export const buildAPIKeyPolicyWorkspaceUpdate = (
   quota?: APIKeyQuotaInput | null,
   profileEnabled?: boolean,
   activeProfileId?: string,
+  concurrency?: { limit: number; expectedLimit: number },
 ) => ({
+  ...(concurrency !== undefined ? { concurrency } : {}),
   displayName,
   version,
   clientFeatures: apiKeyPolicyWriteFeatures(quota, profileEnabled),
@@ -360,6 +363,9 @@ export const apiKeyPolicyApi = {
     return apiClient.post('/api-key-policy-key', { keyRef });
   },
 
+  setKeyConcurrency(keyRef: string, limit: number, expectedLimit: number): Promise<{ concurrencyLimit: number }> {
+    return apiClient.put('/api-key-policy-key-concurrency', { keyRef, limit, expectedLimit });
+  },
   setKeyDisabled(keyRef: string, disabled: boolean, expectedDisabled: boolean): Promise<{ disabled: boolean }> {
     return apiClient.put('/api-key-policy-key-state', { keyRef, disabled, expectedDisabled });
   },
@@ -453,9 +459,10 @@ export const apiKeyPolicyApi = {
     return normalizePolicy(await apiClient.get<APIKeyPolicy>(policyPath(policyId)));
   },
 
-  async create(keyRef: string, displayName: string, initialProfile?: APIKeyProfileInput, quota?: APIKeyQuotaInput | null): Promise<APIKeyPolicy> {
+  async create(keyRef: string, displayName: string, initialProfile?: APIKeyProfileInput, quota?: APIKeyQuotaInput | null, concurrency?: { limit: number; expectedLimit: number }): Promise<APIKeyPolicy> {
     return normalizePolicy(await apiClient.post<APIKeyPolicy>('/api-key-policies', {
       keyRef,
+      ...(concurrency !== undefined ? { concurrency } : {}),
       displayName,
       ...(initialProfile ? { initialProfile } : {}),
       clientFeatures: apiKeyPolicyWriteFeatures(quota),
@@ -477,6 +484,7 @@ export const apiKeyPolicyApi = {
     quota?: APIKeyQuotaInput | null,
     profileEnabled?: boolean,
     activeProfileId?: string,
+    concurrency?: { limit: number; expectedLimit: number },
   ): Promise<APIKeyPolicy> {
     return apiClient.patch<APIKeyPolicy>(policyPath(policyId), buildAPIKeyPolicyWorkspaceUpdate(
       displayName,
@@ -487,6 +495,7 @@ export const apiKeyPolicyApi = {
       quota,
       profileEnabled,
       activeProfileId,
+      concurrency,
     )).then(normalizePolicy);
   },
 
@@ -628,3 +637,11 @@ export const validateProfileInput = (
   }
   return null;
 };
+
+// Keep form parsing stricter than Number(): no fractions, exponents or empty input.
+export function parseKeyConcurrencyLimit(value: string): number | null {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const limit = Number(trimmed);
+  return Number.isSafeInteger(limit) && limit <= 1_000_000 ? limit : null;
+}

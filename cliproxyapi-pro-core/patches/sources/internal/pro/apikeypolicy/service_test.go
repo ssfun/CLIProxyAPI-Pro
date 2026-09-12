@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	probackup "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/backup"
 )
 
 func newTestService(t *testing.T) *Service {
@@ -1592,7 +1594,7 @@ func TestPolicyBackupRestoresPendingQuotaSettlementAndBlockedState(t *testing.T)
 	if err = json.Unmarshal(payload, &document); err != nil {
 		t.Fatal(err)
 	}
-	if document.SchemaVersion != 9 || len(document.PendingQuotaSettlements) != 1 || document.PendingQuotaSettlements[0].Usage.TotalTokens != 20 {
+	if document.SchemaVersion != 10 || len(document.PendingQuotaSettlements) != 1 || document.PendingQuotaSettlements[0].Usage.TotalTokens != 20 {
 		t.Fatalf("pending backup document = %#v", document)
 	}
 	invalid := document
@@ -2255,7 +2257,7 @@ func TestPolicyBackupRoundTripAndValidation(t *testing.T) {
 	if strings.Contains(string(payload), "backup-key") || !strings.Contains(string(payload), identity.Hash()) {
 		t.Fatalf("backup secret/hash boundary = %s", payload)
 	}
-	if !strings.Contains(string(payload), `"schema_version":9`) || !strings.Contains(string(payload), `"profile_enabled":true`) || !strings.Contains(string(payload), `"takeover_enabled":true`) || !strings.Contains(string(payload), `"eventType":"policy_created"`) || !strings.Contains(string(payload), `"requests":25`) || !strings.Contains(string(payload), `"timezone":"Asia/Shanghai"`) {
+	if !strings.Contains(string(payload), `"schema_version":10`) || !strings.Contains(string(payload), `"profile_enabled":true`) || !strings.Contains(string(payload), `"takeover_enabled":true`) || !strings.Contains(string(payload), `"eventType":"policy_created"`) || !strings.Contains(string(payload), `"requests":25`) || !strings.Contains(string(payload), `"timezone":"Asia/Shanghai"`) {
 		t.Fatalf("backup schema/audit record = %s", payload)
 	}
 	if err := service.DeletePolicy(context.Background(), created.ID, created.Version, PassthroughConfirmation); err != nil {
@@ -2620,7 +2622,7 @@ func TestKeyStateRestorePreviewIncludesSettingsAndEffectiveChanges(t *testing.T)
 				t.Fatal(err)
 			}
 			if tc.legacySchema {
-				payload = []byte(strings.Replace(string(payload), `"schema_version":9`, `"schema_version":8`, 1))
+				payload = []byte(strings.Replace(string(payload), `"schema_version":10`, `"schema_version":8`, 1))
 			}
 			var configured []string
 			if tc.configured {
@@ -2648,5 +2650,358 @@ func TestKeyStateRestorePreviewIncludesSettingsAndEffectiveChanges(t *testing.T)
 				}
 			}
 		})
+	}
+}
+
+func TestKeyConcurrencyAdmissionIsAtomicAndPerKey(t *testing.T) {
+	s := newTestService(t)
+	ctx := context.Background()
+	key := testIdentity(t, "concurrency-a")
+	other := testIdentity(t, "concurrency-b")
+	if err := s.SetKeyConcurrencyLimit(ctx, key, 3, 0); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	var accepted atomic.Int32
+	releases := make(chan func(), 64)
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			release, err := s.AcquireKeyRequest(key)
+			if err == nil {
+				accepted.Add(1)
+				releases <- release
+			} else if !errors.Is(err, ErrKeyConcurrencyExceeded) {
+				t.Errorf("admit: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if accepted.Load() != 3 {
+		t.Fatalf("admitted %d, want 3", accepted.Load())
+	}
+	otherRelease, err := s.AcquireKeyRequest(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherRelease()
+	close(releases)
+	for release := range releases {
+		release()
+		release()
+	} // release must be idempotent.
+	release, err := s.AcquireKeyRequest(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if len(s.activeRequests) != 0 {
+		t.Fatalf("idle counters leaked: %v", s.activeRequests)
+	}
+}
+
+func TestKeyConcurrencyChangesRetainInFlightRequests(t *testing.T) {
+	s := newTestService(t)
+	ctx := context.Background()
+	key := testIdentity(t, "concurrency-live")
+	// Traffic admitted without a limit must count when a limit is enabled.
+	first, err := s.AcquireKeyRequest(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first()
+	if err := s.SetKeyConcurrencyLimit(ctx, key, 1, 0); err != nil {
+		t.Fatal(err)
+	}
+	blocked := func() {
+		t.Helper()
+		release, err := s.AcquireKeyRequest(key)
+		if release != nil {
+			release()
+		}
+		if !errors.Is(err, ErrKeyConcurrencyExceeded) {
+			t.Fatalf("want limit error, got %v", err)
+		}
+	}
+	blocked()
+	if err := s.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	blocked()
+	backup, err := s.ExportBackup(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ImportBackup(ctx, backup); err != nil {
+		t.Fatal(err)
+	}
+	blocked()
+	if err := s.SetTakeover(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.AcquireKeyRequest(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second()
+	if s.KeyConcurrencyLimit(key) != 1 {
+		t.Fatal("paused takeover discarded saved limit")
+	}
+	if err := s.SetTakeover(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	blocked()
+	if err := s.SetKeyConcurrencyLimit(ctx, key, 3, 1); err != nil {
+		t.Fatal(err)
+	}
+	third, err := s.AcquireKeyRequest(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer third()
+	if err := s.SetKeyConcurrencyLimit(ctx, key, 1, 3); err != nil {
+		t.Fatal(err)
+	}
+	blocked()
+	first()
+	second()
+	blocked()
+	third()
+	next, err := s.AcquireKeyRequest(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next()
+	if err := s.SetKeyConcurrencyLimit(ctx, key, 0, 1); err != nil {
+		t.Fatal(err)
+	}
+	if s.KeyConcurrencyLimit(key) != 0 {
+		t.Fatal("limit not cleared")
+	}
+}
+
+func TestKeyConcurrencyPersistenceValidationAndRestorePreview(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "concurrency.sqlite")
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewService(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	key := testIdentity(t, "concurrency-backup")
+	for _, limit := range []int{-1, MaxKeyConcurrency + 1} {
+		if err := s.SetKeyConcurrencyLimit(ctx, key, limit, 0); !errors.Is(err, ErrInvalidKeyConcurrency) {
+			t.Fatalf("invalid %d: %v", limit, err)
+		}
+	}
+	if err := s.SetKeyConcurrencyLimit(ctx, key, 2, 1); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale write: %v", err)
+	}
+	if err := s.SetKeyConcurrencyLimit(ctx, key, 2, 0); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := s.ExportBackup(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err = NewService(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.KeyConcurrencyLimit(key) != 2 {
+		t.Fatal("limit lost after restart")
+	}
+	if err := s.SetKeyConcurrencyLimit(ctx, key, 5, 2); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := s.PreviewBackup(ctx, backup, []string{key.Hash()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.CurrentConcurrencyKeys != 1 || preview.TargetConcurrencyKeys != 1 || preview.ChangedConcurrencyKeys != 1 || preview.EffectiveConcurrencyChanges != 0 {
+		t.Fatalf("paused preview: %+v", preview)
+	}
+	if err := s.SetTakeover(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	preview, err = s.PreviewBackup(ctx, backup, []string{key.Hash()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.EffectiveConcurrencyChanges != 1 {
+		t.Fatalf("takeover preview: %+v", preview)
+	}
+	if err := s.ImportBackup(ctx, backup); err != nil {
+		t.Fatal(err)
+	}
+	if s.KeyConcurrencyLimit(key) != 2 {
+		t.Fatal("backup did not restore limit")
+	}
+	var document backupDocument
+	if err := json.Unmarshal(backup, &document); err != nil {
+		t.Fatal(err)
+	}
+	document.ConcurrencyLimits[key.Hash()] = -1
+	invalid, _ := json.Marshal(document)
+	if err := s.ImportBackup(ctx, invalid); err == nil {
+		t.Fatal("invalid backup accepted")
+	}
+	if s.KeyConcurrencyLimit(key) != 2 {
+		t.Fatal("failed import changed runtime")
+	}
+	document.SchemaVersion = 9 // Older backups have no concurrency settings.
+	legacy, _ := json.Marshal(document)
+	preview, err = s.PreviewBackup(ctx, legacy, []string{key.Hash()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.TargetConcurrencyKeys != 0 || preview.ChangedConcurrencyKeys != 1 {
+		t.Fatalf("legacy preview: %+v", preview)
+	}
+	if err := s.ImportBackup(ctx, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if s.KeyConcurrencyLimit(key) != 0 {
+		t.Fatal("legacy backup did not clear limit")
+	}
+}
+
+func TestKeyConcurrencyBackupRollbackAndSharedCommit(t *testing.T) {
+	s := newTestService(t)
+	ctx := context.Background()
+	key := testIdentity(t, "concurrency-transaction")
+	if err := s.SetKeyConcurrencyLimit(ctx, key, 1, 0); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := s.ExportBackup(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetKeyConcurrencyLimit(ctx, key, 3, 1); err != nil {
+		t.Fatal(err)
+	}
+	active, err := s.AcquireKeyRequest(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer active()
+	// Fail after the limit table has been replaced, proving durable rollback.
+	if _, err := s.store.db.Exec(`create trigger fail_concurrency_restore before update on api_key_policy_settings begin select raise(abort, 'restore failure'); end`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ImportBackup(ctx, payload); err == nil {
+		t.Fatal("expected failed import")
+	}
+	if _, err := s.store.db.Exec(`drop trigger fail_concurrency_restore`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s.KeyConcurrencyLimit(key) != 3 {
+		t.Fatal("rollback lost current limit")
+	}
+	// The shared restore coordinator pauses runtime before opening its transaction.
+	if err := s.PauseQuotaRuntime(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.ResumeQuotaRuntime(ctx) }()
+	for _, commit := range []bool{false, true} {
+		tx, err := s.store.db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		transactionCtx := probackup.WithTransaction(ctx, tx)
+		if err := s.ImportBackup(transactionCtx, payload); err != nil {
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+		if s.KeyConcurrencyLimit(key) != 3 {
+			_ = tx.Rollback()
+			t.Fatal("published before commit")
+		}
+		if commit {
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			probackup.RunAfterCommit(transactionCtx)
+		} else {
+			if err := tx.Rollback(); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Reload(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if s.KeyConcurrencyLimit(key) != 3 {
+				t.Fatal("shared rollback lost current limit")
+			}
+		}
+	}
+	if s.KeyConcurrencyLimit(key) != 1 {
+		t.Fatal("shared commit not published")
+	}
+	if release, err := s.AcquireKeyRequest(key); !errors.Is(err, ErrKeyConcurrencyExceeded) {
+		if release != nil {
+			release()
+		}
+		t.Fatalf("shared restore forgot active request: %v", err)
+	}
+}
+
+func TestWorkspaceConcurrencyAtomicWrites(t *testing.T) {
+	s := newTestService(t)
+	ctx := context.Background()
+	key := testIdentity(t, "workspace-concurrency")
+	requests := int64(20)
+	quota := &QuotaInput{Enabled: true, Requests: &requests, Period: QuotaPeriod{Type: QuotaPeriodAllTime}}
+	p, err := s.CreateWorkspace(ctx, key, "initial", nil, quota, &ConcurrencyUpdate{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.KeyConcurrencyLimit(key) != 2 || p.Quota == nil || len(p.Profiles) != 0 {
+		t.Fatalf("incomplete workspace: %+v", p)
+	}
+	_, err = s.UpdateWorkspace(ctx, p.ID, p.Version, WorkspaceUpdate{DisplayName: "conflicting", Concurrency: &ConcurrencyUpdate{Limit: 3, ExpectedLimit: 0}, Quota: QuotaUpdate{Present: true}})
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("expected conflict: %v", err)
+	}
+	got, _ := s.Get(ctx, p.ID)
+	if got.DisplayName != "initial" || got.Quota == nil || got.Version != p.Version || s.KeyConcurrencyLimit(key) != 2 {
+		t.Fatal("conflict partially saved")
+	}
+	// Fail after the concurrency write, proving SQL and runtime publication rollback together.
+	if _, err := s.store.db.Exec(`create trigger fail_workspace before update on api_key_policies begin select raise(abort, 'workspace failure'); end`); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.UpdateWorkspace(ctx, p.ID, p.Version, WorkspaceUpdate{DisplayName: "failed", Concurrency: &ConcurrencyUpdate{Limit: 3, ExpectedLimit: 2}, Quota: QuotaUpdate{Present: true}})
+	if err == nil || s.KeyConcurrencyLimit(key) != 2 {
+		t.Fatal("failed workspace published concurrency")
+	}
+	if _, err := s.store.db.Exec(`drop trigger fail_workspace`); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.Get(ctx, p.ID)
+	if got.Quota == nil || got.Version != p.Version {
+		t.Fatal("failed workspace saved quota")
+	}
+	p, err = s.UpdateWorkspace(ctx, p.ID, p.Version, WorkspaceUpdate{DisplayName: "legacy"})
+	if err != nil || s.KeyConcurrencyLimit(key) != 2 {
+		t.Fatalf("omitted concurrency changed: %v", err)
+	}
+	_, err = s.UpdateWorkspace(ctx, p.ID, p.Version, WorkspaceUpdate{DisplayName: "disabled", Concurrency: &ConcurrencyUpdate{Limit: 0, ExpectedLimit: 2}})
+	if err != nil || s.KeyConcurrencyLimit(key) != 0 {
+		t.Fatalf("disable failed: %v", err)
 	}
 }

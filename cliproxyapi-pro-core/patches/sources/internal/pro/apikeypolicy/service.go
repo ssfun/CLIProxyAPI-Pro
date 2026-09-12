@@ -19,11 +19,12 @@ import (
 )
 
 type runtimeIndex struct {
-	disabledKeys    map[string]bool
-	healthy         bool
-	takeoverEnabled bool
-	generation      uint64
-	items           map[string]RequestPolicySnapshot
+	concurrencyLimits map[string]int
+	disabledKeys      map[string]bool
+	healthy           bool
+	takeoverEnabled   bool
+	generation        uint64
+	items             map[string]RequestPolicySnapshot
 }
 
 type backupPolicy struct {
@@ -40,6 +41,7 @@ type backupPolicy struct {
 }
 
 type backupDocument struct {
+	ConcurrencyLimits       map[string]int            `json:"concurrency_limits,omitempty"`
 	DisabledKeys            []string                  `json:"disabled_keys,omitempty"`
 	SchemaVersion           int                       `json:"schema_version"`
 	TakeoverEnabled         bool                      `json:"takeover_enabled"`
@@ -151,13 +153,17 @@ func (s *Service) ExportBackup(ctx context.Context) ([]byte, error) {
 		hashes = append(hashes, hash)
 	}
 	sort.Strings(hashes)
-	return json.Marshal(backupDocument{SchemaVersion: 9, DisabledKeys: hashes, TakeoverEnabled: takeoverEnabled, Policies: policiesToBackup(policies), Audits: audits, QuotaAdmissions: admissions, QuotaEvents: events, PendingQuotaSettlements: pending})
+	limits, err := listConcurrencyLimits(ctx, s.store.db)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(backupDocument{SchemaVersion: 10, ConcurrencyLimits: limits, DisabledKeys: hashes, TakeoverEnabled: takeoverEnabled, Policies: policiesToBackup(policies), Audits: audits, QuotaAdmissions: admissions, QuotaEvents: events, PendingQuotaSettlements: pending})
 }
 
 func decodeBackup(payload []byte) ([]Policy, []AuditRecord, []backupQuotaAdmission, []backupQuotaEvent, []backupPendingSettlement, bool, error) {
 	var document backupDocument
 	if err := json.Unmarshal(payload, &document); err == nil && document.SchemaVersion != 0 {
-		if document.SchemaVersion < 2 || document.SchemaVersion > 9 {
+		if document.SchemaVersion < 2 || document.SchemaVersion > 10 {
 			return nil, nil, nil, nil, nil, false, fmt.Errorf("unsupported API key policy backup schema %d", document.SchemaVersion)
 		}
 		return backupToPolicies(document.Policies, document.SchemaVersion), document.Audits, document.QuotaAdmissions, document.QuotaEvents, document.PendingQuotaSettlements, document.SchemaVersion >= 3 && document.TakeoverEnabled, nil
@@ -343,11 +349,17 @@ func (s *Service) PreviewBackup(ctx context.Context, payload []byte, configuredH
 	if err != nil {
 		return probackup.PolicyBackupPreview{}, err
 	}
+	currentLimits, err := listConcurrencyLimits(ctx, s.store.db)
+	if err != nil {
+		return probackup.PolicyBackupPreview{}, err
+	}
 	configured := make(map[string]struct{}, len(configuredHashes))
 	for _, hash := range configuredHashes {
 		configured[hash] = struct{}{}
 	}
 	preview := probackup.PolicyBackupPreview{
+		CurrentConcurrencyKeys: len(currentLimits),
+		TargetConcurrencyKeys:  len(targetIndex.concurrencyLimits),
 		CurrentDisabledKeys:    len(currentDisabled),
 		TargetDisabledKeys:     len(targetIndex.disabledKeys),
 		HasPolicies:            true,
@@ -368,8 +380,30 @@ func (s *Service) PreviewBackup(ctx context.Context, payload []byte, configuredH
 			preview.RemovedDisabledKeys++
 		}
 	}
+	limitHashes := make(map[string]struct{})
+	for hash := range currentLimits {
+		limitHashes[hash] = struct{}{}
+	}
+	for hash := range targetIndex.concurrencyLimits {
+		limitHashes[hash] = struct{}{}
+	}
+	for hash := range limitHashes {
+		if currentLimits[hash] != targetIndex.concurrencyLimits[hash] {
+			preview.ChangedConcurrencyKeys++
+		}
+	}
 	// Effective changes apply only to keys still present in upstream config.
 	for hash := range configured {
+		before, after := 0, 0
+		if currentTakeoverEnabled {
+			before = currentLimits[hash]
+		}
+		if targetTakeoverEnabled {
+			after = targetIndex.concurrencyLimits[hash]
+		}
+		if before != after {
+			preview.EffectiveConcurrencyChanges++
+		}
 		wasBlocked := currentTakeoverEnabled && currentDisabled[hash]
 		willBeBlocked := targetTakeoverEnabled && targetIndex.disabledKeys[hash]
 		if willBeBlocked && !wasBlocked {
@@ -431,6 +465,14 @@ func (s *Service) ImportBackup(ctx context.Context, payload []byte) (err error) 
 	}
 	if _, err := tx.ExecContext(ctx, `delete from api_key_disabled_keys`); err != nil {
 		return err
+	}
+	if _, err := tx.ExecContext(ctx, `delete from api_key_concurrency_limits`); err != nil {
+		return err
+	}
+	for hash, limit := range next.concurrencyLimits {
+		if _, err := tx.ExecContext(ctx, `insert into api_key_concurrency_limits(api_key_hash, max_concurrent) values (?, ?)`, hash, limit); err != nil {
+			return err
+		}
 	}
 	for hash := range next.disabledKeys {
 		if _, err := tx.ExecContext(ctx, `insert into api_key_disabled_keys(api_key_hash) values (?)`, hash); err != nil {
@@ -507,6 +549,7 @@ func (s *Service) ImportBackup(ctx context.Context, payload []byte) (err error) 
 		return err
 	}
 	loadedIndex.disabledKeys = next.disabledKeys
+	loadedIndex.concurrencyLimits = next.concurrencyLimits
 	if owned {
 		if err := tx.Commit(); err != nil {
 			return err
@@ -557,6 +600,16 @@ func (s *Service) stageBackup(payload []byte) ([]Policy, []AuditRecord, []backup
 				return nil, nil, nil, nil, nil, false, nil, errors.New("invalid disabled API key hash")
 			}
 			next.disabledKeys[hash] = true
+		}
+	}
+	if document.SchemaVersion >= 10 {
+		next.concurrencyLimits = make(map[string]int)
+		for hash, limit := range document.ConcurrencyLimits {
+			decoded, err := hex.DecodeString(hash)
+			if err != nil || len(decoded) != 32 || hash != strings.ToLower(hash) || limit <= 0 || limit > MaxKeyConcurrency {
+				return nil, nil, nil, nil, nil, false, nil, errors.New("invalid API key concurrency limit")
+			}
+			next.concurrencyLimits[hash] = limit
 		}
 	}
 	return policies, audits, admissions, events, pending, takeoverEnabled, next, nil
@@ -630,6 +683,8 @@ func (s *Service) normalizeBackupPolicies(policies []Policy) ([]Policy, error) {
 }
 
 type Service struct {
+	concurrencyMu          sync.Mutex
+	activeRequests         map[string]int
 	store                  *Store
 	writeMu                sync.Mutex
 	quotaMu                sync.Mutex
@@ -1023,11 +1078,13 @@ func (s *Service) MarkUnavailable() {
 		if current != nil {
 			generation = current.generation
 		}
+		var concurrencyLimits map[string]int
 		var disabledKeys map[string]bool
 		if current != nil {
 			disabledKeys = current.disabledKeys
+			concurrencyLimits = current.concurrencyLimits
 		}
-		s.index.Store(&runtimeIndex{healthy: false, takeoverEnabled: takeoverEnabled, generation: generation, disabledKeys: disabledKeys})
+		s.index.Store(&runtimeIndex{healthy: false, takeoverEnabled: takeoverEnabled, generation: generation, disabledKeys: disabledKeys, concurrencyLimits: concurrencyLimits})
 	}
 }
 
@@ -1057,6 +1114,11 @@ func (s *Service) reloadLocked(ctx context.Context) error {
 		return err
 	}
 	index.disabledKeys, err = listDisabledKeys(ctx, s.store.db)
+	if err != nil {
+		s.MarkUnavailable()
+		return err
+	}
+	index.concurrencyLimits, err = listConcurrencyLimits(ctx, s.store.db)
 	if err != nil {
 		s.MarkUnavailable()
 		return err
@@ -1999,6 +2061,10 @@ func (s *Service) setTakeover(ctx context.Context, enabled bool, expectedPolicyG
 		if err != nil {
 			return err
 		}
+		next.concurrencyLimits, err = listConcurrencyLimits(ctx, tx)
+		if err != nil {
+			return err
+		}
 		if err = tx.Commit(); err != nil {
 			return err
 		}
@@ -2083,6 +2149,15 @@ func (s *Service) Create(ctx context.Context, identity AuthenticatedAPIKeyIdenti
 // Profile. A policy without a Profile applies only its Key-wide quota and does
 // not restrict providers, models, or mappings.
 func (s *Service) CreateOptionalProfile(ctx context.Context, identity AuthenticatedAPIKeyIdentity, displayName string, initial *ProfileInput, quota ...*QuotaInput) (Policy, error) {
+	var q *QuotaInput
+	if len(quota) > 0 {
+		q = quota[0]
+	}
+	return s.CreateWorkspace(ctx, identity, displayName, initial, q, nil)
+}
+
+func (s *Service) CreateWorkspace(ctx context.Context, identity AuthenticatedAPIKeyIdentity, displayName string, initial *ProfileInput, q *QuotaInput, concurrency *ConcurrencyUpdate) (Policy, error) {
+	quota := []*QuotaInput{q}
 	if !identity.Valid() {
 		return Policy{}, errors.New("authenticated api key identity is required")
 	}
@@ -2130,6 +2205,9 @@ func (s *Service) CreateOptionalProfile(ctx context.Context, identity Authentica
 			if err := replaceQuota(ctx, tx, policyID, initialQuota, now); err != nil {
 				return err
 			}
+		}
+		if err := replaceConcurrencyLimit(ctx, tx, identity.Hash(), concurrency); err != nil {
+			return err
 		}
 		if err := insertAudit(ctx, tx, policyID, "policy_created", map[string]any{"activeProfileId": profileID}, now); err != nil {
 			return err
@@ -2201,6 +2279,15 @@ func (s *Service) UpdateWorkspace(ctx context.Context, policyID string, version 
 	policies, err := s.write(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := requireVersion(ctx, tx, policyID, version); err != nil {
 			return err
+		}
+		if update.Concurrency != nil {
+			var hash string
+			if err := tx.QueryRowContext(ctx, `select api_key_hash from api_key_policies where id = ?`, policyID).Scan(&hash); err != nil {
+				return err
+			}
+			if err := replaceConcurrencyLimit(ctx, tx, hash, update.Concurrency); err != nil {
+				return err
+			}
 		}
 		if update.Profile != nil {
 			if update.CreateProfile {
@@ -2703,6 +2790,10 @@ func (s *Service) write(ctx context.Context, operation func(context.Context, *sq
 		if err != nil {
 			return err
 		}
+		next.concurrencyLimits, err = listConcurrencyLimits(ctx, tx)
+		if err != nil {
+			return err
+		}
 		if err := tx.Commit(); err != nil {
 			return err
 		}
@@ -2779,4 +2870,118 @@ func (s *Service) SetKeyDisabled(ctx context.Context, identity AuthenticatedAPIK
 		return err
 	})
 	return err
+}
+
+const MaxKeyConcurrency = 1000000
+
+var ErrInvalidKeyConcurrency = errors.New("API key concurrency must be an integer between 0 and 1000000")
+var ErrKeyConcurrencyExceeded = errors.New("API key concurrent request limit reached")
+
+func listConcurrencyLimits(ctx context.Context, queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}) (map[string]int, error) {
+	rows, err := queryer.QueryContext(ctx, `select api_key_hash, max_concurrent from api_key_concurrency_limits`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	limits := make(map[string]int)
+	for rows.Next() {
+		var hash string
+		var limit int
+		if err := rows.Scan(&hash, &limit); err != nil {
+			return nil, err
+		}
+		limits[hash] = limit
+	}
+	return limits, rows.Err()
+}
+
+func (s *Service) KeyConcurrencyLimit(identity AuthenticatedAPIKeyIdentity) int {
+	if s == nil {
+		return 0
+	}
+	index := s.index.Load()
+	if index == nil {
+		return 0
+	}
+	return index.concurrencyLimits[identity.Hash()]
+}
+
+func (s *Service) SetKeyConcurrencyLimit(ctx context.Context, identity AuthenticatedAPIKeyIdentity, limit, expectedLimit int) error {
+	if !identity.Valid() {
+		return ErrUnavailable
+	}
+	if limit < 0 || limit > MaxKeyConcurrency || expectedLimit < 0 || expectedLimit > MaxKeyConcurrency {
+		return ErrInvalidKeyConcurrency
+	}
+	_, err := s.write(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return replaceConcurrencyLimit(ctx, tx, identity.Hash(), &ConcurrencyUpdate{Limit: limit, ExpectedLimit: expectedLimit})
+	})
+	return err
+}
+
+func replaceConcurrencyLimit(ctx context.Context, tx *sql.Tx, hash string, update *ConcurrencyUpdate) error {
+	if update == nil {
+		return nil
+	}
+	limit, expectedLimit := update.Limit, update.ExpectedLimit
+	if limit < 0 || limit > MaxKeyConcurrency || expectedLimit < 0 || expectedLimit > MaxKeyConcurrency {
+		return ErrInvalidKeyConcurrency
+	}
+	var current int
+	err := tx.QueryRowContext(ctx, `select max_concurrent from api_key_concurrency_limits where api_key_hash = ?`, hash).Scan(&current)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if current != expectedLimit {
+		return ErrVersionConflict
+	}
+	if limit == 0 {
+		_, err = tx.ExecContext(ctx, `delete from api_key_concurrency_limits where api_key_hash = ?`, hash)
+	} else {
+		_, err = tx.ExecContext(ctx, `insert into api_key_concurrency_limits(api_key_hash, max_concurrent) values (?, ?) on conflict(api_key_hash) do update set max_concurrent = excluded.max_concurrent`, hash, limit)
+	}
+	return err
+}
+
+// AcquireKeyRequest counts one active proxy request, including its entire stream
+// or WebSocket connection. The caller must defer release until the handler exits,
+// including error/panic paths. Cancellation alone does not mean execution ended.
+// Counts are process-local, never backed up or reset by configuration changes.
+// Track unlimited/paused traffic too so enabling a limit sees existing requests.
+func (s *Service) AcquireKeyRequest(identity AuthenticatedAPIKeyIdentity) (func(), error) {
+	if s == nil || !identity.Valid() {
+		return nil, ErrUnavailable
+	}
+	s.concurrencyMu.Lock()
+	defer s.concurrencyMu.Unlock()
+	index := s.index.Load()
+	if index == nil || (index.takeoverEnabled && !index.healthy) {
+		return nil, ErrUnavailable
+	}
+	hash := identity.Hash()
+	if index.takeoverEnabled {
+		if index.disabledKeys[hash] {
+			return nil, &PolicyError{Code: "api_key_disabled", Message: "API key is disabled"}
+		}
+		if limit := index.concurrencyLimits[hash]; limit > 0 && s.activeRequests[hash] >= limit {
+			return nil, ErrKeyConcurrencyExceeded
+		}
+	}
+	if s.activeRequests == nil {
+		s.activeRequests = make(map[string]int)
+	}
+	s.activeRequests[hash]++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.concurrencyMu.Lock()
+			defer s.concurrencyMu.Unlock()
+			s.activeRequests[hash]--
+			if s.activeRequests[hash] == 0 {
+				delete(s.activeRequests, hash)
+			}
+		})
+	}, nil
 }

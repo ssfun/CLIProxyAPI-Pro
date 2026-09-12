@@ -899,3 +899,73 @@ func TestAPIKeyCardControlsProtectReferencesAndPreserveBindings(t *testing.T) {
 		t.Fatalf("stale reveal: %d", got.Code)
 	}
 }
+
+func TestAPIKeyConcurrencyManagementValidationAndReferenceFence(t *testing.T) {
+	h, router := newAPIKeyPolicyManagementHarness(t, []string{"concurrency-management-secret"})
+	listed := policyRequest(t, router, http.MethodGet, "/v0/management/api-key-policy-bindings", "session-a", nil)
+	binding := bindingResponse(t, listed).Items[0]
+	write := func(session string, limit any, expected any) *httptest.ResponseRecorder {
+		return policyRequest(t, router, http.MethodPut, "/v0/management/api-key-policy-key-concurrency", session, map[string]any{"keyRef": binding.KeyRef, "limit": limit, "expectedLimit": expected})
+	}
+	if got := write("session-b", 2, 0); got.Code != 409 {
+		t.Fatalf("cross-session write: %d", got.Code)
+	}
+	for _, invalid := range []any{-1, 1.5, 1000001, "2", nil} {
+		if got := write("session-a", invalid, 0); got.Code != 400 {
+			t.Fatalf("invalid %v: %d %s", invalid, got.Code, got.Body.String())
+		}
+	}
+	if got := write("session-a", 2, 0); got.Code != 200 {
+		t.Fatalf("save: %d %s", got.Code, got.Body.String())
+	}
+	if got := write("session-a", 3, 0); got.Code != 409 {
+		t.Fatalf("stale value: %d", got.Code)
+	}
+	listed = policyRequest(t, router, http.MethodGet, "/v0/management/api-key-policy-bindings", "session-a", nil)
+	current := bindingResponse(t, listed).Items[0]
+	if current.ConcurrencyLimit != 2 || current.Policy != nil || strings.Contains(listed.Body.String(), "concurrency-management-secret") {
+		t.Fatalf("binding: %s", listed.Body.String())
+	}
+	if got := write("session-a", 0, 2); got.Code != 200 {
+		t.Fatalf("unlimited: %d", got.Code)
+	}
+	h.mu.Lock()
+	h.configGeneration++
+	h.mu.Unlock()
+	if got := write("session-a", 4, 0); got.Code != 409 {
+		t.Fatalf("stale ref: %d", got.Code)
+	}
+}
+
+func TestWorkspaceConcurrencyHTTPAtomicSave(t *testing.T) {
+	_, router := newAPIKeyPolicyManagementHarness(t, []string{"unified-key"})
+	listed := bindingResponse(t, policyRequest(t, router, http.MethodGet, "/v0/management/api-key-policy-bindings", "session-a", nil))
+	created := policyRequest(t, router, http.MethodPost, "/v0/management/api-key-policies", "session-a", map[string]any{
+		"keyRef": listed.Items[0].KeyRef, "displayName": "Unified", "concurrency": map[string]int{"limit": 2, "expectedLimit": 0},
+		"quota": map[string]any{"enabled": true, "requests": 10, "period": map[string]any{"type": "all_time"}},
+	})
+	if created.Code != http.StatusCreated {
+		t.Fatal(created.Body.String())
+	}
+	var policy apikeypolicy.Policy
+	if err := json.Unmarshal(created.Body.Bytes(), &policy); err != nil {
+		t.Fatal(err)
+	}
+	path := "/v0/management/api-key-policies/" + policy.ID
+	conflict := policyRequest(t, router, http.MethodPatch, path, "session-a", map[string]any{"displayName": "Conflict", "version": policy.Version, "quota": nil, "concurrency": map[string]int{"limit": 3, "expectedLimit": 0}})
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("conflict=%d %s", conflict.Code, conflict.Body.String())
+	}
+	bindings := bindingResponse(t, policyRequest(t, router, http.MethodGet, "/v0/management/api-key-policy-bindings", "session-a", nil))
+	if bindings.Items[0].ConcurrencyLimit != 2 || bindings.Items[0].Policy.DisplayName != "Unified" || bindings.Items[0].Policy.Quota == nil {
+		t.Fatal("partial HTTP save")
+	}
+	updated := policyRequest(t, router, http.MethodPatch, path, "session-a", map[string]any{"displayName": "Updated", "version": policy.Version, "concurrency": map[string]int{"limit": 4, "expectedLimit": 2}})
+	if updated.Code != http.StatusOK {
+		t.Fatal(updated.Body.String())
+	}
+	bindings = bindingResponse(t, policyRequest(t, router, http.MethodGet, "/v0/management/api-key-policy-bindings", "session-a", nil))
+	if bindings.Items[0].ConcurrencyLimit != 4 {
+		t.Fatal("workspace ignored concurrency")
+	}
+}

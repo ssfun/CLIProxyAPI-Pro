@@ -1209,6 +1209,8 @@ func (s *Server) handleUsageImport(c *gin.Context) {
 					importPreview.PreserveProfiles = currentPreview.TargetProfiles
 					importPreview.CurrentDisabledKeys = currentPreview.CurrentDisabledKeys
 					importPreview.TargetDisabledKeys = currentPreview.CurrentDisabledKeys
+					importPreview.CurrentConcurrencyKeys = currentPreview.CurrentConcurrencyKeys
+					importPreview.TargetConcurrencyKeys = currentPreview.CurrentConcurrencyKeys
 					importPreview.CurrentTakeoverEnabled = currentPreview.CurrentTakeoverEnabled
 					importPreview.TargetTakeoverEnabled = currentPreview.CurrentTakeoverEnabled
 				}

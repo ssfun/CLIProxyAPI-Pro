@@ -92,7 +92,11 @@ detail 还会保留 upstream `ClientRequestMetadata` 提供的 `client_ip`、`x_
 
 `/usage/import` 接受同样的 JSONL 格式。导入时会先完整读取和校验请求，再在一个 SQLite 事务中导入 usage events、模型价格、quota cache entries、运行时路由状态、监控设置和 Pro 设置；Pro 设置的 live 配置会在提交前应用，应用失败会回滚数据库，提交失败则恢复导入前配置。提交成功后再按固定顺序恢复其余运行态、账号巡检调度和最近一次巡检结果快照。整个导入由独占写屏障保护；同步管理写会等待导入结束，高频路由/账号运行态快照会在导入窗口内丢弃，避免旧快照覆盖恢复结果。恢复的结果快照为只读；发起新的完整巡检后才允许重检、刷新令牌或执行账号变更。无 manifest 的旧版 event-only 或混合 JSONL 默认拒绝，因为它们无法获得文件级完整性校验；可信旧备份可显式使用 `?allow_legacy=1` 或 `X-CLIProxy-Allow-Legacy-Backup: true` 请求头导入，管理端会在启用兼容模式前要求确认。
 
-API Key 策略备份记录包含稳定 SHA-256 Key 指纹、Profile 规则、active Profile 状态和策略审计历史，但绝不包含或恢复 `config.yaml api-keys`。指纹属于敏感标识；JSONL 与 WebDAV 备份必须沿用敏感配置导出的访问控制、传输加密和存储保留要求。WebDAV 恢复只接受列表中的 `usage-export-*.jsonl` 文件名，并复用本地导入的预检和原子恢复管线。
+API Key 策略备份记录包含稳定 SHA-256 Key 指纹、Profile 规则、active Profile 状态、策略审计历史、密钥禁用设置与并发上限，但绝不包含或恢复 `config.yaml api-keys`。指纹属于敏感标识；JSONL 与 WebDAV 备份必须沿用敏感配置导出的访问控制、传输加密和存储保留要求。WebDAV 恢复只接受列表中的 `usage-export-*.jsonl` 文件名，并复用本地导入的预检和原子恢复管线。
+
+API 密钥工作区支持按 Key 设置并发请求上限（`0` 不限，最大 `1,000,000`），无需先创建 Profile。仅在策略接管开启时执行；超限请求立即返回 HTTP `429` / `api_key_concurrency_exceeded`，不进入执行或消耗请求配额。普通请求在处理结束后释放名额，流式响应和 WebSocket 连接持有名额直到结束；模型发现、公开密钥查询和管理接口不计入。WebRTC SDP 引导只计算其 HTTP 请求生命周期，不计算引导结束后的媒体会话。计数按当前服务实例独立维护，不跨实例共享，不写入备份；修改上限、停止/恢复接管或恢复备份不会清空在途请求。恢复旧策略备份时并发上限恢复为不限，预览会显示设置及生效范围变化。
+
+并发设置接口为 `PUT /v0/management/api-key-policy-key-concurrency`，沿用管理认证和会话绑定的 `keyRef`，请求体为 `{ "keyRef": "...", "limit": 4, "expectedLimit": 0 }`。旧值不匹配返回 `409`，写入成功返回 `concurrencyLimit`；工作区复用配额的启用开关和统一保存：创建或更新策略时，通过可选的 `concurrency: { limit, expectedLimit }` 与配额、Profile 在同一事务内提交。旧客户端省略该字段会保留现有上限；面板仅在 Core 声明 `workspace_concurrency_limits` 能力时显示工作区设置。
 
 导入响应示例字段：
 

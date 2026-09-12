@@ -1,3 +1,4 @@
+import { parseKeyConcurrencyLimit } from '../src/pro/modules/apiKeyPolicy/apiKeyPolicy';
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -234,7 +235,7 @@ describe('API Key Policy profile drafts', () => {
     expect(page).toContain('apiKeyPolicyApi.updateWorkspace(');
     expect(page).not.toContain('policy = await apiKeyPolicyApi.rename');
     expect(page).toContain('savingRef.current = true');
-    expect(page).toContain('if (!workspaceTarget || !draft || savingRef.current) return;');
+    expect(page).toContain('if (!workspaceTarget || !draft || savingRef.current || keyActionBusyRef.current || dangerBusyRef.current) return;');
     expect(page).toContain('if (!validateDraft(changedProfile)) return;');
     expect(page).toContain('draft.profileEnabled ? draft.profile : undefined');
     expect(page).toContain("supportsOptionalAPIKeyProfile(snapshot.capabilities)");
@@ -333,7 +334,7 @@ describe('API Key Policy profile drafts', () => {
     const styles = readFileSync(resolve(import.meta.dir, '../src/pro/modules/apiKeyPolicy/APIKeyPolicyPage.module.scss'), 'utf8');
 		expect(page).toContain('className={styles.policySheet}');
 		expect(page).toContain('footer={');
-		expect(page).toContain('disabled={!dirty || saving}');
+		expect(page).toContain('disabled={!workspaceDirty || saving || keyActionBusy}');
 		expect(page).not.toContain('workspaceActionBar');
 		expect(styles).toContain('width: min(720px, 100vw) !important;');
   });
@@ -445,7 +446,7 @@ describe('API Key Policy profile drafts', () => {
     expect(activate).toContain('const revision = ++saveRevisionRef.current;');
     expect(activate).toContain('if (revision !== saveRevisionRef.current) return;');
     const danger = page.slice(page.indexOf('const runDangerAction'), page.indexOf('const visibleItems'));
-    expect(danger).toContain('if (!dangerPolicy || !dangerKind || dangerBusyRef.current) return;');
+    expect(danger).toContain('if (!dangerPolicy || !dangerKind || dangerBusyRef.current || keyActionBusyRef.current) return;');
     expect(danger).toContain('const revision = ++dangerRevisionRef.current;');
     expect(danger).toContain('if (revision !== dangerRevisionRef.current) return;');
     expect(danger).toContain("dangerPolicy.activeProfileId === draft?.profileId");
@@ -464,7 +465,7 @@ describe('API Key Policy profile drafts', () => {
     expect(reload).toContain('const revision = ++saveRevisionRef.current;');
     expect(reload).toContain('savingRef.current = true;');
     expect(save).toContain('const submittedDraftRevision = draftRevisionRef.current;');
-    expect(save).toContain('if (revision !== saveRevisionRef.current) return;');
+    expect(save).toContain('if (revision !== saveRevisionRef.current || workspaceSession !== workspaceSessionRef.current) return;');
     expect(save).toContain('if (submittedDraftRevision === draftRevisionRef.current)');
   });
 
@@ -556,5 +557,18 @@ describe('API Key Policy profile drafts', () => {
     const client = readFileSync(resolve(import.meta.dir, '../src/pro/modules/apiKeyPolicy/apiKeyPolicy.ts'), 'utf8');
     expect(client).toContain('mappings: (profile.mappings ?? []).map');
     expect(client).toContain('policy: normalizePolicy(binding.policy)');
+  });
+});
+
+describe('API key concurrency form values', () => {
+  test('accepts zero and bounded positive integers', () => {
+    expect(parseKeyConcurrencyLimit('0')).toBe(0);
+    expect(parseKeyConcurrencyLimit(' 12 ')).toBe(12);
+    expect(parseKeyConcurrencyLimit('1000000')).toBe(1000000);
+  });
+  test('rejects empty, fractional, signed, exponential and oversized values', () => {
+    for (const value of ['', ' ', '-1', '+1', '1.5', '1e3', 'Infinity', '1000001', '9999999999999999999']) {
+      expect(parseKeyConcurrencyLimit(value)).toBeNull();
+    }
   });
 });

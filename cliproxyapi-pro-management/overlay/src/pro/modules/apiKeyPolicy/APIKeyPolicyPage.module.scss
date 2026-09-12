@@ -359,3 +359,16 @@
 .badge_key_disabled { color: var(--danger-color); border-color: color-mix(in srgb, var(--danger-color) 34%, var(--border-color)); }
 
 .keyPending { color: var(--text-secondary); font-size: 12px; font-weight: 600; margin-right: auto; }
+
+.cardConcurrency {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12px;
+  strong { margin-left: auto; color: var(--text-primary); }
+  small { flex-basis: 100%; }
+}

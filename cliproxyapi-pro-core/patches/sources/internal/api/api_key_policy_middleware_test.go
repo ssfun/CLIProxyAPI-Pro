@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	codexlive "github.com/router-for-me/CLIProxyAPI/v7/internal/client/codex/live"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pro/apikeypolicy"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
@@ -403,4 +405,174 @@ func TestDisabledAPIKeyEnforcementFollowsTakeover(t *testing.T) {
 	if recorder.Code != http.StatusNoContent {
 		t.Fatalf("enabled response: %d", recorder.Code)
 	}
+}
+
+func TestAPIKeyConcurrencyMiddlewareHoldsRequestsAndReleasesOnExit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name, method, path string
+		panicExit          bool
+	}{
+		{"stream cancellation", http.MethodPost, "/v1/chat/completions", false},
+		{"websocket connection", http.MethodGet, "/v1/responses", false},
+		{"panic", http.MethodPost, "/v1/messages", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newAPIKeyPolicyMiddlewareService(t)
+			identity, _ := apikeypolicy.NewAuthenticatedAPIKeyIdentity("middleware-concurrent-key")
+			if err := s.SetKeyConcurrencyLimit(context.Background(), identity, 1, 0); err != nil {
+				t.Fatal(err)
+			}
+			manager := sdkaccess.NewManager()
+			manager.SetProviders([]sdkaccess.Provider{apiKeyPolicyAccessProvider{provider: sdkaccess.DefaultAccessProviderName, principal: "middleware-concurrent-key"}})
+			entered, finished := make(chan struct{}), make(chan struct{})
+			router := gin.New()
+			router.Use(gin.Recovery(), AuthMiddleware(manager, s), apiKeyQuotaMiddleware(s))
+			router.GET("/v1/models", func(c *gin.Context) { c.Status(200) })
+			router.Handle(tc.method, tc.path, func(c *gin.Context) {
+				if c.GetHeader("X-Test-Hold") == "true" {
+					if !tc.panicExit {
+						c.Header("Content-Type", "text/event-stream")
+						c.Writer.Flush()
+					}
+					close(entered)
+					<-c.Request.Context().Done()
+					if tc.panicExit {
+						panic("test handler failure")
+					}
+				}
+				c.Status(200)
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			request := httptest.NewRequest(tc.method, tc.path, nil).WithContext(ctx)
+			request.Header.Set("X-Test-Hold", "true")
+			if tc.method == http.MethodGet {
+				request.Header.Set("Upgrade", "websocket")
+			}
+			go func() { defer close(finished); router.ServeHTTP(httptest.NewRecorder(), request) }()
+			select {
+			case <-entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("request did not enter")
+			}
+			blocked := httptest.NewRecorder()
+			router.ServeHTTP(blocked, httptest.NewRequest(tc.method, tc.path, nil))
+			if blocked.Code != 429 || !strings.Contains(blocked.Body.String(), "api_key_concurrency_exceeded") {
+				t.Fatalf("limit: %d %s", blocked.Code, blocked.Body.String())
+			}
+			discovery := httptest.NewRecorder()
+			router.ServeHTTP(discovery, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+			if discovery.Code != 200 {
+				t.Fatalf("discovery consumed slot: %d", discovery.Code)
+			}
+			cancel()
+			select {
+			case <-finished:
+			case <-time.After(5 * time.Second):
+				t.Fatal("handler did not exit")
+			}
+			next := httptest.NewRecorder()
+			router.ServeHTTP(next, httptest.NewRequest(tc.method, tc.path, nil))
+			if next.Code != 200 {
+				t.Fatalf("slot leaked: %d %s", next.Code, next.Body.String())
+			}
+		})
+	}
+}
+
+func TestAPIKeyConcurrencyRejectsBeforeQuotaAndReleasesQuotaFailures(t *testing.T) {
+	s := newAPIKeyPolicyMiddlewareService(t)
+	identity, _ := apikeypolicy.NewAuthenticatedAPIKeyIdentity("concurrency-quota-key")
+	budget := int64(1)
+	_, err := s.Create(context.Background(), identity, "Quota", apikeypolicy.ProfileInput{Name: "Default"}, &apikeypolicy.QuotaInput{Enabled: true, Requests: &budget})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetKeyConcurrencyLimit(context.Background(), identity, 1, 0); err != nil {
+		t.Fatal(err)
+	}
+	manager := sdkaccess.NewManager()
+	manager.SetProviders([]sdkaccess.Provider{apiKeyPolicyAccessProvider{provider: sdkaccess.DefaultAccessProviderName, principal: "concurrency-quota-key"}})
+	router := gin.New()
+	router.Use(AuthMiddleware(manager, s), apiKeyQuotaMiddleware(s))
+	router.POST("/v1/responses", func(c *gin.Context) { c.Status(200) })
+	call := func() *httptest.ResponseRecorder {
+		r := httptest.NewRecorder()
+		router.ServeHTTP(r, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+		return r
+	}
+	release, err := s.AcquireKeyRequest(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := call(); got.Code != 429 || !strings.Contains(got.Body.String(), "api_key_concurrency_exceeded") {
+		t.Fatalf("limit: %d %s", got.Code, got.Body.String())
+	}
+	release()
+	if got := call(); got.Code != 200 {
+		t.Fatalf("rejected request consumed quota: %d %s", got.Code, got.Body.String())
+	}
+	for i := 0; i < 2; i++ {
+		if got := call(); got.Code != 429 || !strings.Contains(got.Body.String(), "api_key_quota_exceeded") {
+			t.Fatalf("quota rejection leaked slot: %d %s", got.Code, got.Body.String())
+		}
+	}
+}
+
+func TestAPIKeyConcurrencyRealWebSocketCloseReleasesSlot(t *testing.T) {
+	s := newAPIKeyPolicyMiddlewareService(t)
+	identity, _ := apikeypolicy.NewAuthenticatedAPIKeyIdentity("concurrent-websocket-key")
+	if err := s.SetKeyConcurrencyLimit(context.Background(), identity, 1, 0); err != nil {
+		t.Fatal(err)
+	}
+	manager := sdkaccess.NewManager()
+	manager.SetProviders([]sdkaccess.Provider{apiKeyPolicyAccessProvider{provider: sdkaccess.DefaultAccessProviderName, principal: "concurrent-websocket-key"}})
+	router := gin.New()
+	finished := make(chan struct{}, 2)
+	// This outer middleware signals only after the quota/concurrency defer runs.
+	router.Use(func(c *gin.Context) { c.Next(); finished <- struct{}{} }, AuthMiddleware(manager, s), apiKeyQuotaMiddleware(s))
+	router.GET("/v1/responses", func(c *gin.Context) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	})
+	server := httptest.NewServer(router)
+	defer server.Close()
+	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/responses"
+	first, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, response, err := websocket.DefaultDialer.Dial(url, nil)
+	if second != nil {
+		_ = second.Close()
+	}
+	if response != nil {
+		defer response.Body.Close()
+	}
+	if err == nil || response == nil || response.StatusCode != 429 {
+		t.Fatalf("saturated websocket: response=%v err=%v", response, err)
+	}
+	<-finished // Rejected handshake.
+	_ = first.Close()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("socket handler did not release")
+	}
+	next, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = next.Close()
 }
