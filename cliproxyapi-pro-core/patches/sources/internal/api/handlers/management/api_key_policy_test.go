@@ -969,3 +969,83 @@ func TestWorkspaceConcurrencyHTTPAtomicSave(t *testing.T) {
 		t.Fatal("workspace ignored concurrency")
 	}
 }
+
+func TestCreateWorkspaceConcurrencyConflictReissuesReferenceForRetry(t *testing.T) {
+	for _, initialProfile := range []bool{false, true} {
+		t.Run(strconv.FormatBool(initialProfile), func(t *testing.T) {
+			_, router := newAPIKeyPolicyManagementHarness(t, []string{"conflict-retry-key", "other-conflict-key"})
+			listed := bindingResponse(t, policyRequest(t, router, http.MethodGet, "/v0/management/api-key-policy-bindings", "session-a", nil))
+			originalRef := listed.Items[0].KeyRef
+			raw := policyRequest(t, router, http.MethodPost, "/v0/management/api-key-policy-key", "session-a", map[string]any{"keyRef": originalRef}).Body.String()
+			changed := policyRequest(t, router, http.MethodPut, "/v0/management/api-key-policy-key-concurrency", "session-a", map[string]any{"keyRef": originalRef, "limit": 2, "expectedLimit": 0})
+			if changed.Code != http.StatusOK {
+				t.Fatal(changed.Body.String())
+			}
+			body := map[string]any{
+				"keyRef": originalRef, "displayName": "Preserved draft",
+				"concurrency": map[string]int{"limit": 3, "expectedLimit": 0},
+				"quota":       map[string]any{"enabled": true, "requests": 20, "period": map[string]any{"type": "all_time"}},
+			}
+			if initialProfile {
+				body["initialProfile"] = map[string]any{"name": "Draft profile"}
+			}
+			conflict := policyRequest(t, router, http.MethodPost, "/v0/management/api-key-policies", "session-a", body)
+			if conflict.Code != http.StatusConflict {
+				t.Fatalf("status=%d %s", conflict.Code, conflict.Body.String())
+			}
+			var recovery struct {
+				KeyRef string `json:"keyRef"`
+				Error  struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(conflict.Body.Bytes(), &recovery); err != nil {
+				t.Fatal(err)
+			}
+			if recovery.Error.Code != "config_version_conflict" || recovery.KeyRef == "" || recovery.KeyRef == originalRef {
+				t.Fatal("missing fresh conflict reference")
+			}
+			if conflict.Header().Get("Cache-Control") != "no-store" {
+				t.Fatal("conflict reference response must not be cached")
+			}
+			refreshed := bindingResponse(t, policyRequest(t, router, http.MethodGet, "/v0/management/api-key-policy-bindings", "session-a", nil))
+			found := false
+			for _, binding := range refreshed.Items {
+				if binding.KeyRef == recovery.KeyRef {
+					found = true
+					if binding.Policy != nil || binding.ConcurrencyLimit != 2 {
+						t.Fatal("failed create partially saved")
+					}
+				}
+			}
+			if !found {
+				t.Fatal("list did not retain replacement reference")
+			}
+			wrongSession := policyRequest(t, router, http.MethodPost, "/v0/management/api-key-policy-key", "session-b", map[string]any{"keyRef": recovery.KeyRef})
+			if wrongSession.Code != http.StatusConflict {
+				t.Fatal("replacement reference crossed sessions")
+			}
+			resolved := policyRequest(t, router, http.MethodPost, "/v0/management/api-key-policy-key", "session-a", map[string]any{"keyRef": recovery.KeyRef})
+			if resolved.Code != http.StatusOK || resolved.Body.String() != raw {
+				t.Fatal("replacement reference changed key identity")
+			}
+			body["keyRef"] = recovery.KeyRef
+			body["concurrency"] = map[string]int{"limit": 3, "expectedLimit": 2}
+			saved := policyRequest(t, router, http.MethodPost, "/v0/management/api-key-policies", "session-a", body)
+			if saved.Code != http.StatusCreated {
+				t.Fatal(saved.Body.String())
+			}
+			var policy apikeypolicy.Policy
+			if err := json.Unmarshal(saved.Body.Bytes(), &policy); err != nil {
+				t.Fatal(err)
+			}
+			if policy.DisplayName != "Preserved draft" || policy.Quota == nil || *policy.Quota.Requests != 20 || (len(policy.Profiles) == 1) != initialProfile {
+				t.Fatal("retry lost workspace data")
+			}
+			reused := policyRequest(t, router, http.MethodPost, "/v0/management/api-key-policies", "session-a", body)
+			if reused.Code != http.StatusConflict || !strings.Contains(reused.Body.String(), "api_key_reference_stale") {
+				t.Fatal("successful retry did not consume reference")
+			}
+		})
+	}
+}

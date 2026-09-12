@@ -512,6 +512,20 @@ func (h *Handler) CreateAPIKeyPolicy(c *gin.Context) {
 	}
 	policy, err := service.CreateWorkspace(apiKeyPolicyWriteContext(c, request.ClientFeatures), identity, request.DisplayName, request.InitialProfile, request.Quota, request.Concurrency)
 	if err != nil {
+		// The failed create consumed its one-use reference. Reissue only for
+		// the authenticated identity so a conflict can be reconciled without
+		// identifying keys by their non-unique masks or discarding drafts.
+		if errors.Is(err, apikeypolicy.ErrVersionConflict) {
+			keyRef, refErr := h.issueAPIKeyReference(c, identity, generation)
+			if refErr == nil {
+				c.Header("Cache-Control", "no-store")
+				c.JSON(http.StatusConflict, gin.H{
+					"error":  gin.H{"code": "config_version_conflict", "message": err.Error()},
+					"keyRef": keyRef,
+				})
+				return
+			}
+		}
 		writeAPIKeyPolicyError(c, err)
 		return
 	}

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { Transpiler } from 'bun';
-import { parseKeyConcurrencyLimit } from '../src/pro/modules/apiKeyPolicy/apiKeyPolicy';
+import { apiKeyPolicyConflictKeyRef, parseKeyConcurrencyLimit } from '../src/pro/modules/apiKeyPolicy/apiKeyPolicy';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -48,6 +48,7 @@ function harness(options: { refreshedLimit?: number; refreshFails?: boolean } = 
     showNotification: () => { notifications++; }, t: (key: string) => key,
     takeoverStatus: { takeoverEnabled: true },
     apiKeyPolicyErrorCode: (error: Error) => error.message,
+    apiKeyPolicyConflictKeyRef,
     errorMessage: (error: Error) => error.message,
     load,
   };

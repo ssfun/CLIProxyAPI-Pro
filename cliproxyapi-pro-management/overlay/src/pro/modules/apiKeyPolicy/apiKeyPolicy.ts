@@ -565,6 +565,14 @@ export const apiKeyPolicyErrorCode = (error: unknown): string =>
     ? (error as ApiError).apiCode ?? ''
     : '';
 
+// Only an authenticated create-conflict response can rotate its consumed keyRef.
+export const apiKeyPolicyConflictKeyRef = (error: unknown): string | undefined => {
+  if (apiKeyPolicyErrorCode(error) !== 'config_version_conflict') return undefined;
+  const data = (error as ApiError).data;
+  if (!data || typeof data !== 'object' || !('keyRef' in data)) return undefined;
+  return typeof data.keyRef === 'string' && data.keyRef.trim() ? data.keyRef : undefined;
+};
+
 export const apiKeyPolicyErrorTranslationKey = (error: unknown): string => {
   const code = apiKeyPolicyErrorCode(error);
   return code ? `api_key_policy.error.${code}` : '';

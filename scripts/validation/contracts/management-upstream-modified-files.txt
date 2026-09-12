@@ -1,4 +1,4 @@
-# Latest-only baseline: Management v1.22.15 (ed5f1c48e11ba7335f1e8f676f228c280196af85).
+# Latest-only baseline: Management v1.22.16 (9b2ab8ef5f0e76205203f4646b5aaea1073d71eb).
 # Update this reviewed surface only when adapting to a newer latest upstream release.
 src/App.tsx
 src/components/common/ConfirmationModal.tsx

@@ -30,6 +30,7 @@ import {
   apiKeyPolicyApi,
   parseKeyConcurrencyLimit,
   apiKeyPolicyErrorCode,
+  apiKeyPolicyConflictKeyRef,
   apiKeyPolicyErrorTranslationKey,
   buildAPIKeyQuotaTimezoneOptions,
   cloneProfileInput,
@@ -680,7 +681,11 @@ export function APIKeyPolicyPage() {
         const bindings = await apiKeyPolicyApi.bindings();
         if (revision !== saveRevisionRef.current) return;
         const binding = bindings.items.find((item) => item.keyRef === workspaceTarget.binding.keyRef);
-        if (!binding) { closeWorkspace(); await load(); return; }
+        if (!binding) {
+          // A stale reference or older Core must not silently discard the draft.
+          showNotification(t('api_key_policy.key_ref_stale'), 'warning');
+          return;
+        }
         setSnapshot((current) => current ? { ...current, bindings } : current);
         setWorkspaceTarget(binding.policy
           ? { kind: 'policy', policy: binding.policy, readOnly: false }
@@ -708,7 +713,7 @@ export function APIKeyPolicyPage() {
         setSaving(false);
       }
     }
-  }, [closeWorkspace, load, errorMessage, replacePolicyInSnapshot, showNotification, snapshot, workspaceTarget]);
+  }, [t, errorMessage, replacePolicyInSnapshot, showNotification, snapshot, workspaceTarget]);
 
   const validateDraft = useCallback((validateProfile: boolean): boolean => {
     if (!snapshot || !draft) return false;
@@ -822,11 +827,23 @@ export function APIKeyPolicyPage() {
     } catch (error) {
       if (revision !== saveRevisionRef.current || workspaceSession !== workspaceSessionRef.current) return;
       if (apiKeyPolicyErrorCode(error) === 'config_version_conflict') {
+        const keyRef = workspaceTarget.kind === 'create' ? apiKeyPolicyConflictKeyRef(error) : undefined;
+        if (keyRef && workspaceTarget.kind === 'create') {
+          const previousRef = workspaceTarget.binding.keyRef;
+          setWorkspaceTarget({ ...workspaceTarget, binding: { ...workspaceTarget.binding, keyRef } });
+          setSnapshot((current) => current ? {
+            ...current,
+            bindings: { ...current.bindings, items: current.bindings.items.map((binding) =>
+              binding.keyRef === previousRef ? { ...binding, keyRef } : binding) },
+          } : current);
+        }
         setConflict(true);
       } else if (apiKeyPolicyErrorCode(error) === 'api_key_reference_stale') {
         showNotification(t('api_key_policy.key_ref_stale'), 'warning');
-        closeWorkspace();
-        await load();
+        if (workspaceTarget.kind !== 'create') {
+          closeWorkspace();
+          await load();
+        }
       } else {
         showNotification(errorMessage(error), 'error');
       }
