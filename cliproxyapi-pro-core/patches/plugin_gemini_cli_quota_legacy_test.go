@@ -96,7 +96,7 @@ func TestLegacyGeminiCLIQuotaAdapterReportsUpstreamStatus(t *testing.T) {
 	manager := coreauth.NewManager(nil, nil, nil)
 	manager.RegisterExecutor(&legacyGeminiCLIQuotaTestExecutor{quotaCode: http.StatusUnauthorized})
 	host.SetAuthManager(manager)
-	result := host.FetchQuota(context.Background(), &coreauth.Auth{
+	result := host.FetchProQuota(context.Background(), &coreauth.Auth{
 		ID: "auth-1", Provider: legacyGeminiCLIProvider, Metadata: map[string]any{"project_id": "project-a"},
 	}, nil)
 	if !result.Handled || result.Err == nil || result.UpstreamStatus != http.StatusUnauthorized {
@@ -122,7 +122,7 @@ func TestLegacyGeminiCLIQuotaAdapterUsesRegisteredExecutorAndRetainsPlan(t *test
 		Metadata: map[string]any{"project_id": "project-a"},
 	}
 
-	result := host.FetchQuota(context.Background(), auth, previous)
+	result := host.FetchProQuota(context.Background(), auth, previous)
 	if !result.Handled || result.Err != nil || result.PluginID != "geminicli" {
 		t.Fatalf("FetchQuota() = %#v", result)
 	}
@@ -211,7 +211,7 @@ func TestLegacyGeminiCLIQuotaAdapterRetainsPlanWhenTierPayloadIsUnsupported(t *t
 		Metadata: map[string]any{"project_id": "project-a"},
 	}
 
-	result := host.FetchQuota(context.Background(), auth, previous)
+	result := host.FetchProQuota(context.Background(), auth, previous)
 	if !result.Handled || result.Err != nil {
 		t.Fatalf("FetchQuota() = %#v", result)
 	}

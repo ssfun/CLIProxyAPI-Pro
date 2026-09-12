@@ -2,6 +2,7 @@ package pluginhost
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -12,10 +13,57 @@ import (
 
 type quotaProviderStub struct {
 	identifier string
+	supported  []string
 	fetch      func(context.Context, pluginapi.QuotaFetchRequest) (pluginapi.QuotaFetchResponse, error)
 }
 
 func (p quotaProviderStub) Identifier() string { return p.identifier }
+func (p quotaProviderStub) DescribeQuota(context.Context, pluginapi.QuotaDescribeRequest) (pluginapi.QuotaDescribeResponse, error) {
+	if p.supported != nil {
+		return pluginapi.QuotaDescribeResponse{SupportedProviders: p.supported}, nil
+	}
+	return pluginapi.QuotaDescribeResponse{SupportedProviders: []string{p.identifier}}, nil
+}
+
+func TestFetchProQuotaAcceptsUpstreamProviderAndResponse(t *testing.T) {
+	provider := quotaProviderStub{identifier: "multi", supported: []string{"codex"}, fetch: func(_ context.Context, req pluginapi.QuotaFetchRequest) (pluginapi.QuotaFetchResponse, error) {
+		if req.Provider != "codex" || req.AuthProvider != "codex" || req.AuthIndex != "index-1" || req.HTTPClient == nil {
+			t.Fatalf("upstream and Pro request fields = %#v", req)
+		}
+		var resp pluginapi.QuotaFetchResponse
+		err := json.Unmarshal([]byte(`{"subscription":{"plan":"pro","tier_name":"Pro Tier","tier_id":"pro-1"},"groups":[{"display_name":"Requests","buckets":[{"window":"daily","remaining_fraction":0.25,"reset_time":"2026-09-14T00:00:00Z"},{"window":"weekly","remaining_fraction":0.75}]}]}`), &resp)
+		return resp, err
+	}}
+	host := newHostWithRecords(capabilityRecord{id: "multi-plugin", plugin: pluginapi.Plugin{Capabilities: pluginapi.Capabilities{QuotaProvider: provider}}})
+	result := host.FetchProQuota(context.Background(), &coreauth.Auth{ID: "auth-1", Index: "index-1", Provider: "codex"}, nil)
+	if !result.Handled || result.Err != nil || result.PluginID != "multi-plugin" {
+		t.Fatalf("FetchProQuota = %#v", result)
+	}
+	snapshot := result.Snapshot
+	if len(snapshot.Items) != 2 || snapshot.Items[0].ID == snapshot.Items[1].ID || *snapshot.Items[0].RemainingFraction != 0.25 || *snapshot.Items[1].RemainingFraction != 0.75 || snapshot.Items[0].ResetAt != "2026-09-14T00:00:00Z" {
+		t.Fatalf("converted buckets = %#v", snapshot.Items)
+	}
+	if snapshot.Plan == nil || snapshot.Plan.ID != "pro-1" || snapshot.Plan.Label != "Pro Tier" || snapshot.Plan.Kind != "pro" {
+		t.Fatalf("converted plan = %#v", snapshot.Plan)
+	}
+}
+
+func TestQuotaResponseJSONRetainsProExtensions(t *testing.T) {
+	var resp pluginapi.QuotaFetchResponse
+	if err := json.Unmarshal([]byte(`{"snapshot":{"schema_version":1,"items":[{"id":"legacy","label":"Legacy"}]},"plan_unavailable":true,"plan_error":"retry","auth_update":{"id":"auth-1"}}`), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Snapshot.Items) != 1 || resp.Snapshot.Items[0].ID != "legacy" || !resp.PlanUnavailable || resp.PlanError != "retry" || resp.AuthUpdate.ID != "auth-1" {
+		t.Fatalf("Pro RPC response = %#v", resp)
+	}
+	resp.Groups = []pluginapi.QuotaGroup{{Buckets: []pluginapi.QuotaBucket{{Window: "new"}}}}
+	if snapshot := proQuotaSnapshot(resp); len(snapshot.Items) != 1 || snapshot.Items[0].ID != "legacy" {
+		t.Fatalf("legacy snapshot was replaced = %#v", snapshot)
+	}
+}
+func (p quotaProviderStub) ResetQuota(context.Context, pluginapi.QuotaResetRequest) (pluginapi.QuotaResetResponse, error) {
+	return pluginapi.QuotaResetResponse{}, nil
+}
 func (p quotaProviderStub) FetchQuota(ctx context.Context, req pluginapi.QuotaFetchRequest) (pluginapi.QuotaFetchResponse, error) {
 	return p.fetch(ctx, req)
 }
@@ -38,7 +86,7 @@ func TestFetchQuotaNormalizesAndRetainsPreviousPlan(t *testing.T) {
 		meta:   pluginapi.Metadata{Name: "Gemini CLI", Version: "1.0.0"},
 		plugin: pluginapi.Plugin{Capabilities: pluginapi.Capabilities{QuotaProvider: provider}},
 	})
-	result := host.FetchQuota(context.Background(), &coreauth.Auth{ID: "auth-1", Provider: "gemini-cli", FileName: "gemini.json"}, previous)
+	result := host.FetchProQuota(context.Background(), &coreauth.Auth{ID: "auth-1", Provider: "gemini-cli", FileName: "gemini.json"}, previous)
 	if !result.Handled || result.Err != nil || result.PluginID != "geminicli" {
 		t.Fatalf("FetchQuota() = %#v", result)
 	}
@@ -66,7 +114,7 @@ func TestHasQuotaProviderMatchesIdentifier(t *testing.T) {
 		t.Fatal("quota provider matching failed")
 	}
 	plugins := host.RegisteredPlugins()
-	if len(plugins) != 1 || !plugins[0].SupportsQuota || plugins[0].QuotaProvider != "Gemini-CLI" || plugins[0].QuotaMode != "native" {
+	if len(plugins) != 1 || !plugins[0].SupportsQuota || plugins[0].QuotaProvider != "gemini-cli" || plugins[0].QuotaMode != "native" {
 		t.Fatalf("registered quota capability = %#v", plugins)
 	}
 	if caps := rpcCapabilitiesFromPlugin(host.activeRecords()[0].plugin); !caps.QuotaProvider {
@@ -80,7 +128,7 @@ func TestFetchQuotaRejectsNewerSnapshotSchema(t *testing.T) {
 			return pluginapi.QuotaFetchResponse{Snapshot: pluginapi.QuotaSnapshot{SchemaVersion: pluginapi.QuotaSnapshotSchemaVersion + 1}}, nil
 		}},
 	}}})
-	result := host.FetchQuota(context.Background(), &coreauth.Auth{ID: "auth-1", Provider: "gemini-cli"}, nil)
+	result := host.FetchProQuota(context.Background(), &coreauth.Auth{ID: "auth-1", Provider: "gemini-cli"}, nil)
 	if !result.Handled || result.Err == nil {
 		t.Fatalf("FetchQuota() = %#v, want handled schema error", result)
 	}
@@ -107,7 +155,7 @@ func TestFetchQuotaConstrainsAuthUpdateToCurrentIdentity(t *testing.T) {
 		Attributes: map[string]string{"path": "/tmp/gemini.json", "project_id": "project-a"},
 	}
 
-	result := host.FetchQuota(context.Background(), auth, nil)
+	result := host.FetchProQuota(context.Background(), auth, nil)
 	if !result.Handled || result.Err != nil || result.Auth == nil {
 		t.Fatalf("FetchQuota() = %#v", result)
 	}
@@ -129,7 +177,7 @@ func TestFetchQuotaClampsFutureObservationTime(t *testing.T) {
 	}}
 	host := newHostWithRecords(capabilityRecord{id: "geminicli", plugin: pluginapi.Plugin{Capabilities: pluginapi.Capabilities{QuotaProvider: provider}}})
 	before := time.Now().UnixMilli()
-	result := host.FetchQuota(context.Background(), &coreauth.Auth{ID: "auth-1", Provider: "gemini-cli"}, nil)
+	result := host.FetchProQuota(context.Background(), &coreauth.Auth{ID: "auth-1", Provider: "gemini-cli"}, nil)
 	after := time.Now().UnixMilli()
 	if !result.Handled || result.Err != nil {
 		t.Fatalf("FetchQuota() = %#v", result)

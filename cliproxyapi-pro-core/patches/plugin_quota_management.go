@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -17,24 +18,19 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-// RegisterPluginQuotaRoutes registers the host-owned normalized quota endpoint.
-func (h *Handler) RegisterPluginQuotaRoutes(group *gin.RouterGroup) {
-	if h == nil || group == nil {
-		return
-	}
-	group.POST("/quota/fetch", h.FetchPluginQuota)
-}
-
-// FetchPluginQuota asks the provider plugin for one auth's current quota and persists it.
-func (h *Handler) FetchPluginQuota(c *gin.Context) {
-	var req struct {
-		AuthIndex string `json:"auth_index"`
-	}
+// FetchProPluginQuota asks the provider plugin for one auth's current quota and persists it.
+func (h *Handler) FetchProPluginQuota(c *gin.Context) {
+	var req credentialQuotaRequest
 	if errBind := c.ShouldBindJSON(&req); errBind != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-	authIndex := strings.TrimSpace(req.AuthIndex)
+	// Explicit upstream plugin/provider selection keeps its original response contract.
+	if strings.TrimSpace(req.PluginID) != "" || strings.TrimSpace(req.Provider) != "" {
+		h.forwardCredentialQuota(c, req)
+		return
+	}
+	authIndex := req.resolveAuthIndex()
 	if authIndex == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "auth_index is required"})
 		return
@@ -46,15 +42,30 @@ func (h *Handler) FetchPluginQuota(c *gin.Context) {
 		return
 	}
 	result, statusCode, errorLabel, errFetch := h.fetchAndPersistPluginQuota(c.Request.Context(), auth)
+	if !result.Handled && (statusCode == http.StatusNotFound || statusCode == http.StatusServiceUnavailable) {
+		// Upstream also supports declarative metadata probes without a quota plugin.
+		h.forwardCredentialQuota(c, req)
+		return
+	}
 	if errFetch != nil {
 		c.JSON(statusCode, gin.H{"error": errorLabel, "message": errFetch.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"auth_index": auth.Index,
-		"plugin_id":  result.PluginID,
-		"snapshot":   result.Snapshot,
+		"auth_index":         auth.Index,
+		"plugin_id":          result.PluginID,
+		"snapshot":           result.Snapshot,
+		"subscription":       result.Response.Subscription,
+		"groups":             result.Response.Groups,
+		"serverTimeOffsetMs": result.Response.ServerTimeOffsetMs,
 	})
+}
+
+func (h *Handler) forwardCredentialQuota(c *gin.Context, req credentialQuotaRequest) {
+	raw, _ := json.Marshal(req)
+	c.Request.Body = io.NopCloser(strings.NewReader(string(raw)))
+	c.Request.ContentLength = int64(len(raw))
+	h.FetchCredentialQuota(c)
 }
 
 func (h *Handler) fetchAndPersistPluginQuota(ctx context.Context, auth *coreauth.Auth) (pluginhost.QuotaResult, int, string, error) {
@@ -69,7 +80,7 @@ func (h *Handler) fetchAndPersistPluginQuota(ctx context.Context, auth *coreauth
 		return pluginhost.QuotaResult{}, http.StatusServiceUnavailable, "plugin quota service unavailable", fmt.Errorf("plugin quota service unavailable")
 	}
 	previous := loadPluginQuotaSnapshot(ctx, auth.Provider, auth.FileName, auth.Index)
-	result := host.FetchQuota(ctx, auth, previous)
+	result := host.FetchProQuota(ctx, auth, previous)
 	if !result.Handled {
 		return result, http.StatusNotFound, "quota provider not found", fmt.Errorf("quota provider not found")
 	}

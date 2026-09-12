@@ -15,6 +15,7 @@ type QuotaResult struct {
 	Handled        bool
 	PluginID       string
 	Snapshot       pluginapi.QuotaSnapshot
+	Response       pluginapi.QuotaFetchResponse
 	Auth           *coreauth.Auth
 	UpstreamStatus int
 	Err            error
@@ -32,25 +33,7 @@ func quotaUpstreamStatus(err error) int {
 	return 0
 }
 
-func (h *Host) HasQuotaProvider(provider string) bool {
-	provider = normalizeProviderID(provider)
-	if h == nil || provider == "" {
-		return false
-	}
-	for _, record := range h.activeRecords() {
-		quotaProvider := record.plugin.Capabilities.QuotaProvider
-		if quotaProvider == nil || h.isPluginFused(record.id) {
-			continue
-		}
-		identifier, okIdentifier := h.callQuotaProviderIdentifier(record.id, quotaProvider)
-		if okIdentifier && normalizeProviderID(identifier) == provider {
-			return true
-		}
-	}
-	return false
-}
-
-func (h *Host) FetchQuota(ctx context.Context, auth *coreauth.Auth, previous *pluginapi.QuotaSnapshot) QuotaResult {
+func (h *Host) FetchProQuota(ctx context.Context, auth *coreauth.Auth, previous *pluginapi.QuotaSnapshot) QuotaResult {
 	if h == nil || auth == nil {
 		return QuotaResult{}
 	}
@@ -58,16 +41,8 @@ func (h *Host) FetchQuota(ctx context.Context, auth *coreauth.Auth, previous *pl
 	if provider == "" {
 		return QuotaResult{}
 	}
-	for _, record := range h.activeRecords() {
-		quotaProvider := record.plugin.Capabilities.QuotaProvider
-		if quotaProvider == nil || h.isPluginFused(record.id) {
-			continue
-		}
-		identifier, okIdentifier := h.callQuotaProviderIdentifier(record.id, quotaProvider)
-		if !okIdentifier || normalizeProviderID(identifier) != provider {
-			continue
-		}
-		resp, errFetch := h.callFetchQuota(ctx, record, quotaProvider, auth, previous)
+	if record := h.quotaProviderRecord(ctx, provider); record != nil {
+		resp, errFetch := h.callFetchQuota(ctx, *record, record.plugin.Capabilities.QuotaProvider, auth, previous)
 		if errFetch != nil {
 			return QuotaResult{Handled: true, PluginID: record.id, UpstreamStatus: quotaUpstreamStatus(errFetch), Err: errFetch}
 		}
@@ -90,7 +65,7 @@ func (h *Host) quotaResultFromResponse(pluginID, provider string, auth *coreauth
 			resp.Snapshot.SchemaVersion, pluginapi.QuotaSnapshotSchemaVersion,
 		)}
 	}
-	snapshot := proquota.NormalizeSnapshot(resp.Snapshot, provider, previous, resp.PlanUnavailable, resp.PlanError)
+	snapshot := proquota.NormalizeSnapshot(proQuotaSnapshot(resp), provider, previous, resp.PlanUnavailable, resp.PlanError)
 	path := ""
 	if auth.Attributes != nil {
 		path = auth.Attributes["path"]
@@ -99,7 +74,35 @@ func (h *Host) quotaResultFromResponse(pluginID, provider string, auth *coreauth
 	if authDataHasValue(resp.AuthUpdate) {
 		updated = h.boundQuotaAuthUpdate(resp.AuthUpdate, auth, path)
 	}
-	return QuotaResult{Handled: true, PluginID: pluginID, Snapshot: snapshot, Auth: updated}
+	return QuotaResult{Handled: true, PluginID: pluginID, Snapshot: snapshot, Response: resp, Auth: updated}
+}
+
+// proQuotaSnapshot accepts upstream quota groups while retaining legacy Pro snapshots.
+func proQuotaSnapshot(resp pluginapi.QuotaFetchResponse) pluginapi.QuotaSnapshot {
+	snapshot := resp.Snapshot
+	if snapshot.SchemaVersion != 0 || snapshot.Items != nil || snapshot.Plan != nil {
+		return snapshot
+	}
+	for groupIndex, group := range resp.Groups {
+		for bucketIndex, bucket := range group.Buckets {
+			remaining := bucket.RemainingFraction
+			label := strings.TrimSpace(group.DisplayName + " " + bucket.Window)
+			snapshot.Items = append(snapshot.Items, pluginapi.QuotaItem{
+				ID:    fmt.Sprintf("group:%d:bucket:%d", groupIndex, bucketIndex),
+				Label: label, Kind: "quota", RemainingFraction: &remaining,
+				ResetAt:  bucket.ResetTime,
+				Metadata: map[string]any{"description": bucket.Description},
+			})
+		}
+	}
+	if sub := resp.Subscription; sub != nil {
+		label := strings.TrimSpace(sub.TierName)
+		if label == "" {
+			label = sub.Plan
+		}
+		snapshot.Plan = &pluginapi.QuotaPlan{ID: sub.TierID, Label: label, Kind: sub.Plan}
+	}
+	return snapshot
 }
 
 func (h *Host) boundQuotaAuthUpdate(data pluginapi.AuthData, auth *coreauth.Auth, path string) *coreauth.Auth {
@@ -124,32 +127,14 @@ func (h *Host) boundQuotaAuthUpdate(data pluginapi.AuthData, auth *coreauth.Auth
 	return updated
 }
 
-func (h *Host) callQuotaProviderIdentifier(pluginID string, provider pluginapi.QuotaProvider) (identifier string, ok bool) {
-	if h == nil || provider == nil || h.isPluginFused(pluginID) {
-		return "", false
-	}
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			h.fusePlugin(pluginID, "QuotaProvider.Identifier", recovered)
-			identifier, ok = "", false
-		}
-	}()
-	return strings.TrimSpace(provider.Identifier()), true
-}
-
 func (h *Host) callFetchQuota(ctx context.Context, record capabilityRecord, provider pluginapi.QuotaProvider, auth *coreauth.Auth, previous *pluginapi.QuotaSnapshot) (resp pluginapi.QuotaFetchResponse, err error) {
 	if h == nil || provider == nil || auth == nil || h.isPluginFused(record.id) || !h.recordCurrent(record) {
 		return pluginapi.QuotaFetchResponse{}, fmt.Errorf("quota provider is unavailable")
 	}
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			h.fusePlugin(record.id, "QuotaProvider.FetchQuota", recovered)
-			resp = pluginapi.QuotaFetchResponse{}
-			err = fmt.Errorf("quota provider panic: %v", recovered)
-		}
-	}()
-	return provider.FetchQuota(ctx, pluginapi.QuotaFetchRequest{
+	resp, handled, err := h.callQuotaFetch(ctx, record, provider, pluginapi.QuotaFetchRequest{
 		Plugin:       clonePluginMetadata(record.meta),
+		AuthIndex:    auth.Index,
+		Provider:     auth.Provider,
 		AuthID:       auth.ID,
 		AuthProvider: auth.Provider,
 		StorageJSON:  storageJSONFromAuth(auth),
@@ -159,4 +144,11 @@ func (h *Host) callFetchQuota(ctx context.Context, record capabilityRecord, prov
 		Host:         h.hostConfigSummary(),
 		HTTPClient:   h.newHTTPClient(auth, auth.Provider),
 	})
+	if err != nil {
+		return pluginapi.QuotaFetchResponse{}, err
+	}
+	if !handled {
+		return pluginapi.QuotaFetchResponse{}, fmt.Errorf("quota provider is unavailable")
+	}
+	return resp, nil
 }

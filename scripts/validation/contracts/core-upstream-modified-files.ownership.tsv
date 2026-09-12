@@ -32,11 +32,8 @@ internal/managementasset/updater.go	must-remain-host-patch	management-panel	reta
 internal/pluginhost/adapters_executors.go	generic-host-hook	plugin-executor-usage	upstream-complete-plugin-executor-usage-observation
 internal/pluginhost/auth_provider.go	generic-host-hook	plugin-auth	upstream-disabled-state-and-storage-normalization
 internal/pluginhost/executor_route.go	generic-host-hook	api-key-policy	upstream-plugin-executor-provider-introspection
-internal/pluginhost/host.go	generic-host-hook	plugin-quota	upstream-quota-provider-capability
 internal/pluginhost/host_callbacks.go	upstream-generic-fix	plugin-stream-lifecycle	upstream-stream-close-after-rpc-response
 internal/pluginhost/host_model_stream_callbacks.go	upstream-generic-fix	plugin-stream-lifecycle	upstream-stream-close-after-rpc-response
-internal/pluginhost/rpc_client.go	generic-host-hook	plugin-quota	upstream-rpc-quota-provider
-internal/pluginhost/rpc_schema.go	generic-host-hook	plugin-quota	upstream-rpc-quota-schema
 internal/pluginhost/snapshot.go	generic-host-hook	plugin-quota	upstream-quota-capability-snapshot
 internal/pluginstore/auth.go	upstream-generic-fix	plugin-store-auth	upstream-private-github-release-auth
 internal/redisqueue/plugin.go	must-remain-host-patch	observability	retain-usage-enrichment-and-monitoring-controls
@@ -96,6 +93,5 @@ sdk/cliproxy/service_lifecycle.go	must-remain-host-patch	pro-composition	retain-
 sdk/cliproxy/service_models.go	generic-host-hook	account-policy	upstream-auth-model-filter-hook-and-generation-fence
 sdk/cliproxy/service_plugins.go	upstream-generic-fix	model-registration	upstream-generation-fenced-plugin-refresh
 sdk/cliproxy/usage/manager.go	generic-host-hook	usage-lifecycle	upstream-request-metadata-and-named-plugin-unregister
-sdk/pluginabi/types.go	generic-host-hook	plugin-quota	upstream-quota-provider-rpc-methods
 sdk/pluginapi/types.go	generic-host-hook	plugin-quota	upstream-provider-neutral-quota-contract
 sdk/proxyutil/proxy.go	must-remain-host-patch	final-outbound-transport	retain-runtime-proxy-override-until-transport-hook-exists

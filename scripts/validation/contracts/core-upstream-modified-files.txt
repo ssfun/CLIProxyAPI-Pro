@@ -29,11 +29,8 @@ internal/managementasset/updater.go
 internal/pluginhost/adapters_executors.go
 internal/pluginhost/auth_provider.go
 internal/pluginhost/executor_route.go
-internal/pluginhost/host.go
 internal/pluginhost/host_callbacks.go
 internal/pluginhost/host_model_stream_callbacks.go
-internal/pluginhost/rpc_client.go
-internal/pluginhost/rpc_schema.go
 internal/pluginhost/snapshot.go
 internal/pluginstore/auth.go
 internal/redisqueue/plugin.go
@@ -93,6 +90,5 @@ sdk/cliproxy/service_lifecycle.go
 sdk/cliproxy/service_models.go
 sdk/cliproxy/service_plugins.go
 sdk/cliproxy/usage/manager.go
-sdk/pluginabi/types.go
 sdk/pluginapi/types.go
 sdk/proxyutil/proxy.go
