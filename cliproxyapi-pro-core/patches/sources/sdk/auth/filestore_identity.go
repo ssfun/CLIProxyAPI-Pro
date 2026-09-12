@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	claudeauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/claude"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
@@ -35,9 +36,10 @@ func authMetadataString(metadata map[string]any, keys ...string) string {
 }
 
 type providerFileIdentity struct {
-	provider  string
-	strongKey string
-	companion string
+	provider     string
+	strongKey    string
+	companion    string
+	organization string
 }
 
 func resolveProviderFileIdentity(provider string, metadata map[string]any) (providerFileIdentity, bool) {
@@ -54,6 +56,7 @@ func resolveProviderFileIdentity(provider string, metadata map[string]any) (prov
 	case "claude":
 		identity.strongKey = authMetadataString(metadata, "account_uuid", "account_id")
 		identity.companion = email
+		identity.organization = authMetadataString(metadata, "organization_uuid")
 	case "xai":
 		identity.strongKey = authMetadataString(metadata, "sub", "subject", "user_id")
 		identity.companion = email
@@ -116,6 +119,20 @@ func (s *FileTokenStore) reuseExistingProviderIdentity(auth *cliproxyauth.Auth) 
 	if !ok {
 		return nil
 	}
+	// Canonical Claude filenames and legacy migration are owned by upstream.
+	// Reusing a legacy path here would let the caller delete the newly saved file.
+	if identity.provider == "claude" {
+		email := authMetadataString(auth.Metadata, "email")
+		account := authMetadataString(auth.Metadata, "account_uuid")
+		name := strings.TrimSpace(auth.FileName)
+		if name == "" {
+			name = strings.TrimSpace(auth.ID)
+		}
+		if email != "" && (identity.organization != "" || account != "") &&
+			strings.EqualFold(filepath.Base(name), claudeauth.CredentialFileName(email, identity.organization, account)) {
+			return nil
+		}
+	}
 	baseDir := s.baseDirSnapshot()
 	if baseDir == "" {
 		return nil
@@ -136,6 +153,9 @@ func (s *FileTokenStore) reuseExistingProviderIdentity(auth *cliproxyauth.Auth) 
 		path := filepath.Join(baseDir, entry.Name())
 		existing, exists := storedProviderFileIdentity(path)
 		if !exists || existing.provider != identity.provider || existing.strongKey != identity.strongKey {
+			continue
+		}
+		if identity.provider == "claude" && !strings.EqualFold(identity.organization, existing.organization) {
 			continue
 		}
 		if identity.companion != "" && existing.companion != "" &&

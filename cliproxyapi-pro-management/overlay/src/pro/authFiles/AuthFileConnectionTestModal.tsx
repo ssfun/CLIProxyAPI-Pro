@@ -62,7 +62,7 @@ export function AuthFileConnectionTestModal({
 
     setModelsLoading(true);
     void authFilesApi
-      .getModelsForAuthFile(activeFile.name, normalizeAuthIndex(activeFile.authIndex))
+      .getModelsForAuthFile(activeFile.name, normalizeAuthIndex(activeFile.authIndex), 'connection-test')
       .then((items) => {
         if (requestSequence.current !== sequence) return;
         const seen = new Set<string>();

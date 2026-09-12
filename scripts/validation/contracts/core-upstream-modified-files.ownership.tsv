@@ -1,4 +1,4 @@
-# Latest-only ownership review for Core v7.2.152.
+# Latest-only ownership review for Core v7.2.158.
 # Categories describe the whole Pro delta for each modified upstream file.
 # The current roadmap keeps host business-state extensions in host patches;
 # this review does not assume or require a plugin migration.
@@ -52,8 +52,10 @@ internal/runtime/executor/codex_websockets_execute.go	upstream-generic-fix	codex
 internal/runtime/executor/codex_websockets_executor_test.go	upstream-generic-fix	codex-rate-limit-retry	upstream-align-websocket-connection-limit-retry-after-expectation
 internal/runtime/executor/codex_websockets_stream.go	upstream-generic-fix	codex-rate-limit-retry	upstream-forward-standard-retry-after-through-websocket-stream
 internal/runtime/executor/helps/logging_helpers.go	generic-host-hook	request-observer	upstream-final-response-observer
+internal/runtime/executor/helps/openai_compat_tool_results.go	upstream-generic-fix	tool-image-relay	upstream-text-only-normalization-of-relayed-user-images
 internal/runtime/executor/helps/usage_helpers.go	must-remain-host-patch	api-key-policy	retain-synchronous-quota-settlement-while-upstreaming-usage-fixes
 internal/runtime/executor/openai_compat_executor.go	upstream-generic-fix	usage-accounting	upstream-terminal-usage-publication-correctness
+internal/runtime/executor/openai_compat_executor_tool_results_test.go	upstream-generic-fix	tool-image-relay	upstream-executor-tests-for-relayed-user-images
 internal/runtime/executor/xai_executor.go	must-remain-host-patch	final-outbound-transport	retain-xai-request-identity-bridge
 internal/runtime/executor/xai_executor_execute.go	generic-host-hook	request-observer	upstream-built-in-executor-response-observer
 internal/runtime/executor/xai_executor_stream.go	generic-host-hook	request-observer	upstream-built-in-stream-response-observer

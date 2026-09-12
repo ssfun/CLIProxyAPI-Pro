@@ -545,7 +545,10 @@ replace_once(
 		return "", fmt.Errorf("auth filestore: missing file path attribute for %s", auth.ID)
 	}
 
-	if auth.Disabled {
+	// Runtime updates must not recreate a disabled credential whose source file
+	// was deliberately removed. Login and migration callers explicitly mark the
+	// save when creating a missing disabled credential is intentional.
+	if auth.Disabled && !cliproxyauth.HasAuthCreationIntent(ctx) {
 		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
 			return "", nil
 		}
@@ -568,7 +571,10 @@ replace_once(
 		return "", fmt.Errorf("auth filestore: missing file path attribute for %s", auth.ID)
 	}
 
-	if auth.Disabled {
+	// Runtime updates must not recreate a disabled credential whose source file
+	// was deliberately removed. Login and migration callers explicitly mark the
+	// save when creating a missing disabled credential is intentional.
+	if auth.Disabled && !cliproxyauth.HasAuthCreationIntent(ctx) {
 		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
 			return "", nil
 		}
@@ -2544,7 +2550,7 @@ replace_once(
     openai_handlers_source,
     '''\tif _, ok := c.Request.URL.Query()["client_version"]; ok {
 \t\tclientVersion := c.Query("client_version")
-\t\tc.JSON(http.StatusOK, h.codexClientModelsResponse(clientVersion))
+\t\th.WriteModelListResponse(c, h.HandlerType(), h.codexClientModelsResponse(clientVersion))
 \t\treturn
 \t}
 
@@ -2558,7 +2564,7 @@ replace_once(
 \t}
 \tif _, ok := c.Request.URL.Query()["client_version"]; ok {
 \t\tclientVersion := c.Query("client_version")
-\t\tc.JSON(http.StatusOK, codexmodels.BuildResponseForClient(allModels, registry.GetGlobalRegistry().GetModelProviders, h.Cfg != nil && h.Cfg.CodexOptimizeMultiAgentV2, clientVersion))
+\t\th.WriteModelListResponse(c, h.HandlerType(), codexmodels.BuildResponseForClient(allModels, registry.GetGlobalRegistry().GetModelProviders, h.Cfg != nil && h.Cfg.CodexOptimizeMultiAgentV2, clientVersion))
 \t\treturn
 \t}
 
@@ -2592,7 +2598,7 @@ replace_once(
     claude_handlers_source,
     '''func (h *ClaudeCodeAPIHandler) ClaudeModels(c *gin.Context) {
 \tdisableCloaking := h.Cfg != nil && h.Cfg.ClaudeCode.DisableCloakingModelList
-\tc.JSON(http.StatusOK, claudemodels.BuildResponse(h.Models(), disableCloaking))
+\th.WriteModelListResponse(c, h.HandlerType(), claudemodels.BuildResponse(h.Models(), disableCloaking))
 }
 ''',
     '''func (h *ClaudeCodeAPIHandler) ClaudeModels(c *gin.Context) {
@@ -2606,7 +2612,7 @@ replace_once(
 \t\treturn
 \t}
 \tdisableCloaking := h.Cfg != nil && h.Cfg.ClaudeCode.DisableCloakingModelList
-\tc.JSON(http.StatusOK, claudemodels.BuildResponse(models, disableCloaking))
+\th.WriteModelListResponse(c, h.HandlerType(), claudemodels.BuildResponse(models, disableCloaking))
 }
 ''',
     'models, policyErr := handlers.FilterModelMapsForRequest',
@@ -2684,7 +2690,7 @@ replace_once(
     '''\t} else {
 \t\tmodels = grokModelsFromRegistryInfos(registry.GetGlobalRegistry().GetAvailableModelInfos())
 \t}
-\tc.JSON(http.StatusOK, grokbuild.BuildResponse(models))
+\ts.writeModelListResponse(c, "openai", grokbuild.BuildResponse(models))
 ''',
     '''\t} else {
 \t\tvar ok bool
@@ -2693,7 +2699,7 @@ replace_once(
 \t\t\treturn
 \t\t}
 \t}
-\tc.JSON(http.StatusOK, grokbuild.BuildResponse(models))
+\ts.writeModelListResponse(c, "openai", grokbuild.BuildResponse(models))
 ''',
     'models, ok = s.filterRegistryGrokModels',
 )
@@ -3459,6 +3465,48 @@ insert_before(
 )
 
 openai_compat_execute = ROOT / 'internal/runtime/executor/openai_compat_executor.go'
+replace_once(
+    ROOT / 'internal/runtime/executor/helps/openai_compat_tool_results.go',
+    '\t\tif message.Get("role").String() == "tool" {\n',
+    '\t\t// Claude tool images now arrive in a user message, possibly merged with user text.\n'
+    '\t\tisToolImageRelay := message.Get("role").String() == "user" && message.Get("content.0.text").String() == "Images returned by the preceding tool call(s):"\n'
+    '\t\tif message.Get("role").String() == "tool" || isToolImageRelay {\n',
+    '|| isToolImageRelay',
+)
+replace_once(
+    ROOT / 'internal/runtime/executor/openai_compat_executor_tool_results_test.go',
+    '''\t\t\ttoolContent := gjson.GetBytes(gotBody, "messages.1.content")
+\t\t\tif tt.wantString {
+\t\t\t\tif toolContent.Type != gjson.String {
+\t\t\t\t\tt.Fatalf("tool content type = %s, want string; body=%s", toolContent.Type, string(gotBody))
+\t\t\t\t}
+\t\t\t\twant := "image inspected\\n\\n[image omitted: unsupported by upstream]"
+\t\t\t\tif toolContent.String() != want {
+\t\t\t\t\tt.Fatalf("tool content = %q, want %q", toolContent.String(), want)
+\t\t\t\t}
+\t\t\t} else if !toolContent.IsArray() {
+\t\t\t\tt.Fatalf("tool content type = %s, want array; body=%s", toolContent.Type, string(gotBody))
+\t\t\t}
+''',
+    '''\t\t\ttoolContent := gjson.GetBytes(gotBody, "messages.1.content")
+\t\t\tif toolContent.Type != gjson.String || toolContent.String() != "image inspected" {
+\t\t\t\tt.Fatalf("tool text changed: %s", gotBody)
+\t\t\t}
+\t\t\tif gjson.GetBytes(gotBody, "messages.2.role").String() != "user" {
+\t\t\t\tt.Fatalf("missing relayed tool image user message: %s", gotBody)
+\t\t\t}
+\t\t\trelayContent := gjson.GetBytes(gotBody, "messages.2.content")
+\t\t\tif tt.wantString {
+\t\t\t\twant := "Images returned by the preceding tool call(s):\\n\\n[image omitted: unsupported by upstream]"
+\t\t\t\tif relayContent.Type != gjson.String || relayContent.String() != want {
+\t\t\t\t\tt.Fatalf("text-only relay content = %s, want %q", relayContent.Raw, want)
+\t\t\t\t}
+\t\t\t} else if !relayContent.IsArray() || relayContent.Get("1.image_url.url").String() != "data:image/png;base64,AA==" {
+\t\t\t\tt.Fatalf("relayed tool image lost: %s", gotBody)
+\t\t\t}
+''',
+    'relayed tool image lost',
+)
 replace_once(
     openai_compat_execute,
     '''\thelps.AppendAPIResponseChunk(ctx, e.cfg, body)
@@ -4927,7 +4975,7 @@ replace_once(
 \tresult := make([]gin.H, 0, len(models))
 ''',
     '''\tmodels := reg.GetModelsForClient(authID)
-\tif len(models) == 0 && selectedAuth != nil {
+\tif len(models) == 0 && selectedAuth != nil && c.Query("purpose") == "connection-test" {
 \t\tmodels = authFileManagementFallbackModels(selectedAuth)
 \t}
 
@@ -5488,13 +5536,12 @@ add_go_import(
 )
 replace_once(
     auth_files_fields_handler,
-    '''\tsavedPath, errSave := store.Save(ctx, record)
+    '''\tsavedPath, errSave := store.Save(coreauth.WithAuthCreationIntent(ctx), record)
 \tif errSave != nil {
 \t\treturn savedPath, errSave
 \t}
-\tif h.postAuthPersistHook != nil {
 ''',
-    '''\tsavedPath, errSave := store.Save(ctx, record)
+    '''\tsavedPath, errSave := store.Save(coreauth.WithAuthCreationIntent(ctx), record)
 \tif errSave != nil {
 \t\treturn savedPath, errSave
 \t}
@@ -5504,7 +5551,6 @@ replace_once(
 \t\t// entitlement changes make the previous snapshot unsafe to reuse.
 \t\t_ = embeddedusage.DeleteQuotaCache(ctx, record.Provider, record.FileName)
 \t}
-\tif h.postAuthPersistHook != nil {
 ''',
     'sdkAuth.TakeReusedExistingAuthIdentity(record)',
 )

@@ -1,4 +1,4 @@
-# Latest-only baseline: CLIProxyAPI v7.2.152 (c76dfd4e0edabab9000628b1560ab8ab379eadb8).
+# Latest-only baseline: CLIProxyAPI v7.2.158 (5b2785617d1e7de84a9f4dee599d275a4ccd8999).
 # Update this reviewed surface only when adapting to a newer latest upstream release.
 cmd/server/main.go
 config.example.yaml
@@ -49,8 +49,10 @@ internal/runtime/executor/codex_websockets_execute.go
 internal/runtime/executor/codex_websockets_executor_test.go
 internal/runtime/executor/codex_websockets_stream.go
 internal/runtime/executor/helps/logging_helpers.go
+internal/runtime/executor/helps/openai_compat_tool_results.go
 internal/runtime/executor/helps/usage_helpers.go
 internal/runtime/executor/openai_compat_executor.go
+internal/runtime/executor/openai_compat_executor_tool_results_test.go
 internal/runtime/executor/xai_executor.go
 internal/runtime/executor/xai_executor_execute.go
 internal/runtime/executor/xai_executor_stream.go

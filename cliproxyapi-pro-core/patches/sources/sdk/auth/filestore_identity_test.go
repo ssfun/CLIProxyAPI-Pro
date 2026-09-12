@@ -132,6 +132,31 @@ func TestFileTokenStoreSaveDoesNotGuessUnsupportedProviderIdentity(t *testing.T)
 	}
 }
 
+func TestFileTokenStoreSaveDoesNotReuseClaudeAcrossOrganizations(t *testing.T) {
+	for _, organization := range []string{"organization-b", ""} {
+		t.Run(organization, func(t *testing.T) {
+			baseDir := t.TempDir()
+			oldPath := filepath.Join(baseDir, "claude-old.json")
+			oldJSON := []byte(`{"type":"claude","account_uuid":"account-1","email":"user@example.com","organization_uuid":"organization-a","access_token":"old"}`)
+			if err := os.WriteFile(oldPath, oldJSON, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			store := NewFileTokenStore()
+			store.SetBaseDir(baseDir)
+			auth := &cliproxyauth.Auth{ID: "claude-custom.json", FileName: "claude-custom.json", Provider: "claude",
+				Metadata: map[string]any{"type": "claude", "account_uuid": "account-1", "email": "user@example.com", "organization_uuid": organization}}
+			path, err := store.Save(context.Background(), auth)
+			if err != nil || path != filepath.Join(baseDir, auth.FileName) || path == oldPath || TakeReusedExistingAuthIdentity(auth) {
+				t.Fatalf("Save() = %q, %v; crossed organization boundary", path, err)
+			}
+			got, err := os.ReadFile(oldPath)
+			if err != nil || string(got) != string(oldJSON) {
+				t.Fatalf("old credential changed: %s, %v", got, err)
+			}
+		})
+	}
+}
+
 func TestFileTokenStoreSaveRejectsAmbiguousCodexStrongIdentity(t *testing.T) {
 	baseDir := t.TempDir()
 	for _, name := range []string{"codex-old-free.json", "codex-old-plus.json"} {

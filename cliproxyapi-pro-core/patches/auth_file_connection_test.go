@@ -75,11 +75,18 @@ func TestAuthFileConnectionUsesExactAuthAndReturnsOutput(t *testing.T) {
 	testModel := testModels[0].ID
 
 	handler := &Handler{authManager: manager}
+	ordinaryRecorder := httptest.NewRecorder()
+	ordinaryContext, _ := gin.CreateTestContext(ordinaryRecorder)
+	ordinaryContext.Request = httptest.NewRequest(http.MethodGet, "/v0/management/auth-files/models?name=account.json", nil)
+	handler.GetAuthFileModels(ordinaryContext)
+	if ordinaryRecorder.Code != http.StatusOK || ordinaryRecorder.Body.String() != "{\"models\":[]}" {
+		t.Fatalf("disabled auth ordinary models = %s", ordinaryRecorder.Body.String())
+	}
 	modelsRecorder := httptest.NewRecorder()
 	modelsContext, _ := gin.CreateTestContext(modelsRecorder)
 	modelsContext.Request = httptest.NewRequest(
 		http.MethodGet,
-		"/v0/management/auth-files/models?name=account.json",
+		"/v0/management/auth-files/models?name=account.json&purpose=connection-test",
 		nil,
 	)
 	handler.GetAuthFileModels(modelsContext)

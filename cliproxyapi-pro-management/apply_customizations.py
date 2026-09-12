@@ -1442,14 +1442,15 @@ def patch_auth_file_connection_test(target: Path) -> None:
         "    );\n",
         "  async getModelsForAuthFile(\n"
         "    name: string,\n"
-        "    authIndex?: string\n"
+        "    authIndex?: string,\n"
+        "    purpose?: 'connection-test'\n"
         "  ): Promise<{ id: string; display_name?: string; type?: string; owned_by?: string }[]> {\n"
         "    const normalizedAuthIndex = authIndex?.trim();\n"
         "    const authIndexQuery = normalizedAuthIndex\n"
         "      ? `&auth_index=${encodeURIComponent(normalizedAuthIndex)}`\n"
         "      : '';\n"
         "    const data = await apiClient.get<Record<string, unknown>>(\n"
-        "      `/auth-files/models?name=${encodeURIComponent(name)}${authIndexQuery}`\n"
+        "      `/auth-files/models?name=${encodeURIComponent(name)}${authIndexQuery}${purpose === 'connection-test' ? '&purpose=connection-test' : ''}`\n"
         "    );\n",
     )
 
