@@ -49,7 +49,7 @@ internal/runtime/executor/codex_executor_terminal.go	upstream-generic-fix	codex-
 internal/runtime/executor/codex_openai_images.go	upstream-generic-fix	codex-rate-limit-retry	upstream-forward-standard-retry-after-through-image-execution
 internal/runtime/executor/codex_websockets_errors.go	upstream-generic-fix	codex-rate-limit-retry	upstream-parse-standard-retry-after-from-websocket-error-frames
 internal/runtime/executor/codex_websockets_execute.go	upstream-generic-fix	codex-rate-limit-retry	upstream-forward-standard-retry-after-through-websocket-execution
-internal/runtime/executor/codex_websockets_executor_test.go	upstream-generic-fix	codex-rate-limit-retry	upstream-align-websocket-connection-limit-retry-after-expectation
+internal/runtime/executor/codex_websockets_executor_test.go	upstream-generic-fix	codex-websocket-tests	align-retry-after-and-wait-for-upload-before-terminal-response
 internal/runtime/executor/codex_websockets_stream.go	upstream-generic-fix	codex-rate-limit-retry	upstream-forward-standard-retry-after-through-websocket-stream
 internal/runtime/executor/helps/logging_helpers.go	generic-host-hook	request-observer	upstream-final-response-observer
 internal/runtime/executor/helps/openai_compat_tool_results.go	upstream-generic-fix	tool-image-relay	upstream-text-only-normalization-of-relayed-user-images
@@ -60,6 +60,7 @@ internal/runtime/executor/xai_executor.go	must-remain-host-patch	final-outbound-
 internal/runtime/executor/xai_executor_execute.go	generic-host-hook	request-observer	upstream-built-in-executor-response-observer
 internal/runtime/executor/xai_executor_stream.go	generic-host-hook	request-observer	upstream-built-in-stream-response-observer
 internal/runtime/executor/xai_websockets_executor.go	generic-host-hook	request-observer	upstream-built-in-websocket-response-observer
+internal/runtime/executor/xai_websockets_executor_test.go	upstream-generic-fix	websocket-keepalive-tests	wait-for-client-upload-before-terminal-response
 internal/translator/codex/openai/chat-completions/codex_openai_request.go	upstream-generic-fix	codex-fast-tier	upstream-forward-fast-service-tier-as-priority
 internal/translator/codex/openai/responses/codex_openai-responses_request.go	upstream-generic-fix	codex-fast-tier	upstream-normalize-fast-service-tier-to-priority
 sdk/api/handlers/claude/code_handlers.go	must-remain-host-patch	final-model-response	retain-request-policy-model-filtering

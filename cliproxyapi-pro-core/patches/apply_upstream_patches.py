@@ -483,6 +483,61 @@ replace_once(
     'want standard Retry-After 1s',
 )
 
+# Receiving Pong only releases the upload hook; it does not mean the request
+# has arrived. Keep the mock upstream alive until its reader receives it.
+for provider, variants in (
+    ('codex', ('WithSession', 'Sessionless', 'NonstreamSessionless')),
+    ('xai', ('WithSession', 'Sessionless')),
+):
+    websocket_tests = ROOT / f'internal/runtime/executor/{provider}_websockets_executor_test.go'
+    for variant in variants:
+        signature = f'func Test{provider.upper() if provider == "xai" else "Codex"}Websockets_KeepalivePingDuringUpload_{variant}(t *testing.T) {{'
+        text = read(websocket_tests)
+        start = text.find(signature)
+        if start < 0:
+            raise SystemExit(f'function not found in {websocket_tests}: {signature!r}')
+        end = text.find('\nfunc ', start + len(signature))
+        if end < 0:
+            end = len(text)
+        body = text[start:end]
+        reader = '''\t\tgo func() {
+\t\t\tfor {
+\t\t\t\tif _, _, errReadLoop := conn.ReadMessage(); errReadLoop != nil {
+\t\t\t\t\treturn
+\t\t\t\t}
+\t\t\t}
+\t\t}()'''
+        if provider == 'codex':
+            reader = reader.replace('errReadLoop', 'errRead')
+            if variant == 'WithSession':
+                reader = reader.replace('\t\t\t\t\treturn', '\t\t\t\t\treadErrCh <- errRead\n\t\t\t\t\treturn')
+        if body.count(reader) != 1:
+            raise SystemExit(f'expected one upload reader in {websocket_tests}: {signature}')
+        # The Codex session test has an unused error channel before its reader.
+        body = body.replace(reader, '''\t\trequestReadCh := make(chan error, 1)
+\t\tgo func() {
+\t\t\t_, _, errRead := conn.ReadMessage()
+\t\t\trequestReadCh <- errRead
+\t\t}()''', 1)
+        body = body.replace('\t\treadErrCh := make(chan error, 1)\n', '', 1)
+        marker = '\t\trespPayload := '
+        if body.count(marker) != 1:
+            raise SystemExit(f'expected one terminal response in {websocket_tests}: {signature}')
+        body = body.replace(marker, '''\t\t// Pong unblocks the upload hook; wait for the actual request before closing.
+\t\tselect {
+\t\tcase errRead := <-requestReadCh:
+\t\t\tif errRead != nil {
+\t\t\t\tt.Errorf("read client request after pong: %v", errRead)
+\t\t\t\treturn
+\t\t\t}
+\t\tcase <-time.After(2 * time.Second):
+\t\t\tt.Error("timed out waiting for client request after pong")
+\t\t\treturn
+\t\t}
+
+''' + marker, 1)
+        write(websocket_tests, text[:start] + body + text[end:])
+
 home_concurrency = ROOT / 'sdk/cliproxy/auth/home_concurrency.go'
 replace_go_function(
     home_concurrency,
@@ -5922,6 +5977,7 @@ format_go_writes([
     'internal/runtime/executor/codex_websockets_errors.go',
     'internal/runtime/executor/codex_websockets_execute.go',
     'internal/runtime/executor/codex_websockets_executor_test.go',
+    'internal/runtime/executor/xai_websockets_executor_test.go',
     'internal/runtime/executor/codex_websockets_stream.go',
     'internal/pro/oauthpolicy/config/config.go',
     'internal/pro/oauthpolicy/config/config_test.go',
