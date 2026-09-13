@@ -1211,36 +1211,17 @@ def patch_layout(target: Path) -> None:
 
 def patch_quota_store(target: Path) -> None:
     path = target / 'src/stores/useQuotaStore.ts'
-    replace_once(
-        path,
-        "  CodexQuotaState,\n  KimiQuotaState,",
-        "  CodexQuotaState,\n  GeminiCliQuotaState,\n  KimiQuotaState,",
-    )
-    replace_once(
-        path,
-        "  codexQuota: Record<string, CodexQuotaState>;\n  kimiQuota: Record<string, KimiQuotaState>;",
-        "  codexQuota: Record<string, CodexQuotaState>;\n  geminiCliQuota: Record<string, GeminiCliQuotaState>;\n  kimiQuota: Record<string, KimiQuotaState>;",
-    )
-    replace_once(
-        path,
-        "  setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;\n  setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void;",
-        "  setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;\n  setGeminiCliQuota: (updater: QuotaUpdater<Record<string, GeminiCliQuotaState>>) => void;\n  setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void;",
-    )
-    replace_once(
-        path,
-        "  codexQuota: {},\n  kimiQuota: {},",
-        "  codexQuota: {},\n  geminiCliQuota: {},\n  kimiQuota: {},",
-    )
-    replace_once(
-        path,
-        "  setCodexQuota: (updater) =>\n    set((state) => ({\n      codexQuota: resolveUpdater(updater, state.codexQuota),\n    })),\n  setKimiQuota: (updater) =>",
-        "  setCodexQuota: (updater) =>\n    set((state) => ({\n      codexQuota: resolveUpdater(updater, state.codexQuota),\n    })),\n  setGeminiCliQuota: (updater) =>\n    set((state) => ({\n      geminiCliQuota: resolveUpdater(updater, state.geminiCliQuota),\n    })),\n  setKimiQuota: (updater) =>",
-    )
-    replace_once(
-        path,
-        "      codexQuota: {},\n      kimiQuota: {},",
-        "      codexQuota: {},\n      geminiCliQuota: {},\n      kimiQuota: {},",
-    )
+    # Extend individual Codex entries without relying on adjacent providers.
+    for old, new in (
+        ("  CodexQuotaState,\n", "  CodexQuotaState,\n  GeminiCliQuotaState,\n"),
+        ("  codexQuota: Record<string, CodexQuotaState>;\n", "  codexQuota: Record<string, CodexQuotaState>;\n  geminiCliQuota: Record<string, GeminiCliQuotaState>;\n"),
+        ("  setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;\n", "  setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;\n  setGeminiCliQuota: (updater: QuotaUpdater<Record<string, GeminiCliQuotaState>>) => void;\n"),
+        ("\n  codexQuota: {},\n", "\n  codexQuota: {},\n  geminiCliQuota: {},\n"),
+        ("  setCodexQuota: (updater) =>\n    set((state) => ({\n      codexQuota: resolveUpdater(updater, state.codexQuota),\n    })),\n", "  setCodexQuota: (updater) =>\n    set((state) => ({\n      codexQuota: resolveUpdater(updater, state.codexQuota),\n    })),\n  setGeminiCliQuota: (updater) =>\n    set((state) => ({\n      geminiCliQuota: resolveUpdater(updater, state.geminiCliQuota),\n    })),\n"),
+        ("          codexQuota: omitNames(state.codexQuota),\n", "          codexQuota: omitNames(state.codexQuota),\n          geminiCliQuota: omitNames(state.geminiCliQuota),\n"),
+        ("        codexQuota: {},\n", "        codexQuota: {},\n        geminiCliQuota: {},\n"),
+    ):
+        replace_once(path, old, new)
 
 
 def patch_quota_constants(target: Path) -> None:
@@ -1589,7 +1570,7 @@ def patch_supporting_api_and_types(target: Path) -> None:
     insert_once(
         auth_files_path,
         "export const authFilesApi = {\n",
-        "const AUTH_FILES_LIST_CACHE_TTL_MS = 2000;\nlet authFilesListCache: { expiresAt: number; response: AuthFilesResponse } | null = null;\nlet authFilesListRequest: Promise<AuthFilesResponse> | null = null;\nlet authFilesListVersion = 0;\n\nconst cloneAuthFilesResponse = (response: AuthFilesResponse): AuthFilesResponse => ({\n  ...response,\n  files: Array.isArray(response.files) ? [...response.files] : [],\n});\n\nconst invalidateAuthFilesListCache = () => {\n  authFilesListVersion += 1;\n  authFilesListCache = null;\n  authFilesListRequest = null;\n};\n\nconst fetchAuthFilesList = async (): Promise<AuthFilesResponse> => {\n  const now = Date.now();\n  if (authFilesListCache && authFilesListCache.expiresAt > now) {\n    return cloneAuthFilesResponse(authFilesListCache.response);\n  }\n  if (!authFilesListRequest) {\n    const requestVersion = authFilesListVersion;\n    authFilesListRequest = apiClient.get<AuthFilesResponse>('/auth-files')\n      .then(normalizeAuthFilesResponse)\n      .then((response) => {\n        if (requestVersion === authFilesListVersion) {\n          authFilesListCache = {\n            expiresAt: Date.now() + AUTH_FILES_LIST_CACHE_TTL_MS,\n            response: cloneAuthFilesResponse(response),\n          };\n        }\n        return response;\n      })\n      .finally(() => {\n        if (requestVersion === authFilesListVersion) {\n          authFilesListRequest = null;\n        }\n      });\n  }\n  return cloneAuthFilesResponse(await authFilesListRequest);\n};\n\nexport const authFilesApi = {\n",
+        "const AUTH_FILES_LIST_CACHE_TTL_MS = 2000;\nlet authFilesListCache: { expiresAt: number; response: AuthFilesResponse } | null = null;\nlet authFilesListRequest: Promise<AuthFilesResponse> | null = null;\nlet authFilesListVersion = 0;\n\nconst cloneAuthFilesResponse = (response: AuthFilesResponse): AuthFilesResponse => ({\n  ...response,\n  files: Array.isArray(response.files) ? [...response.files] : [],\n});\n\nconst invalidateAuthFilesListCache = () => {\n  authFilesListVersion += 1;\n  authFilesListCache = null;\n  authFilesListRequest = null;\n};\n\nconst fetchAuthFilesList = async (lookup?: AuthFileLookup): Promise<AuthFilesResponse> => {\n  if (lookup) {\n    return normalizeAuthFilesResponse(await apiClient.get<AuthFilesResponse>('/auth-files', {\n      params: { name: lookup.name, auth_index: lookup.authIndex },\n    }));\n  }\n  const now = Date.now();\n  if (authFilesListCache && authFilesListCache.expiresAt > now) {\n    return cloneAuthFilesResponse(authFilesListCache.response);\n  }\n  if (!authFilesListRequest) {\n    const requestVersion = authFilesListVersion;\n    authFilesListRequest = apiClient.get<AuthFilesResponse>('/auth-files', undefined)\n      .then(normalizeAuthFilesResponse)\n      .then((response) => {\n        if (requestVersion === authFilesListVersion) {\n          authFilesListCache = {\n            expiresAt: Date.now() + AUTH_FILES_LIST_CACHE_TTL_MS,\n            response: cloneAuthFilesResponse(response),\n          };\n        }\n        return response;\n      })\n      .finally(() => {\n        if (requestVersion === authFilesListVersion) {\n          authFilesListRequest = null;\n        }\n      });\n  }\n  return cloneAuthFilesResponse(await authFilesListRequest);\n};\n\nexport const authFilesApi = {\n",
         "AUTH_FILES_LIST_CACHE_TTL_MS",
     )
     list_replacement = (
@@ -1597,8 +1578,13 @@ def patch_supporting_api_and_types(target: Path) -> None:
     )
     replace_once(
         auth_files_path,
-        "  list: async () =>\n"
-        "    normalizeAuthFilesResponse(await apiClient.get<AuthFilesResponse>('/auth-files')),\n\n"
+        "  list: async (lookup?: AuthFileLookup) =>\n"
+        "    normalizeAuthFilesResponse(\n"
+        "      await apiClient.get<AuthFilesResponse>(\n"
+        "        '/auth-files',\n"
+        "        lookup ? { params: { name: lookup.name, auth_index: lookup.authIndex } } : undefined\n"
+        "      )\n"
+        "    ),\n\n"
         "  setStatus: (name: string, disabled: boolean) =>\n"
         "    apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled }),\n\n",
         list_replacement,
@@ -1622,6 +1608,12 @@ def patch_supporting_api_and_types(target: Path) -> None:
         auth_files_path,
         "  deleteAll: () => apiClient.delete('/auth-files', { params: { all: true } }),\n",
         "  deleteAll: async () => {\n    const response = await apiClient.delete('/auth-files', { params: { all: true } });\n    invalidateAuthFilesListCache();\n    return response;\n  },\n",
+    )
+
+    replace_once(
+        auth_files_path,
+        "      ...(authIndex ? { auth_index: authIndex } : {}),\n    });\n",
+        "      ...(authIndex ? { auth_index: authIndex } : {}),\n    });\n    invalidateAuthFilesListCache();\n",
     )
 
     format_path = target / 'src/utils/format.ts'
@@ -1803,10 +1795,10 @@ def patch_quota_types_latest(target: Path) -> None:
     _ensure_interface_field(path, 'XaiBillingSummary', '  freeQuota?: XaiFreeQuotaSummary;')
 def patch_quota_provider_model_latest(target: Path) -> None:
     types_path = target / 'src/features/quota/providers/types.ts'
-    replace_once(types_path, '  CodexQuotaState,\n  KimiQuotaState,', '  CodexQuotaState,\n  GeminiCliQuotaState,\n  KimiQuotaState,')
-    replace_once(types_path, "export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'kimi' | 'xai';", "export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'gemini-cli' | 'kimi' | 'xai';")
-    replace_once(types_path, '  codexQuota: Record<string, CodexQuotaState>;\n  kimiQuota:', '  codexQuota: Record<string, CodexQuotaState>;\n  geminiCliQuota: Record<string, GeminiCliQuotaState>;\n  kimiQuota:')
-    replace_once(types_path, '  setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;\n  setKimiQuota:', '  setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;\n  setGeminiCliQuota: (updater: QuotaUpdater<Record<string, GeminiCliQuotaState>>) => void;\n  setKimiQuota:')
+    replace_once(types_path, '  CodexQuotaState,\n', '  CodexQuotaState,\n  GeminiCliQuotaState,\n')
+    replace_once(types_path, "export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'devin' | 'kimi' | 'xai';", "export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'gemini-cli' | 'devin' | 'kimi' | 'xai';")
+    replace_once(types_path, '  codexQuota: Record<string, CodexQuotaState>;\n', '  codexQuota: Record<string, CodexQuotaState>;\n  geminiCliQuota: Record<string, GeminiCliQuotaState>;\n')
+    replace_once(types_path, '  setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;\n', '  setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;\n  setGeminiCliQuota: (updater: QuotaUpdater<Record<string, GeminiCliQuotaState>>) => void;\n')
 
     xai_paid_path = target / 'src/utils/quota/xaiPaid.ts'
     replace_once(
@@ -1871,7 +1863,7 @@ export const isPaidXaiAuthFile = (file: AuthFileItem | Record<string, unknown>):
     index_path = target / 'src/features/quota/providers/index.ts'
     replace_once(index_path, "import { XAI_CONFIG } from './xai/data';\nimport { XaiQuotaBody } from './xai/XaiQuotaBody';", "import { GEMINI_CLI_CONFIG, GeminiCliQuotaBody, PRO_XAI_CONFIG, ProXaiQuotaBody } from '@/pro/modules/quota';")
     replace_once(index_path, "  errorStatus?: number;\n}", "  errorStatus?: number;\n  cachedAt?: number;\n}")
-    replace_once(index_path, "  codex: { ...CODEX_CONFIG, Body: CodexQuotaBody } as unknown as QuotaAdapter,\n  kimi:", "  codex: { ...CODEX_CONFIG, Body: CodexQuotaBody } as unknown as QuotaAdapter,\n  'gemini-cli': { ...GEMINI_CLI_CONFIG, Body: GeminiCliQuotaBody } as unknown as QuotaAdapter,\n  kimi:")
+    replace_once(index_path, "  codex: { ...CODEX_CONFIG, Body: CodexQuotaBody } as unknown as QuotaAdapter,\n", "  codex: { ...CODEX_CONFIG, Body: CodexQuotaBody } as unknown as QuotaAdapter,\n  'gemini-cli': { ...GEMINI_CLI_CONFIG, Body: GeminiCliQuotaBody } as unknown as QuotaAdapter,\n")
     replace_once(index_path, '  xai: { ...XAI_CONFIG, Body: XaiQuotaBody } as unknown as QuotaAdapter,', '  xai: { ...PRO_XAI_CONFIG, Body: ProXaiQuotaBody } as unknown as QuotaAdapter,')
 
     constants_path = target / 'src/features/quota/constants.ts'
@@ -1879,7 +1871,7 @@ export const isPaidXaiAuthFile = (file: AuthFileItem | Record<string, unknown>):
 
     logic_path = target / 'src/features/quota/logic.ts'
     replace_once(logic_path, "import { KIMI_CONFIG } from './providers/kimi/data';", "import { GEMINI_CLI_CONFIG } from '@/pro/modules/quota';\nimport { KIMI_CONFIG } from './providers/kimi/data';")
-    replace_once(logic_path, '  codex: CODEX_CONFIG.filterFn,\n  kimi:', "  codex: CODEX_CONFIG.filterFn,\n  'gemini-cli': GEMINI_CLI_CONFIG.filterFn,\n  kimi:")
+    replace_once(logic_path, '  codex: CODEX_CONFIG.filterFn,\n', "  codex: CODEX_CONFIG.filterFn,\n  'gemini-cli': GEMINI_CLI_CONFIG.filterFn,\n")
 
     test_path = target / 'tests/quotaPageLogic.test.ts'
     replace_once(test_path, "      codex: 2,\n      xai: 1,", "      codex: 2,\n      'gemini-cli': 0,\n      xai: 1,")
@@ -1896,8 +1888,8 @@ def patch_quota_page_cache_refresh(target: Path) -> None:
     )
     insert_once(
         path,
-        "  useEffect(() => {\n    void loadFiles();\n  }, [loadFiles]);\n",
-        "  useEffect(() => {\n    void loadFiles();\n  }, [loadFiles]);\n\n"
+        "  }, [loadFiles]);\n",
+        "  }, [loadFiles]);\n\n"
         "  useEffect(() => {\n"
         "    void quotaPersistenceMiddleware.ensureFresh();\n"
         "  }, []);\n",
@@ -1910,9 +1902,9 @@ def patch_quota_page_latest(target: Path) -> None:
     patch_quota_page_cache_refresh(target)
     insert_once(path, "import { EmptyState } from '@/components/ui/EmptyState';\n", "import { EmptyState } from '@/components/ui/EmptyState';\nimport { Input } from '@/components/ui/Input';\nimport { IconSearch } from '@/components/ui/icons';\n", 'quota_management.search_label')
     insert_once(path, "import { readQuotaUiState, writeQuotaUiState } from './uiState';\n", "import { readQuotaUiState, writeQuotaUiState } from './uiState';\nimport { buildQuotaSearchValues, matchesQuotaSearch } from '@/pro/modules/quota';\n", 'matchesQuotaSearch')
-    replace_once(path, '  const codexQuota = useQuotaStore((state) => state.codexQuota);\n  const kimiQuota', '  const codexQuota = useQuotaStore((state) => state.codexQuota);\n  const geminiCliQuota = useQuotaStore((state) => state.geminiCliQuota);\n  const kimiQuota')
-    replace_once(path, "        codex: codexQuota,\n        kimi:", "        codex: codexQuota,\n        'gemini-cli': geminiCliQuota,\n        kimi:")
-    replace_once(path, '[antigravityQuota, claudeQuota, codexQuota, kimiQuota, xaiQuota]', '[antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota]')
+    replace_once(path, '  const codexQuota = useQuotaStore((state) => state.codexQuota);\n', '  const codexQuota = useQuotaStore((state) => state.codexQuota);\n  const geminiCliQuota = useQuotaStore((state) => state.geminiCliQuota);\n')
+    replace_once(path, "        codex: codexQuota,\n", "        codex: codexQuota,\n        'gemini-cli': geminiCliQuota,\n")
+    replace_once(path, '[antigravityQuota, claudeQuota, codexQuota, devinQuota, devinSnapshots, kimiQuota, xaiQuota]', '[antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, devinQuota, devinSnapshots, kimiQuota, xaiQuota]')
     marker = "  const getQuota = useCallback(\n"
     search_state = "  const [search, setSearch] = useState('');\n  const quotaSearchStore = useMemo(\n    () => ({ antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota }),\n    [antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota]\n  );\n\n"
     insert_once(path, marker, search_state + marker, 'const [search, setSearch]')
@@ -1939,7 +1931,7 @@ def patch_quota_cards_latest(target: Path) -> None:
 
     auth_path = target / 'src/features/authFiles/components/AuthFileQuotaSection.tsx'
     insert_once(auth_path, "import { bindQuotaClasses } from '@/features/quota/types';\n", "import { bindQuotaClasses } from '@/features/quota/types';\nimport { QuotaCachedTime } from '@/pro/modules/quota';\n", 'import { QuotaCachedTime }')
-    replace_once(auth_path, "      ) : quota ? (\n        <adapter.Body quota={quota} classes={compactQuotaClasses} />\n      ) : (", "      ) : quota ? (\n        <>\n          <adapter.Body quota={quota} classes={compactQuotaClasses} />\n          <QuotaCachedTime quotaStatus={quotaStatus} cachedAt={quota.cachedAt} />\n        </>\n      ) : (")
+    replace_once(auth_path, "      ) : quota ? (\n        <adapter.Body quota={quota} classes={compactQuotaClasses} />\n      ) : (", "      ) : quota ? (\n        <>\n          <adapter.Body quota={quota} classes={compactQuotaClasses} />\n          <QuotaCachedTime quotaStatus={quotaStatus} cachedAt={'cachedAt' in quota ? quota.cachedAt : undefined} />\n        </>\n      ) : (")
 
 
 def patch_quota_success_timestamps(target: Path) -> None:
@@ -1979,7 +1971,7 @@ def patch_quota_success_timestamps(target: Path) -> None:
 
 def patch_auth_files_gemini_quota_latest(target: Path) -> None:
     path = target / 'src/features/authFiles/constants.ts'
-    replace_once(path, "export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'kimi' | 'xai';", "export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'gemini-cli' | 'kimi' | 'xai';")
+    replace_once(path, "export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'devin' | 'kimi' | 'xai';", "export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'gemini-cli' | 'devin' | 'kimi' | 'xai';")
     for marker in (
         'export const QUOTA_PROVIDER_TYPES = new Set<QuotaProviderType>([',
         'export const AUTH_FILE_MANUAL_REFRESH_PROVIDERS = new Set([',
@@ -1997,8 +1989,8 @@ def patch_auth_files_gemini_quota_latest(target: Path) -> None:
     quota_section_path = target / 'src/features/authFiles/components/AuthFileQuotaSection.tsx'
     replace_once(
         quota_section_path,
-        "    if (quotaType === 'codex') return state.codexQuota[file.name] as QuotaCardState | undefined;\n    if (quotaType === 'kimi')",
-        "    if (quotaType === 'codex') return state.codexQuota[file.name] as QuotaCardState | undefined;\n    if (quotaType === 'gemini-cli') return state.geminiCliQuota[file.name] as QuotaCardState | undefined;\n    if (quotaType === 'kimi')",
+        "    if (quotaType === 'codex') return state.codexQuota[cacheKey] as QuotaCardState | undefined;\n",
+        "    if (quotaType === 'codex') return state.codexQuota[cacheKey] as QuotaCardState | undefined;\n    if (quotaType === 'gemini-cli') return state.geminiCliQuota[cacheKey] as QuotaCardState | undefined;\n",
     )
 
 

@@ -32,11 +32,15 @@ export function QuotaPage() {
   const { t } = useTranslation();
   useEffect(() => {
     void loadFiles();
+    return () => {
+      listRequestRef.current += 1;
+    };
   }, [loadFiles]);
 
   const antigravityQuota = useQuotaStore((state) => state.antigravityQuota);
   const claudeQuota = useQuotaStore((state) => state.claudeQuota);
   const codexQuota = useQuotaStore((state) => state.codexQuota);
+  const devinQuota = useQuotaStore((state) => state.devinQuota);
   const kimiQuota = useQuotaStore((state) => state.kimiQuota);
   const xaiQuota = useQuotaStore((state) => state.xaiQuota);
 
@@ -45,10 +49,11 @@ export function QuotaPage() {
         antigravity: antigravityQuota,
         claude: claudeQuota,
         codex: codexQuota,
+        devin: { ...devinSnapshots, ...devinQuota },
         kimi: kimiQuota,
         xai: xaiQuota,
       }),
-    [antigravityQuota, claudeQuota, codexQuota, kimiQuota, xaiQuota]
+    [antigravityQuota, claudeQuota, codexQuota, devinQuota, devinSnapshots, kimiQuota, xaiQuota]
   );
 
   const getQuota = useCallback(
@@ -113,6 +118,9 @@ class QuotaSearchCustomizationTest(unittest.TestCase):
             self.assertEqual(page.count('const tabCounts = useMemo('), 1)
             self.assertEqual(page.count('const filteredEntries = useMemo('), 1)
             self.assertEqual(page.count('const { pageItems, currentPage, totalPages } = useMemo('), 1)
+            self.assertIn('listRequestRef.current += 1;', page)
+            self.assertIn('devin: { ...devinSnapshots, ...devinQuota }', page)
+            self.assertIn('geminiCliQuota, devinQuota, devinSnapshots, kimiQuota', page)
             self.assertIn('buildTabCounts(searchedEntries)', page)
             self.assertIn('filterEntriesByTab(searchedEntries, tab)', page)
             self.assertIn('sortQuotaEntries(filteredEntries, sortMode, resolveNextRecovery)', page)

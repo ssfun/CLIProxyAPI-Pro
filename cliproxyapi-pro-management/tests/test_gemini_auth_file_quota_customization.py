@@ -11,11 +11,12 @@ CUSTOMIZATIONS = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CUSTOMIZATIONS)
 
 
-CONSTANTS_SOURCE = """export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'kimi' | 'xai';
+CONSTANTS_SOURCE = """export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'devin' | 'kimi' | 'xai';
 export const QUOTA_PROVIDER_TYPES = new Set<QuotaProviderType>([
   'antigravity',
   'claude',
   'codex',
+  'devin',
   'kimi',
   'xai',
 ]);
@@ -23,6 +24,7 @@ export const AUTH_FILE_MANUAL_REFRESH_PROVIDERS = new Set([
   'antigravity',
   'claude',
   'codex',
+  'devin',
   'kimi',
   'xai',
 ]);
@@ -30,8 +32,9 @@ export const AUTH_FILE_MANUAL_REFRESH_PROVIDERS = new Set([
 
 QUOTA_SECTION_SOURCE = """
 const quota = useQuotaStore((state) => {
-    if (quotaType === 'codex') return state.codexQuota[file.name] as QuotaCardState | undefined;
-    if (quotaType === 'kimi') return state.kimiQuota[file.name] as QuotaCardState | undefined;
+    if (quotaType === 'codex') return state.codexQuota[cacheKey] as QuotaCardState | undefined;
+    if (quotaType === 'devin') return state.devinQuota[cacheKey] as QuotaCardState | undefined;
+    if (quotaType === 'kimi') return state.kimiQuota[cacheKey] as QuotaCardState | undefined;
 });
 """
 
@@ -53,9 +56,9 @@ class GeminiAuthFileQuotaCustomizationTest(unittest.TestCase):
 
             constants = (target / 'src/features/authFiles/constants.ts').read_text()
             section = (components / 'AuthFileQuotaSection.tsx').read_text()
-            self.assertIn("'gemini-cli' | 'kimi'", constants)
+            self.assertIn("'gemini-cli' | 'devin'", constants)
             self.assertEqual(constants.count("  'gemini-cli',"), 2)
-            self.assertIn('state.geminiCliQuota[file.name]', section)
+            self.assertIn('state.geminiCliQuota[cacheKey]', section)
 
             CUSTOMIZATIONS.patch_auth_files_gemini_quota_latest(target)
             CUSTOMIZATIONS.flush_writes()

@@ -78,7 +78,7 @@ class QuotaCardCustomizationTest(unittest.TestCase):
             self.assertIn("import { QuotaCachedTime } from '@/pro/modules/quota';", quota_source)
             self.assertIn('<QuotaCachedTime quotaStatus={status} cachedAt={quota.cachedAt} />', quota_source)
             self.assertIn("import { QuotaCachedTime } from '@/pro/modules/quota';", auth_source)
-            self.assertIn('<QuotaCachedTime quotaStatus={quotaStatus} cachedAt={quota.cachedAt} />', auth_source)
+            self.assertIn("<QuotaCachedTime quotaStatus={quotaStatus} cachedAt={'cachedAt' in quota ? quota.cachedAt : undefined} />", auth_source)
 
             CUSTOMIZATIONS.patch_quota_cards_latest(target)
             CUSTOMIZATIONS.flush_writes()
