@@ -34,19 +34,41 @@ func quotaUpstreamStatus(err error) int {
 }
 
 func (h *Host) FetchProQuota(ctx context.Context, auth *coreauth.Auth, previous *pluginapi.QuotaSnapshot) QuotaResult {
+	return h.FetchProQuotaWithSelection(ctx, auth, previous, "", "")
+}
+
+// FetchProQuotaWithSelection selects the upstream provider while retaining the auth's cache identity.
+func (h *Host) FetchProQuotaWithSelection(ctx context.Context, auth *coreauth.Auth, previous *pluginapi.QuotaSnapshot, pluginID, provider string) QuotaResult {
 	if h == nil || auth == nil {
 		return QuotaResult{}
 	}
-	provider := normalizeProviderID(auth.Provider)
+	pluginID = strings.TrimSpace(pluginID)
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		provider = auth.Provider
+	}
 	if provider == "" {
 		return QuotaResult{}
 	}
-	if record := h.quotaProviderRecord(ctx, provider); record != nil {
-		resp, errFetch := h.callFetchQuota(ctx, *record, record.plugin.Capabilities.QuotaProvider, auth, previous)
+	var record *capabilityRecord
+	if pluginID != "" {
+		record = h.quotaProviderRecordByPlugin(pluginID)
+	} else {
+		record = h.quotaProviderRecord(ctx, provider)
+		if record == nil {
+			record = h.quotaProviderRecordByPlugin(provider)
+		}
+	}
+	if record != nil {
+		resp, errFetch := h.callFetchQuota(ctx, *record, record.plugin.Capabilities.QuotaProvider, auth, previous, provider)
 		if errFetch != nil {
 			return QuotaResult{Handled: true, PluginID: record.id, UpstreamStatus: quotaUpstreamStatus(errFetch), Err: errFetch}
 		}
-		return h.quotaResultFromResponse(record.id, provider, auth, previous, resp)
+		return h.quotaResultFromResponse(record.id, auth.Provider, auth, previous, resp)
+	}
+	// A missing explicit plugin must not silently select another plugin or legacy adapter.
+	if pluginID != "" || normalizeProviderID(provider) != normalizeProviderID(auth.Provider) {
+		return QuotaResult{}
 	}
 	if record, okLegacy := h.legacyQuotaAdapter(provider); okLegacy {
 		resp, errFetch := h.fetchLegacyGeminiCLIQuota(ctx, auth)
@@ -59,13 +81,10 @@ func (h *Host) FetchProQuota(ctx context.Context, auth *coreauth.Auth, previous 
 }
 
 func (h *Host) quotaResultFromResponse(pluginID, provider string, auth *coreauth.Auth, previous *pluginapi.QuotaSnapshot, resp pluginapi.QuotaFetchResponse) QuotaResult {
-	if resp.Snapshot.SchemaVersion > pluginapi.QuotaSnapshotSchemaVersion {
-		return QuotaResult{Handled: true, PluginID: pluginID, Err: fmt.Errorf(
-			"quota snapshot schema %d is newer than host schema %d",
-			resp.Snapshot.SchemaVersion, pluginapi.QuotaSnapshotSchemaVersion,
-		)}
+	snapshot, err := NormalizeProQuotaSnapshot(provider, previous, resp)
+	if err != nil {
+		return QuotaResult{Handled: true, PluginID: pluginID, Err: err}
 	}
-	snapshot := proquota.NormalizeSnapshot(proQuotaSnapshot(resp), provider, previous, resp.PlanUnavailable, resp.PlanError)
 	path := ""
 	if auth.Attributes != nil {
 		path = auth.Attributes["path"]
@@ -75,6 +94,14 @@ func (h *Host) quotaResultFromResponse(pluginID, provider string, auth *coreauth
 		updated = h.boundQuotaAuthUpdate(resp.AuthUpdate, auth, path)
 	}
 	return QuotaResult{Handled: true, PluginID: pluginID, Snapshot: snapshot, Response: resp, Auth: updated}
+}
+
+// NormalizeProQuotaSnapshot applies the same snapshot contract to plugin and declarative responses.
+func NormalizeProQuotaSnapshot(provider string, previous *pluginapi.QuotaSnapshot, resp pluginapi.QuotaFetchResponse) (pluginapi.QuotaSnapshot, error) {
+	if resp.Snapshot.SchemaVersion > pluginapi.QuotaSnapshotSchemaVersion {
+		return pluginapi.QuotaSnapshot{}, fmt.Errorf("quota snapshot schema %d is newer than host schema %d", resp.Snapshot.SchemaVersion, pluginapi.QuotaSnapshotSchemaVersion)
+	}
+	return proquota.NormalizeSnapshot(proQuotaSnapshot(resp), normalizeProviderID(provider), previous, resp.PlanUnavailable, resp.PlanError), nil
 }
 
 // proQuotaSnapshot accepts upstream quota groups while retaining legacy Pro snapshots.
@@ -127,14 +154,14 @@ func (h *Host) boundQuotaAuthUpdate(data pluginapi.AuthData, auth *coreauth.Auth
 	return updated
 }
 
-func (h *Host) callFetchQuota(ctx context.Context, record capabilityRecord, provider pluginapi.QuotaProvider, auth *coreauth.Auth, previous *pluginapi.QuotaSnapshot) (resp pluginapi.QuotaFetchResponse, err error) {
+func (h *Host) callFetchQuota(ctx context.Context, record capabilityRecord, provider pluginapi.QuotaProvider, auth *coreauth.Auth, previous *pluginapi.QuotaSnapshot, selectedProvider string) (resp pluginapi.QuotaFetchResponse, err error) {
 	if h == nil || provider == nil || auth == nil || h.isPluginFused(record.id) || !h.recordCurrent(record) {
 		return pluginapi.QuotaFetchResponse{}, fmt.Errorf("quota provider is unavailable")
 	}
 	resp, handled, err := h.callQuotaFetch(ctx, record, provider, pluginapi.QuotaFetchRequest{
 		Plugin:       clonePluginMetadata(record.meta),
 		AuthIndex:    auth.Index,
-		Provider:     auth.Provider,
+		Provider:     selectedProvider,
 		AuthID:       auth.ID,
 		AuthProvider: auth.Provider,
 		StorageJSON:  storageJSONFromAuth(auth),

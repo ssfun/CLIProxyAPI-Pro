@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -25,11 +24,6 @@ func (h *Handler) FetchProPluginQuota(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-	// Explicit upstream plugin/provider selection keeps its original response contract.
-	if strings.TrimSpace(req.PluginID) != "" || strings.TrimSpace(req.Provider) != "" {
-		h.forwardCredentialQuota(c, req)
-		return
-	}
 	authIndex := req.resolveAuthIndex()
 	if authIndex == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "auth_index is required"})
@@ -41,12 +35,27 @@ func (h *Handler) FetchProPluginQuota(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "auth not found"})
 		return
 	}
-	result, statusCode, errorLabel, errFetch := h.fetchAndPersistPluginQuota(c.Request.Context(), auth)
-	if !result.Handled && (statusCode == http.StatusNotFound || statusCode == http.StatusServiceUnavailable) {
-		// Upstream also supports declarative metadata probes without a quota plugin.
-		h.forwardCredentialQuota(c, req)
+	ctx := c.Request.Context()
+	previous := loadPluginQuotaSnapshot(ctx, auth.Provider, auth.FileName, auth.Index)
+	h.mu.Lock()
+	host := h.pluginHost
+	h.mu.Unlock()
+	result := host.FetchProQuotaWithSelection(ctx, auth, previous, req.PluginID, req.Provider)
+	if !result.Handled && result.Err == nil {
+		if probe, ok := auth.Metadata["quota_probe"].(map[string]any); ok {
+			resp, handled, err := h.executeQuotaProbe(c, auth, probe)
+			result = pluginhost.QuotaResult{Handled: handled, Response: resp, Err: err}
+			if handled && err == nil {
+				// Declarative HTTP responses supply quota data, never auth mutations.
+				result.Snapshot, result.Err = pluginhost.NormalizeProQuotaSnapshot(auth.Provider, previous, resp)
+			}
+		}
+	}
+	if !result.Handled && result.Err == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "no quota provider available for credential"})
 		return
 	}
+	result, statusCode, errorLabel, errFetch := h.persistPluginQuotaResult(ctx, auth, result)
 	if errFetch != nil {
 		c.JSON(statusCode, gin.H{"error": errorLabel, "message": errFetch.Error()})
 		return
@@ -59,13 +68,6 @@ func (h *Handler) FetchProPluginQuota(c *gin.Context) {
 		"groups":             result.Response.Groups,
 		"serverTimeOffsetMs": result.Response.ServerTimeOffsetMs,
 	})
-}
-
-func (h *Handler) forwardCredentialQuota(c *gin.Context, req credentialQuotaRequest) {
-	raw, _ := json.Marshal(req)
-	c.Request.Body = io.NopCloser(strings.NewReader(string(raw)))
-	c.Request.ContentLength = int64(len(raw))
-	h.FetchCredentialQuota(c)
 }
 
 func (h *Handler) fetchAndPersistPluginQuota(ctx context.Context, auth *coreauth.Auth) (pluginhost.QuotaResult, int, string, error) {
@@ -81,13 +83,23 @@ func (h *Handler) fetchAndPersistPluginQuota(ctx context.Context, auth *coreauth
 	}
 	previous := loadPluginQuotaSnapshot(ctx, auth.Provider, auth.FileName, auth.Index)
 	result := host.FetchProQuota(ctx, auth, previous)
-	if !result.Handled {
-		return result, http.StatusNotFound, "quota provider not found", fmt.Errorf("quota provider not found")
-	}
+	return h.persistPluginQuotaResult(ctx, auth, result)
+}
+
+func (h *Handler) persistPluginQuotaResult(ctx context.Context, auth *coreauth.Auth, result pluginhost.QuotaResult) (pluginhost.QuotaResult, int, string, error) {
 	if result.Err != nil {
 		return result, http.StatusBadGateway, "quota fetch failed", result.Err
 	}
+	if !result.Handled {
+		return result, http.StatusNotFound, "quota provider not found", fmt.Errorf("quota provider not found")
+	}
 	if result.Auth != nil {
+		h.mu.Lock()
+		manager := h.authManager
+		h.mu.Unlock()
+		if manager == nil {
+			return result, http.StatusServiceUnavailable, "auth manager unavailable", fmt.Errorf("auth manager unavailable")
+		}
 		updated, errUpdate := manager.Update(ctx, result.Auth)
 		if errUpdate != nil {
 			return result, http.StatusInternalServerError, "auth update failed", fmt.Errorf("auth update failed: %w", errUpdate)
