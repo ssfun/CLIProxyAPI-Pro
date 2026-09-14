@@ -1904,7 +1904,7 @@ def patch_quota_page_latest(target: Path) -> None:
     insert_once(path, "import { readQuotaUiState, writeQuotaUiState } from './uiState';\n", "import { readQuotaUiState, writeQuotaUiState } from './uiState';\nimport { buildQuotaSearchValues, matchesQuotaSearch } from '@/pro/modules/quota';\n", 'matchesQuotaSearch')
     replace_once(path, '  const codexQuota = useQuotaStore((state) => state.codexQuota);\n', '  const codexQuota = useQuotaStore((state) => state.codexQuota);\n  const geminiCliQuota = useQuotaStore((state) => state.geminiCliQuota);\n')
     replace_once(path, "        codex: codexQuota,\n", "        codex: codexQuota,\n        'gemini-cli': geminiCliQuota,\n")
-    replace_once(path, '[antigravityQuota, claudeQuota, codexQuota, devinQuota, devinSnapshots, kimiQuota, xaiQuota]', '[antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, devinQuota, devinSnapshots, kimiQuota, xaiQuota]')
+    replace_once(path, '[antigravityQuota, claudeQuota, codexQuota, devinQuota, kimiQuota, xaiQuota]', '[antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, devinQuota, kimiQuota, xaiQuota]')
     marker = "  const getQuota = useCallback(\n"
     search_state = "  const [search, setSearch] = useState('');\n  const quotaSearchStore = useMemo(\n    () => ({ antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota }),\n    [antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota]\n  );\n\n"
     insert_once(path, marker, search_state + marker, 'const [search, setSearch]')
