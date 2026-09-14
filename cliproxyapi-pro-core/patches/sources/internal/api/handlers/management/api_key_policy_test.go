@@ -435,6 +435,9 @@ func TestAPIKeyPolicyProfileCatalogIncludesOrphanedProfilesWithoutPolicyRules(t 
 		if len(response.Items) != 1 || response.Items[0].ID != policy.ActiveProfileID || response.Items[0].Name != "Production" || response.PolicyGeneration == 0 {
 			t.Fatalf("%s catalog=%#v", label, response)
 		}
+		if len(response.APIKeys) != 1 || response.APIKeys[0].APIKeyHash == "" || response.APIKeys[0].DisplayName != policy.DisplayName {
+			t.Fatalf("%s key names=%#v", label, response.APIKeys)
+		}
 		for _, forbidden := range []string{"profile-catalog-key-123456789", policy.ID, "providers", "models", "mappings", "keyRef"} {
 			if strings.Contains(catalog.Body.String(), forbidden) {
 				t.Fatalf("%s catalog leaked %q: %s", label, forbidden, catalog.Body.String())

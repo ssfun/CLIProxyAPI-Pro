@@ -121,6 +121,7 @@ export interface APIKeyPolicyProfileCatalogItem {
 }
 
 export interface APIKeyPolicyProfileCatalog {
+  apiKeys?: Array<{ apiKeyHash: string; displayName: string }>;
   items: APIKeyPolicyProfileCatalogItem[];
   policyGeneration: number;
 }

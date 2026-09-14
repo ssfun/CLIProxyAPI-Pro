@@ -68,6 +68,7 @@ describe('monitoring API key and Profile usage navigation', () => {
     const policyPage = readFileSync(resolve(import.meta.dir, '../src/pro/modules/apiKeyPolicy/APIKeyPolicyPage.tsx'), 'utf8');
     const policyClient = readFileSync(resolve(import.meta.dir, '../src/pro/modules/apiKeyPolicy/apiKeyPolicy.ts'), 'utf8');
     const monitoringPage = readFileSync(resolve(import.meta.dir, '../src/pro/modules/monitoring/MonitoringCenterPage.tsx'), 'utf8');
+    const apiKeyCell = readFileSync(resolve(import.meta.dir, '../src/pro/modules/monitoring/features/components/MonitoringApiKeyCell.tsx'), 'utf8');
     const preferences = readFileSync(resolve(import.meta.dir, '../src/pro/modules/monitoring/features/realtimeLogPreferences.ts'), 'utf8');
     const baseStyles = readFileSync(resolve(import.meta.dir, '../src/pro/modules/monitoring/features/styles/_base.scss'), 'utf8');
     expect(policyPage).toContain("navigate('/monitoring#request-events'");
@@ -85,9 +86,10 @@ describe('monitoring API key and Profile usage navigation', () => {
     expect(monitoringPage).toContain('profileCatalogRequestRef.current');
     expect(monitoringPage).toContain('profileCatalogFetchedAtRef.current');
     expect(monitoringPage).toContain('profileCatalogGenerationRef.current === catalog.policyGeneration');
-    expect(monitoringPage).toContain('styles.realtimeApiKeyCell');
+    expect(monitoringPage).toContain('<MonitoringApiKeyCell apiKey={row.clientApiKey} profileSnapshot={profileSnapshot} />');
+    expect(apiKeyCell).toContain('styles.realtimeApiKeyCell');
     expect(monitoringPage).toContain("resolveUsageProfileSnapshot(row.profileName, row.profileId, '')");
-    expect(monitoringPage).toContain('{profileSnapshot ? <small title={profileSnapshot}>{profileSnapshot}</small> : null}');
+    expect(apiKeyCell).toContain('{profileSnapshot ? <small title={profileSnapshot}>{profileSnapshot}</small> : null}');
     expect(monitoringPage).not.toContain("t('monitoring.api_key_profile'");
     expect(monitoringPage).toContain('profileId: selectedProfile');
     expect(preferences).toContain('apiKey: 168');

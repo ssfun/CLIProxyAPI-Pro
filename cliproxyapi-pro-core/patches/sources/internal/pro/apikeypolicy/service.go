@@ -2089,7 +2089,11 @@ func (s *Service) ListProfileCatalog(ctx context.Context) (ProfileCatalogSnapsho
 	if err != nil {
 		return ProfileCatalogSnapshot{}, err
 	}
-	return ProfileCatalogSnapshot{Items: items, PolicyGeneration: s.PolicyGeneration()}, nil
+	apiKeys, err := s.store.ListAPIKeyCatalog(ctx)
+	if err != nil {
+		return ProfileCatalogSnapshot{}, err
+	}
+	return ProfileCatalogSnapshot{Items: items, APIKeys: apiKeys, PolicyGeneration: s.PolicyGeneration()}, nil
 }
 func (s *Service) ListConfigured(ctx context.Context, configuredHashes []string) ([]Policy, error) {
 	if s == nil || s.store == nil {

@@ -1,3 +1,5 @@
+import { MonitoringApiKeyCell } from './features/components/MonitoringApiKeyCell';
+import { buildConfiguredApiKeyMap, buildMonitoringApiKeyNames, formatMonitoringApiKeyLabel } from './features/apiKeyIdentity';
 import { useMonitoringAnalytics } from './features/hooks/useMonitoringAnalytics';
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -178,7 +180,7 @@ const getRealtimeLogColumnContentTexts = (key: RealtimeLogColumnKey, row: Realti
     case 'stream':
       return [row.stream ? 'Streaming' : 'Non-streaming'];
     case 'apiKey':
-      return [row.clientApiKey.masked];
+      return [formatMonitoringApiKeyLabel(row.clientApiKey)];
     case 'recent':
       return ['||||||||||'];
     case 'status':
@@ -240,6 +242,8 @@ export function MonitoringCenterPage() {
   const navigate = useNavigate();
   const config = useConfigStore((state) => state.config);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
+  const apiBase = useAuthStore((state) => state.apiBase);
+  const managementKey = useAuthStore((state) => state.managementKey);
   const showNotification = useNotificationStore((state) => state.showNotification);
   const antigravityQuota = useQuotaStore((state) => state.antigravityQuota);
   const claudeQuota = useQuotaStore((state) => state.claudeQuota);
@@ -258,6 +262,7 @@ export function MonitoringCenterPage() {
   const [currentProfileCatalog, setCurrentProfileCatalog] = useState<{
     loaded: boolean;
     names: Map<string, string>;
+    apiKeyNames?: ReadonlyMap<string, string>;
   }>({ loaded: false, names: new Map() });
   const [selectedStatus, setSelectedStatus] = useState<StatusFilter>('all');
   const [linkedRequestLogScope, setLinkedRequestLogScope] = useState<LinkedRequestLogScope | null>(null);
@@ -295,6 +300,8 @@ export function MonitoringCenterPage() {
   const [isPriceSyncing, setIsPriceSyncing] = useState(false);
   const priceManagementRequestRef = useRef<Promise<void> | null>(null);
   const profileCatalogRequestRef = useRef<Promise<void> | null>(null);
+  const refreshProfileCatalogRef = useRef<(force?: boolean) => Promise<void>>(() => Promise.resolve());
+  const [profileCatalogRefreshFailed, setProfileCatalogRefreshFailed] = useState(false);
   const profileCatalogFetchedAtRef = useRef(0);
   const profileCatalogGenerationRef = useRef<number | null>(null);
   const [isUsageTrendHidden, setIsUsageTrendHidden] = useState(false);
@@ -350,11 +357,14 @@ export function MonitoringCenterPage() {
 
   useEffect(() => {
     let cancelled = false;
+    let latestRequestId = 0;
+    refreshProfileCatalogRef.current = () => Promise.resolve();
+    setProfileCatalogRefreshFailed(false);
+    profileCatalogRequestRef.current = null;
+    profileCatalogFetchedAtRef.current = 0;
+    profileCatalogGenerationRef.current = null;
+    setCurrentProfileCatalog({ loaded: false, names: new Map() });
     if (connectionStatus !== 'connected') {
-      profileCatalogRequestRef.current = null;
-      profileCatalogFetchedAtRef.current = 0;
-      profileCatalogGenerationRef.current = null;
-      setCurrentProfileCatalog({ loaded: false, names: new Map() });
       return () => {
         cancelled = true;
       };
@@ -364,20 +374,24 @@ export function MonitoringCenterPage() {
       if (!force && fetchedAt > 0 && Date.now() - fetchedAt < PROFILE_CATALOG_REFRESH_MS) {
         return Promise.resolve();
       }
-      if (profileCatalogRequestRef.current) return profileCatalogRequestRef.current;
+      if (!force && profileCatalogRequestRef.current) return profileCatalogRequestRef.current;
+      const requestId = ++latestRequestId;
       const request = apiKeyPolicyApi.profileCatalog()
         .then((catalog) => {
-          if (cancelled) return;
+          if (cancelled || requestId !== latestRequestId) return;
+          setProfileCatalogRefreshFailed(false);
           profileCatalogFetchedAtRef.current = Date.now();
           if (profileCatalogGenerationRef.current === catalog.policyGeneration) return;
           profileCatalogGenerationRef.current = catalog.policyGeneration;
           setCurrentProfileCatalog({
             loaded: true,
+            apiKeyNames: buildMonitoringApiKeyNames(catalog.apiKeys),
             names: new Map(catalog.items.map((profile) => [profile.id, profile.name])),
           });
         })
         .catch(() => {
-          if (!cancelled) {
+          if (!cancelled && requestId === latestRequestId) {
+            setProfileCatalogRefreshFailed(true);
             setCurrentProfileCatalog((current) => current.loaded
               ? current
               : { loaded: false, names: new Map() });
@@ -391,6 +405,7 @@ export function MonitoringCenterPage() {
       });
       return request;
     };
+    refreshProfileCatalogRef.current = refreshProfileCatalog;
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') void refreshProfileCatalog();
     };
@@ -401,11 +416,12 @@ export function MonitoringCenterPage() {
     document.addEventListener('visibilitychange', refreshWhenVisible);
     return () => {
       cancelled = true;
+      refreshProfileCatalogRef.current = () => Promise.resolve();
       window.clearInterval(interval);
       window.removeEventListener('focus', refreshWhenFocused);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [connectionStatus]);
+  }, [apiBase, managementKey, connectionStatus]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDeferredSearch(deferredSearchInput), 300);
@@ -433,6 +449,7 @@ export function MonitoringCenterPage() {
   } = useMonitoringEventRows({
     usage: deferredUsage,
     logUsage: realtimeLogUsage,
+    apiKeyNames: currentProfileCatalog.apiKeyNames,
     config,
     modelPrices,
     deletedCredentialLabel: t('monitoring.deleted_credential'),
@@ -510,7 +527,7 @@ export function MonitoringCenterPage() {
   });
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([refreshUsage(), refreshMeta(false), refreshRealtimeLogs()]);
+    await Promise.all([refreshUsage(), refreshMeta(false), refreshRealtimeLogs(), refreshProfileCatalogRef.current(true)]);
     await refreshAggregates();
   }, [refreshAggregates, refreshMeta, refreshRealtimeLogs, refreshUsage]);
 
@@ -557,7 +574,7 @@ export function MonitoringCenterPage() {
 
   useHeaderRefresh(refreshAll);
 
-  const combinedError = [usageError, monitoringError, realtimeLogError].filter(Boolean).join('；');
+  const combinedError = [usageError, monitoringError, realtimeLogError, profileCatalogRefreshFailed ? t('monitoring.key_names_refresh_failed') : ''].filter(Boolean).join('；');
   const hasPrices = Object.keys(modelPrices).length > 0;
 
   useEffect(() => {
@@ -590,12 +607,18 @@ export function MonitoringCenterPage() {
       }
     });
     if (selectedApiKey !== 'all') {
-      if (selectedApiKeyFallbackLabel) {
+      if (selectedApiKeyFallbackLabel && !apiKeys.has(selectedApiKey)) {
         apiKeys.set(selectedApiKey, selectedApiKeyFallbackLabel);
       } else if (!apiKeys.has(selectedApiKey)) {
         apiKeys.set(selectedApiKey, maskSensitiveText(selectedApiKey));
       }
     }
+
+    const configuredKeys = buildConfiguredApiKeyMap(config?.apiKeys);
+    apiKeys.forEach((label, hash) => {
+      const name = currentProfileCatalog.apiKeyNames?.get(hash);
+      apiKeys.set(hash, formatMonitoringApiKeyLabel({ name, masked: configuredKeys.byHash.get(hash)?.masked || label }));
+    });
 
     const sortedModels = Array.from(models).filter(Boolean).sort((left, right) => left.localeCompare(right));
 
@@ -618,7 +641,7 @@ export function MonitoringCenterPage() {
           .map(([value, label]) => ({ value, label })),
       ],
     };
-  }, [allRows, selectedApiKey, selectedApiKeyFallbackLabel, t, usageAggregates]);
+  }, [allRows, config?.apiKeys, currentProfileCatalog.apiKeyNames, selectedApiKey, selectedApiKeyFallbackLabel, t, usageAggregates]);
   const {
     providerOptions,
     modelOptions,
@@ -892,10 +915,7 @@ export function MonitoringCenterPage() {
       render: (row) => {
         const profileSnapshot = resolveUsageProfileSnapshot(row.profileName, row.profileId, '');
         return (
-          <div className={`${styles.primaryCell} ${styles.realtimeApiKeyCell}`}>
-            <span className={styles.monoCell} title={row.clientApiKey.masked}>{row.clientApiKey.masked}</span>
-            {profileSnapshot ? <small title={profileSnapshot}>{profileSnapshot}</small> : null}
-          </div>
+          <MonitoringApiKeyCell apiKey={row.clientApiKey} profileSnapshot={profileSnapshot} />
         );
       },
     },

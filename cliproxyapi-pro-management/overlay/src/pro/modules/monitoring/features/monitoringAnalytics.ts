@@ -1,3 +1,4 @@
+import { formatMonitoringApiKeyLabel } from './apiKeyIdentity';
 import type { TFunction } from 'i18next';
 import {
   buildDayLabel,
@@ -333,9 +334,9 @@ const createRankingRowAccumulator = (
       group,
       model: '-',
       apiKeyHash: row.clientApiKey.hash,
-      apiKeyMasked: row.clientApiKey.masked,
-      account: row.clientApiKey.masked,
-      accountMasked: row.clientApiKey.masked,
+      apiKeyMasked: formatMonitoringApiKeyLabel(row.clientApiKey),
+      account: formatMonitoringApiKeyLabel(row.clientApiKey),
+      accountMasked: formatMonitoringApiKeyLabel(row.clientApiKey),
     };
   }
 
@@ -410,7 +411,7 @@ export const buildUsageTrendAnalytics = (
   rows.forEach((row) => {
     const apiKeyHash = row.clientApiKey.hash;
     if (apiKeyHash && apiKeyHash !== '-') {
-      apiKeyLabels.set(apiKeyHash, row.clientApiKey.masked);
+      apiKeyLabels.set(apiKeyHash, formatMonitoringApiKeyLabel(row.clientApiKey));
     }
 
     const apiKeyAccumulator = apiKeyGrouped.get(row.clientApiKey.id) ?? createRankingRowAccumulator(row, 'apiKey');

@@ -396,6 +396,7 @@
       "plan_default_hint": "Used for a recognized plan without its own configured rule."
     },
     "monitoring": {
+      "key_names_refresh_failed": "API key and Profile names could not be refreshed. Displayed names may be outdated; use the page refresh to retry.",
       "summary_updated": "Overview updated at {{time}} · refreshes every minute while requests arrive",
       "eyebrow": "Runtime Overview",
       "title": "Request Monitoring",
@@ -1627,6 +1628,7 @@
       "no_auth_providers_hint": "Добавьте файл аутентификации, чтобы настроить правила провайдера."
     },
     "monitoring": {
+      "key_names_refresh_failed": "Не удалось обновить имена API-ключей и Profile. Имена могут быть устаревшими; повторите обновление страницы.",
       "summary_updated": "Обзор обновлён в {{time}} · обновляется раз в минуту при новых запросах",
       "eyebrow": "Runtime Overview",
       "title": "Мониторинг запросов",
@@ -3330,6 +3332,7 @@
       "plan_default_hint": "套餐已识别但没有单独规则时使用。"
     },
     "monitoring": {
+      "key_names_refresh_failed": "API 密钥和 Profile 名称刷新失败，当前名称可能已过期；请点击页面刷新重试。",
       "summary_updated": "概览更新于 {{time}} · 有新请求时每分钟更新",
       "eyebrow": "Runtime Overview",
       "title": "请求监控",
@@ -4894,6 +4897,7 @@
       "plan_default_hint": "套餐已識別但沒有單獨規則時使用。"
     },
     "monitoring": {
+      "key_names_refresh_failed": "API 金鑰和 Profile 名稱重新整理失敗，目前名稱可能已過期；請點擊頁面重新整理重試。",
       "summary_updated": "概覽更新於 {{time}} · 有新請求時每分鐘更新",
       "eyebrow": "Runtime Overview",
       "title": "請求監控",

@@ -255,6 +255,7 @@ export interface UseMonitoringEventRowsParams {
   modelPrices: Record<string, ModelPrice>;
   deletedCredentialLabel?: string;
   unattributedApiKeyLabel?: string;
+  apiKeyNames?: ReadonlyMap<string, string>;
 }
 
 export interface UseMonitoringEventRowsReturn {
@@ -739,6 +740,7 @@ export function useMonitoringEventRows({
   modelPrices,
   deletedCredentialLabel = DELETED_CREDENTIAL_FALLBACK_LABEL,
   unattributedApiKeyLabel = 'Unattributed API Key',
+  apiKeyNames,
 }: UseMonitoringEventRowsParams): UseMonitoringEventRowsReturn {
   const [authFiles, setAuthFiles] = useState<AuthFileItem[]>([]);
   const [channels, setChannels] = useState<MonitoringChannelMeta[]>([]);
@@ -857,9 +859,14 @@ export function useMonitoringEventRows({
     return map;
   }, [channels]);
 
+  const withApiKeyNames = useCallback((rows: MonitoringEventRow[]) => rows.map((row) => ({
+    ...row,
+    clientApiKey: { ...row.clientApiKey, name: apiKeyNames?.get(row.clientApiKey.hash) },
+  })), [apiKeyNames]);
+
   const allRows = useMemo(() => {
     const details = collectUsageDetailsWithEndpoint(usage);
-    return buildEventRows(
+    return withApiKeyNames(buildEventRows(
       details,
       authMetaMap,
       authFileMap,
@@ -869,13 +876,13 @@ export function useMonitoringEventRows({
       modelPrices,
       deletedCredentialLabel,
       unattributedApiKeyLabel
-    );
-  }, [authFileMap, authMetaMap, channelByAuthIndex, configuredApiKeys, deletedCredentialLabel, modelPrices, sourceInfoMap, unattributedApiKeyLabel, usage]);
+    ));
+  }, [withApiKeyNames, authFileMap, authMetaMap, channelByAuthIndex, configuredApiKeys, deletedCredentialLabel, modelPrices, sourceInfoMap, unattributedApiKeyLabel, usage]);
 
   const logRows = useMemo(() => {
     if (logUsage === undefined) return allRows;
     const details = collectUsageDetailsWithEndpoint(logUsage);
-    return buildEventRows(
+    return withApiKeyNames(buildEventRows(
       details,
       authMetaMap,
       authFileMap,
@@ -885,8 +892,8 @@ export function useMonitoringEventRows({
       modelPrices,
       deletedCredentialLabel,
       unattributedApiKeyLabel
-    );
-  }, [allRows, authFileMap, authMetaMap, channelByAuthIndex, configuredApiKeys, deletedCredentialLabel, logUsage, modelPrices, sourceInfoMap, unattributedApiKeyLabel]);
+    ));
+  }, [withApiKeyNames, allRows, authFileMap, authMetaMap, channelByAuthIndex, configuredApiKeys, deletedCredentialLabel, logUsage, modelPrices, sourceInfoMap, unattributedApiKeyLabel]);
 
   return {
     loading,

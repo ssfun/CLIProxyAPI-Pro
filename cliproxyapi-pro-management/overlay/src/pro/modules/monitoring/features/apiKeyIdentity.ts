@@ -4,6 +4,7 @@ export type MonitoringApiKeyIdentity = {
   id: string;
   hash: string;
   masked: string;
+  name?: string;
 };
 
 const maskConfiguredApiKey = (value: string): string => {
@@ -42,3 +43,15 @@ export function resolveConfiguredApiKeyLabel(
   if (!normalizedHash) return unattributedLabel;
   return configuredApiKeys.byHash.get(normalizedHash)?.masked ?? unknownLabel;
 }
+
+export const formatMonitoringApiKeyLabel = (key: Pick<MonitoringApiKeyIdentity, 'masked' | 'name'>): string => {
+  const name = key.name?.trim();
+  return name ? `${name} (${key.masked})` : key.masked;
+};
+
+export const buildMonitoringApiKeyNames = (
+  items: ReadonlyArray<{ apiKeyHash: string; displayName: string }> = []
+): ReadonlyMap<string, string> => new Map(
+  items.filter((item) => item.apiKeyHash.trim() && item.displayName.trim())
+    .map((item) => [item.apiKeyHash.trim(), item.displayName.trim()])
+);

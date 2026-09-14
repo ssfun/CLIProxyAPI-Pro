@@ -3005,3 +3005,41 @@ func TestWorkspaceConcurrencyAtomicWrites(t *testing.T) {
 		t.Fatalf("disable failed: %v", err)
 	}
 }
+
+func TestMonitoringAPIKeyCatalogTracksNamesWithoutProfiles(t *testing.T) {
+	service := newTestService(t)
+	identity := testIdentity(t, "monitoring-name-key")
+	policy, err := service.CreateWorkspace(context.Background(), identity, "Original", nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.ListProfileCatalog(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Items) != 0 || len(first.APIKeys) != 1 || first.APIKeys[0].APIKeyHash != policy.APIKeyHash || first.APIKeys[0].DisplayName != "Original" {
+		t.Fatalf("catalog = %#v", first)
+	}
+	updated, err := service.UpdateDisplayName(context.Background(), policy.ID, "Renamed", policy.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.ListProfileCatalog(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.APIKeys) != 1 || second.APIKeys[0].DisplayName != "Renamed" || second.PolicyGeneration <= first.PolicyGeneration {
+		t.Fatalf("renamed catalog = %#v", second)
+	}
+	_, err = service.UpdateDisplayName(context.Background(), policy.ID, "", updated.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := service.ListProfileCatalog(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(third.APIKeys) != 1 || third.APIKeys[0].DisplayName != "" || third.PolicyGeneration <= second.PolicyGeneration {
+		t.Fatalf("unnamed catalog = %#v", third)
+	}
+}

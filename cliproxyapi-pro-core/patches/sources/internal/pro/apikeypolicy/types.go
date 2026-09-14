@@ -312,7 +312,14 @@ type ProfileCatalogItem struct {
 	UpdatedAtMS int64  `json:"updatedAtMs"`
 }
 
+// APIKeyCatalogItem exposes only the identity needed to label Management usage.
+type APIKeyCatalogItem struct {
+	APIKeyHash  string `json:"apiKeyHash"`
+	DisplayName string `json:"displayName"`
+}
+
 type ProfileCatalogSnapshot struct {
+	APIKeys          []APIKeyCatalogItem  `json:"apiKeys"`
 	Items            []ProfileCatalogItem `json:"items"`
 	PolicyGeneration uint64               `json:"policyGeneration"`
 }

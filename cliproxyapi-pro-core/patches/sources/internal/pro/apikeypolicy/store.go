@@ -237,6 +237,23 @@ func (s *Store) ListProfileCatalog(ctx context.Context) ([]ProfileCatalogItem, e
 	return items, rows.Err()
 }
 
+func (s *Store) ListAPIKeyCatalog(ctx context.Context) ([]APIKeyCatalogItem, error) {
+	rows, err := s.db.QueryContext(ctx, `select api_key_hash, display_name from api_key_policies order by api_key_hash`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]APIKeyCatalogItem, 0)
+	for rows.Next() {
+		var item APIKeyCatalogItem
+		if err := rows.Scan(&item.APIKeyHash, &item.DisplayName); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Store) ListAudits(ctx context.Context) ([]AuditRecord, error) {
 	return listAudits(ctx, s.db)
 }
