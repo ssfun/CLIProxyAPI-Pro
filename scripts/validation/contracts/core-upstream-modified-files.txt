@@ -1,4 +1,4 @@
-# Latest-only baseline: CLIProxyAPI v7.2.158 (5b2785617d1e7de84a9f4dee599d275a4ccd8999).
+# Latest-only baseline: CLIProxyAPI v7.3.3 (7bbfeaf8a7acf2cd5a834dcb0842539fe6aabc2b).
 # Update this reviewed surface only when adapting to a newer latest upstream release.
 cmd/server/main.go
 config.example.yaml
@@ -84,6 +84,7 @@ sdk/cliproxy/auth/types.go
 sdk/cliproxy/builder.go
 sdk/cliproxy/service.go
 sdk/cliproxy/service_auth.go
+sdk/cliproxy/service_auth_sync_test.go
 sdk/cliproxy/service_config.go
 sdk/cliproxy/service_executors.go
 sdk/cliproxy/service_lifecycle.go

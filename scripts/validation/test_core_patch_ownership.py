@@ -15,7 +15,7 @@ ALLOWED_CATEGORIES = {
 
 EXPECTED_CATEGORY_COUNTS = {
     'generic-host-hook': 24,
-    'upstream-generic-fix': 28,
+    'upstream-generic-fix': 29,
     'must-remain-host-patch': 40,
 }
 
@@ -49,7 +49,7 @@ class CorePatchOwnershipContractTest(unittest.TestCase):
         ownership = load_ownership()
         paths = [row['path'] for row in ownership]
 
-        self.assertEqual(92, len(surface))
+        self.assertEqual(93, len(surface))
         self.assertEqual(surface, paths)
         self.assertEqual(len(paths), len(set(paths)))
 

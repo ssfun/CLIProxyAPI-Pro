@@ -1111,11 +1111,11 @@ replace_once(
 replace_once(
     service_auth,
     '''\t\t\tauthForRegistration := auth
-\t\t\ttasks = append(tasks, modelRegistrationTask{
+\t\t\texpectedGeneration := authForRegistration.Generation
 ''',
     '''\t\t\tauthForRegistration := auth
 \t\t\tauthRegistrationCtx := s.beginAuthModelRegistration(registrationCtx, authForRegistration.ID)
-\t\t\ttasks = append(tasks, modelRegistrationTask{
+\t\t\texpectedGeneration := authForRegistration.Generation
 ''',
     'authRegistrationCtx := s.beginAuthModelRegistration(registrationCtx, authForRegistration.ID)',
 )
@@ -1125,6 +1125,61 @@ replace_once(
     's.completeModelRegistrationForAuthWithCache(authRegistrationCtx, authForRegistration, compatCache)',
     's.completeModelRegistrationForAuthWithCache(authRegistrationCtx, authForRegistration, compatCache)',
 )
+
+
+# Workers may reach the hook in either order. Test per-auth completion without
+# assuming the second worker is auth B, and drain workers before registry cleanup.
+auth_sync_test = ROOT / 'sdk/cliproxy/service_auth_sync_test.go'
+auth_sync_text = read(auth_sync_test)
+batch_test_start = auth_sync_text.index('func TestHandleAuthUpdates_SameRevisionWaitDoesNotWaitForOtherAuthInBatch(')
+batch_test_end = auth_sync_text.index('\nfunc ', batch_test_start + 1)
+batch_test = auth_sync_text[batch_test_start:batch_test_end]
+batch_test = batch_test.replace('\tbStarted := make(chan struct{})', '\tfinishedBatch := make(chan struct{})\n\tbStarted := make(chan struct{})', 1)
+batch_test = batch_test.replace('\t\tmodelRegistrationTaskHook = nil\n', '', 1)
+batch_test = batch_test.replace('\t\t\tclose(bBlock)\n\t\t}\n\t})', '\t\t\tclose(bBlock)\n\t\t}\n\t\t<-finishedBatch\n\t\tmodelRegistrationTaskHook = nil\n\t})', 1)
+batch_test = batch_test.replace('\n\tfinishedBatch := make(chan struct{})\n\tgo func()', '\n\tgo func()', 1)
+old_wait = """\tdoneA := make(chan struct{})
+\tgo func() {
+\t\tservice.handleAuthUpdate(context.Background(), updateA)
+\t\tclose(doneA)
+\t}()
+\tselect {
+\tcase <-doneA:
+\tcase <-time.After(2 * time.Second):
+\t\tt.Fatal("auth A hook wait blocked on unrelated auth B registration")
+\t}
+"""
+new_wait = """\t// Either auth may be the blocked worker. The other must finish its
+\t// same-revision wait without waiting for the whole batch.
+\tdoneAuth := make(chan string, 2)
+\tvar waiters sync.WaitGroup
+\tfor _, update := range []watcher.AuthUpdate{updateA, updateB} {
+\t\twaiters.Add(1)
+\t\tgo func() {
+\t\t\tdefer waiters.Done()
+\t\t\tservice.handleAuthUpdate(context.Background(), update)
+\t\t\tdoneAuth <- update.ID
+\t\t}()
+\t}
+\tdefer func() {
+\t\tselect {
+\t\tcase <-bBlock:
+\t\tdefault:
+\t\t\tclose(bBlock)
+\t\t}
+\t\twaiters.Wait()
+\t}()
+\tselect {
+\tcase <-doneAuth:
+\tcase <-time.After(2 * time.Second):
+\t\tt.Fatal("completed auth hook wait blocked on unrelated registration")
+\t}
+"""
+if batch_test.count(old_wait) != 1:
+    raise SystemExit('expected one pattern in auth batch independent-wait test')
+batch_test = batch_test.replace(old_wait, new_wait, 1)
+write(auth_sync_test, auth_sync_text[:batch_test_start] + batch_test + auth_sync_text[batch_test_end:])
+replace_once(auth_sync_test, '\t"sync/atomic"\n', '\t"sync"\n\t"sync/atomic"\n', '\t"sync"\n')
 
 replace_once(
     service_config_source,

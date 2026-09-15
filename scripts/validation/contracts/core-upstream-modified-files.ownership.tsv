@@ -1,4 +1,4 @@
-# Latest-only ownership review for Core v7.2.158.
+# Latest-only ownership review for Core v7.3.3.
 # Categories describe the whole Pro delta for each modified upstream file.
 # The current roadmap keeps host business-state extensions in host patches;
 # this review does not assume or require a plugin migration.
@@ -87,6 +87,7 @@ sdk/cliproxy/auth/types.go	must-remain-host-patch	scheduler-runtime-state	retain
 sdk/cliproxy/builder.go	must-remain-host-patch	pro-composition	retain-mixed-pro-service-composition-until-every-static-module-has-plugin-parity
 sdk/cliproxy/service.go	upstream-generic-fix	model-registration	upstream-generation-fenced-model-registration
 sdk/cliproxy/service_auth.go	upstream-generic-fix	model-registration	upstream-generation-fenced-auth-registration
+sdk/cliproxy/service_auth_sync_test.go	upstream-generic-fix	model-registration-tests	remove-once-upstream-independent-wait-test-is-order-independent-and-drains-workers
 sdk/cliproxy/service_config.go	must-remain-host-patch	final-outbound-transport	retain-base-proxy-runtime-update-while-upstreaming-generation-fence
 sdk/cliproxy/service_executors.go	generic-host-hook	account-policy	upstream-auth-model-filter-hook-and-generation-fence
 sdk/cliproxy/service_lifecycle.go	must-remain-host-patch	pro-composition	retain-mixed-pro-lifecycle-until-every-static-module-has-plugin-parity
