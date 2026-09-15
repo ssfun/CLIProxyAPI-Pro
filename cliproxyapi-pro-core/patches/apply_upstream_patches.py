@@ -1181,6 +1181,27 @@ batch_test = batch_test.replace(old_wait, new_wait, 1)
 write(auth_sync_test, auth_sync_text[:batch_test_start] + batch_test + auth_sync_text[batch_test_end:])
 replace_once(auth_sync_test, '\t"sync/atomic"\n', '\t"sync"\n\t"sync/atomic"\n', '\t"sync"\n')
 
+# Release validation overlays latest models.json. Static SupportsWebSearch must
+# remain; fetched IDs only enhance. Assert the agent model matches the static
+# registry instead of hard-coding false.
+excluded_models_test = ROOT / 'sdk/cliproxy/service_excluded_models_test.go'
+replace_once(
+    excluded_models_test,
+    """	if agentModel.SupportsWebSearch {
+		t.Fatal("gemini-pro-agent should not support web search")
+	}
+""",
+    """	staticAgentModel := staticByID["gemini-pro-agent"]
+	if staticAgentModel == nil {
+		t.Fatal("expected static gemini-pro-agent definition")
+	}
+	if agentModel.SupportsWebSearch != staticAgentModel.SupportsWebSearch {
+		t.Fatalf("gemini-pro-agent web search = %v, want static %v", agentModel.SupportsWebSearch, staticAgentModel.SupportsWebSearch)
+	}
+""",
+    'gemini-pro-agent web search = %v, want static %v',
+)
+
 replace_once(
     service_config_source,
     '''\t\tauthForRegistration := prepared
@@ -6070,6 +6091,7 @@ format_go_writes([
     'sdk/cliproxy/service_executors.go',
     'sdk/cliproxy/service_lifecycle.go',
     'sdk/cliproxy/service_models.go',
+    'sdk/cliproxy/service_excluded_models_test.go',
     'sdk/cliproxy/executor/speed.go',
     'sdk/cliproxy/usage/manager.go',
 	'sdk/cliproxy/usage/manager_extensions.go',

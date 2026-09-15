@@ -86,6 +86,7 @@ sdk/cliproxy/service.go
 sdk/cliproxy/service_auth.go
 sdk/cliproxy/service_auth_sync_test.go
 sdk/cliproxy/service_config.go
+sdk/cliproxy/service_excluded_models_test.go
 sdk/cliproxy/service_executors.go
 sdk/cliproxy/service_lifecycle.go
 sdk/cliproxy/service_models.go

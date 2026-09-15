@@ -89,6 +89,7 @@ sdk/cliproxy/service.go	upstream-generic-fix	model-registration	upstream-generat
 sdk/cliproxy/service_auth.go	upstream-generic-fix	model-registration	upstream-generation-fenced-auth-registration
 sdk/cliproxy/service_auth_sync_test.go	upstream-generic-fix	model-registration-tests	remove-once-upstream-independent-wait-test-is-order-independent-and-drains-workers
 sdk/cliproxy/service_config.go	must-remain-host-patch	final-outbound-transport	retain-base-proxy-runtime-update-while-upstreaming-generation-fence
+sdk/cliproxy/service_excluded_models_test.go	upstream-generic-fix	model-registration-tests	align-static-antigravity-web-search-assertion-with-release-models-overlay
 sdk/cliproxy/service_executors.go	generic-host-hook	account-policy	upstream-auth-model-filter-hook-and-generation-fence
 sdk/cliproxy/service_lifecycle.go	must-remain-host-patch	pro-composition	retain-mixed-pro-lifecycle-until-every-static-module-has-plugin-parity
 sdk/cliproxy/service_models.go	generic-host-hook	account-policy	upstream-auth-model-filter-hook-and-generation-fence
