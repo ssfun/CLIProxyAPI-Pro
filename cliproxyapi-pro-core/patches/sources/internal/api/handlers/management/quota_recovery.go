@@ -85,7 +85,7 @@ func (s *accountInspectionScheduler) recoverQuotaProtections(ctx context.Context
 	running := s.isRunningLocked()
 	autoRecover := s.schedule.Settings.AutoExecuteQuotaRecoveryEnable
 	s.mu.Unlock()
-	if stopped || running {
+	if stopped || running || !autoRecover {
 		return
 	}
 	auths := s.inspectionAuthManager().List()
