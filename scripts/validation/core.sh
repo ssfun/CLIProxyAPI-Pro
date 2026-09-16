@@ -94,24 +94,37 @@ run_upstream_test_groups() {
   local include_pro_packages="$2"
   local status=0
 
-  run_go_test_group "${log_path}" core-packages \
-  ./sdk/auth \
-  ./internal/client/claude/models \
+  # Keep this list scoped to packages containing a modified upstream file or
+  # an injected Pro compatibility/test source. Generic upstream-only packages
+  # belong in upstream CI, not in this customization comparison.
+  run_go_test_group "${log_path}" patch-relevant-upstream \
+  ./cmd/server \
   ./internal/api \
   ./internal/api/handlers/management \
+  ./internal/auth/claude \
+  ./internal/client/codex/live \
+  ./internal/cmd \
+  ./internal/config \
   ./internal/managementasset \
   ./internal/pluginhost \
   ./internal/pluginstore \
   ./internal/redisqueue \
   ./internal/requestmeta \
+  ./internal/runtime/executor \
   ./internal/runtime/executor/helps \
-  ./internal/translator/codex/claude \
   ./internal/translator/codex/openai/chat-completions \
   ./internal/translator/codex/openai/responses \
-  ./internal/translator/gemini/openai/responses \
   ./sdk/api/handlers \
   ./sdk/api/handlers/claude \
+  ./sdk/api/handlers/gemini \
+  ./sdk/api/handlers/openai \
+  ./sdk/auth \
+  ./sdk/cliproxy \
   ./sdk/cliproxy/auth \
+  ./sdk/cliproxy/executor \
+  ./sdk/cliproxy/usage \
+  ./sdk/pluginapi \
+  ./sdk/proxyutil \
   || status=1
 
   if [[ "${include_pro_packages}" == "1" ]]; then
