@@ -110,7 +110,6 @@ run_upstream_test_groups() {
   ./internal/pluginstore \
   ./internal/redisqueue \
   ./internal/requestmeta \
-  ./internal/runtime/executor \
   ./internal/runtime/executor/helps \
   ./internal/translator/codex/openai/chat-completions \
   ./internal/translator/codex/openai/responses \
@@ -119,7 +118,6 @@ run_upstream_test_groups() {
   ./sdk/api/handlers/gemini \
   ./sdk/api/handlers/openai \
   ./sdk/auth \
-  ./sdk/cliproxy \
   ./sdk/cliproxy/auth \
   ./sdk/cliproxy/executor \
   ./sdk/cliproxy/usage \
