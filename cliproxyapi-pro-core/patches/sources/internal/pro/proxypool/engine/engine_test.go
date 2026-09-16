@@ -14,6 +14,7 @@ import (
 	"time"
 
 	proxyconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/proxypool/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/proxyutil"
 	proxy "golang.org/x/net/proxy"
 )
 
@@ -262,5 +263,58 @@ func TestProbeDraftDoesNotMutateSavedNodeRuntime(t *testing.T) {
 	snapshot := engine.Status().Nodes[0]
 	if snapshot.State != "unknown" || snapshot.TotalConnects != 0 || snapshot.SuccessConnects != 0 {
 		t.Fatalf("draft probe mutated saved runtime: %+v", snapshot)
+	}
+}
+
+func TestProbeDraftWorksBeforeRuntimeConfigIsApplied(t *testing.T) {
+	working := startConnectProxy(t)
+	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"ip":"203.0.113.9","country":"Testland"}`)
+	}))
+	t.Cleanup(target.Close)
+
+	engine := New()
+	t.Cleanup(engine.Close)
+	result := engine.ProbeDraft(
+		context.Background(),
+		"draft",
+		"http://"+working.listener.Addr().String(),
+		target.URL,
+	)
+	if !result.Success || result.ExitIP != "203.0.113.9" {
+		t.Fatalf("ProbeDraft() before ApplyConfig = %+v", result)
+	}
+}
+
+func TestProbeDoesNotReenterPoolWhenNodeMatchesGlobalProxy(t *testing.T) {
+	working := startConnectProxy(t)
+	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"ip":"203.0.113.10","country":"Testland"}`)
+	}))
+	t.Cleanup(target.Close)
+
+	listen := freeAddress(t)
+	nodeURL := "http://" + working.listener.Addr().String()
+	cfg := proxyconfig.Default()
+	cfg.Listen = listen
+	cfg.HealthCheck.Enabled = false
+	cfg.HealthCheck.Timeout.Duration = 500 * time.Millisecond
+	cfg.Nodes = []proxyconfig.NodeConfig{{ID: "global", URL: nodeURL, Enabled: true, Weight: 1, Order: 10}}
+	engine := New()
+	if errApply := engine.ApplyConfig(cfg); errApply != nil {
+		t.Fatal(errApply)
+	}
+	t.Cleanup(engine.Close)
+
+	proxyutil.SetRuntimeProxyOverride(nodeURL, "socks5://"+listen)
+	t.Cleanup(proxyutil.ClearRuntimeProxyOverride)
+	result := engine.Probe(context.Background(), "global", target.URL)
+	if !result.Success || result.ExitIP != "203.0.113.10" {
+		t.Fatalf("Probe() with matching global proxy = %+v", result)
+	}
+	if working.count.Load() != 1 {
+		t.Fatalf("pool node proxy connections = %d, want 1", working.count.Load())
 	}
 }

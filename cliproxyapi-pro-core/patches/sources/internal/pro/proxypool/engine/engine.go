@@ -240,16 +240,31 @@ func (e *Engine) ProbeDraft(ctx context.Context, nodeID, rawProxyURL, rawTestURL
 	cfg := e.cfg
 	e.mu.RUnlock()
 	result := ProbeResult{NodeID: strings.TrimSpace(nodeID), CheckedAt: time.Now().UTC().Format(time.RFC3339)}
-	validationConfig := cfg
+	// Draft probes are independent from the running takeover state. When the
+	// pool has not been applied yet, cfg is the zero value and validating the
+	// draft against it would reject the URL with "unsupported strategy \"\"".
+	// Keep only the runtime values that are relevant to probing and use the
+	// normal defaults for the rest.
+	probeConfig := proxyconfig.Default()
+	if strings.TrimSpace(cfg.Listen) != "" {
+		probeConfig.Listen = cfg.Listen
+	}
+	if cfg.HealthCheck.Timeout.Duration > 0 {
+		probeConfig.HealthCheck.Timeout = cfg.HealthCheck.Timeout
+	}
+	if strings.TrimSpace(cfg.HealthCheck.TestURL) != "" {
+		probeConfig.HealthCheck.TestURL = cfg.HealthCheck.TestURL
+	}
+	validationConfig := probeConfig
 	validationConfig.Nodes = []proxyconfig.NodeConfig{{ID: "draft", URL: strings.TrimSpace(rawProxyURL), Enabled: true, Weight: 1}}
 	if errValidate := validationConfig.NormalizeAndValidate(); errValidate != nil {
 		result.Error = errValidate.Error()
 		return result
 	}
 	if strings.TrimSpace(rawTestURL) == "" {
-		rawTestURL = cfg.HealthCheck.TestURL
+		rawTestURL = probeConfig.HealthCheck.TestURL
 	}
-	return probeProxyURL(ctx, result, validationConfig.Nodes[0].URL, rawTestURL, cfg.HealthCheck.Timeout.Duration, nil, cfg)
+	return probeProxyURL(ctx, result, validationConfig.Nodes[0].URL, rawTestURL, probeConfig.HealthCheck.Timeout.Duration, nil, probeConfig)
 }
 
 func probeProxyURL(ctx context.Context, result ProbeResult, rawProxyURL, rawTestURL string, timeout time.Duration, node *pool.Node, cfg proxyconfig.Config) ProbeResult {
@@ -491,7 +506,10 @@ func (e *Engine) setLastError(err error) {
 }
 
 func dialNode(ctx context.Context, rawProxyURL, target string) (net.Conn, error) {
-	dialer, mode, errBuild := proxyutil.BuildDialer(rawProxyURL)
+	// A pool node is an explicit internal hop. It must use the configured node
+	// URL as-is; applying the process-wide takeover here would turn a node that
+	// equals the original global proxy into a dial back to the pool listener.
+	dialer, mode, errBuild := proxyutil.BuildDialerWithoutRuntimeOverride(rawProxyURL)
 	if errBuild != nil {
 		return nil, errBuild
 	}

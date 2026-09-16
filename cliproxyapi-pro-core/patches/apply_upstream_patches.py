@@ -658,8 +658,8 @@ replace_once(
 replace_once(
     proxyutil_source,
     'func BuildDialer(raw string) (proxy.Dialer, Mode, error) {\n\tsetting, errParse := Parse(raw)\n',
-    'func BuildDialer(raw string) (proxy.Dialer, Mode, error) {\n\traw = resolveRuntimeProxyOverride(raw)\n\tsetting, errParse := Parse(raw)\n',
-    'func BuildDialer(raw string) (proxy.Dialer, Mode, error) {\n\traw = resolveRuntimeProxyOverride(raw)',
+    'func BuildDialer(raw string) (proxy.Dialer, Mode, error) {\n\treturn buildDialer(resolveRuntimeProxyOverride(raw))\n}\n\n// BuildDialerWithoutRuntimeOverride builds a dialer from the supplied raw\n// setting without applying the process-wide runtime proxy takeover. Internal\n// proxy-pool hops use this boundary to avoid dialing back into the pool.\nfunc BuildDialerWithoutRuntimeOverride(raw string) (proxy.Dialer, Mode, error) {\n\treturn buildDialer(raw)\n}\n\nfunc buildDialer(raw string) (proxy.Dialer, Mode, error) {\n\tsetting, errParse := Parse(raw)\n',
+    'func BuildDialer(raw string) (proxy.Dialer, Mode, error) {\n\treturn buildDialer(resolveRuntimeProxyOverride(raw))',
 )
 
 write(
