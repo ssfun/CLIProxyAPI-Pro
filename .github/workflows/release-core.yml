@@ -637,35 +637,52 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld wget
-
-      - name: Prepare workspace git metadata for FreeBSD plugin build
-        if: matrix.kind == 'freebsd-plugin'
-        env:
-          BUILD_DATE: ${{ steps.prepare-core.outputs.build_date }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          GIT_AUTHOR_DATE="${BUILD_DATE}" GIT_COMMITTER_DATE="${BUILD_DATE}" git commit --allow-empty -m "Prepare workspace metadata for cgo action"
+          sudo apt-get install -y clang lld
 
       - name: Build FreeBSD plugin-capable binary
         if: matrix.kind == 'freebsd-plugin'
-        uses: go-cross/cgo-actions@d0b8f2f2d67923ce9a42d92a7ef0ed1ebd905f0a # v1
+        shell: bash
         env:
-          GOFLAGS: -buildvcs=false -trimpath
-        with:
-          dir: upstream-core
-          packages: ./cmd/server/
-          targets: ${{ matrix.goos }}-${{ matrix.goarch }}
-          out-dir: upstream-core/dist/${{ matrix.target }}/bin
-          output: cli-proxy-api
-          flags: -ldflags=-s -w
-          x-flags: |
-            main.Version=${{ needs.check-version.outputs.release_tag }}
-            main.Commit=release-${{ needs.check-version.outputs.core_tag }}
-            main.BuildDate=${{ steps.prepare-core.outputs.build_date }}
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+          CORE_TAG: ${{ needs.check-version.outputs.core_tag }}
+          BUILD_DATE: ${{ steps.prepare-core.outputs.build_date }}
+        run: |
+          set -euo pipefail
+
+          freebsd_release="$({
+            curl -fsSL --retry 5 --retry-all-errors \
+              https://download.freebsd.org/releases/amd64/ |
+              grep -oE 'href="14\.[0-9]+-RELEASE/"' |
+              sed -E 's/^href="//; s#/"$##' |
+              sort -V |
+              tail -n 1
+          })"
+          if [[ ! "${freebsd_release}" =~ ^14\.[0-9]+-RELEASE$ ]]; then
+            printf 'Unable to determine a current FreeBSD 14.x release, got: %s\n' "${freebsd_release}" >&2
+            exit 1
+          fi
+
+          freebsd_version="${freebsd_release%-RELEASE}"
+          sysroot_dir="${RUNNER_TEMP}/freebsd-${freebsd_version}-sysroot"
+          archive_path="${RUNNER_TEMP}/freebsd-${freebsd_version}-base.txz"
+          mkdir -p "${sysroot_dir}"
+          curl -fL --retry 5 --retry-all-errors \
+            "https://download.freebsd.org/releases/amd64/${freebsd_release}/base.txz" \
+            -o "${archive_path}"
+          tar -xf "${archive_path}" -C "${sysroot_dir}"
+
+          mkdir -p "upstream-core/dist/${{ matrix.target }}/bin"
+          cd upstream-core
+          CGO_ENABLED=1 \
+          GOOS=freebsd \
+          GOARCH=amd64 \
+          GOFLAGS='-buildvcs=false -trimpath' \
+          CGO_LDFLAGS='-fuse-ld=lld' \
+          CC="clang --target=x86_64-unknown-freebsd${freebsd_version} --sysroot=${sysroot_dir}" \
+          go build \
+            -ldflags="-s -w -X main.Version=${RELEASE_TAG} -X main.Commit=release-${CORE_TAG} -X main.BuildDate=${BUILD_DATE}" \
+            -o "dist/${{ matrix.target }}/bin/cli-proxy-api" \
+            ./cmd/server/
 
       - name: Package FreeBSD plugin-capable archive
         if: matrix.kind == 'freebsd-plugin'
