@@ -400,3 +400,11 @@ func DeleteAuthRuntimeState(ctx context.Context, authID, authIndex, fileName str
 		return writer.Delete(ctx, authID, authIndex, fileName)
 	})
 }
+
+// WithProSettingWriter keeps a guarded read/modify/write and its live mutation
+// inside one backup barrier. The writer is valid only during this callback.
+func WithProSettingWriter(ctx context.Context, update func(context.Context, func(ProSetting) error) error) error {
+	return probackup.Default.ExecuteWrite(ctx, func(ctx context.Context) error {
+		return update(ctx, func(item ProSetting) error { return setProSetting(ctx, item) })
+	})
+}

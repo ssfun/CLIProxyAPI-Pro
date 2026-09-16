@@ -15,10 +15,43 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/embeddedusage"
 	proinspection "github.com/router-for-me/CLIProxyAPI/v6/internal/pro/inspection"
+	prorouting "github.com/router-for-me/CLIProxyAPI/v6/internal/pro/routing"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
 )
+
+func TestQuotaProtectionImportUsesCurrentAuthManager(t *testing.T) {
+	ctx := startProQuotaTestService(t)
+	hold := prorouting.QuotaProtection{Source: inspectionQuotaSource, Revision: 1, RetryAt: time.Now().Add(time.Hour).UnixMilli()}
+	oldManager := coreauth.NewManager(nil, nil, nil)
+	newManager := coreauth.NewManager(nil, nil, nil)
+	registered, err := oldManager.Register(ctx, &coreauth.Auth{ID: "manager-swap-auth", Provider: "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := oldManager.ChangeQuotaProtection(ctx, registered, inspectionQuotaSource, 0, &hold); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newManager.Register(ctx, &coreauth.Auth{ID: "manager-swap-auth", Provider: "codex"}); err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{authManager: oldManager}
+	scheduler := &accountInspectionScheduler{h: h}
+	h.SetAuthManager(newManager)
+	if err := scheduler.applyImportedQuotaProtection(ctx, embeddedusage.ProSetting{SchemaVersion: 1, Settings: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := newManager.GetByID("manager-swap-auth")
+	if len(prorouting.QuotaProtections(updated.Metadata)) != 0 {
+		t.Fatal("import did not apply to the current auth manager")
+	}
+	previous, _ := oldManager.GetByID("manager-swap-auth")
+	if len(prorouting.QuotaProtections(previous.Metadata)) == 0 {
+		t.Fatal("import unexpectedly mutated the replaced auth manager")
+	}
+}
 
 type accountInspectionTestStorage struct {
 	meta map[string]any

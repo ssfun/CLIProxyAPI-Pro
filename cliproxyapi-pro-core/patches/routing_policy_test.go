@@ -388,6 +388,10 @@ func TestNormalizeRoutingRequestProtectionConfig(t *testing.T) {
 	if len(codex.StatusCodes) != 1 || codex.StatusCodes[0] != 429 {
 		t.Fatalf("status codes = %#v", codex.StatusCodes)
 	}
+	defaults := normalizeRoutingRequestProtectionConfig(routingRequestProtectionConfig{}).Providers["codex"]
+	if len(defaults.StatusCodes) != 2 || defaults.StatusCodes[0] != http.StatusPaymentRequired || defaults.StatusCodes[1] != http.StatusTooManyRequests {
+		t.Fatalf("default status codes = %#v", defaults.StatusCodes)
+	}
 	if codex.Confirmations != 5 {
 		t.Fatalf("confirmations = %d", codex.Confirmations)
 	}
@@ -544,6 +548,7 @@ func TestRoutingProtectionReasonPreservesCompleteBody(t *testing.T) {
 }
 
 func TestRoutingProtectionRedactsReasonBeforeEventAndAuthPersistence(t *testing.T) {
+	startProQuotaTestService(t)
 	manager := coreauth.NewManager(nil, nil, nil)
 	auth, err := manager.Register(context.Background(), &coreauth.Auth{ID: "redacted-reason-auth", Provider: "xai"})
 	if err != nil {
@@ -566,7 +571,7 @@ func TestRoutingProtectionRedactsReasonBeforeEventAndAuthPersistence(t *testing.
 		Fail: coreusage.Failure{StatusCode: http.StatusTooManyRequests, Body: body},
 	})
 	events := controller.recentEvents()
-	if len(events) != 1 || events[0].Action != "disabled" {
+	if len(events) != 1 || events[0].Action != "cooldown" {
 		t.Fatalf("events = %#v", events)
 	}
 	if strings.Contains(events[0].Reason, "sk-secret") || strings.Contains(events[0].Reason, "Bearer private") {
@@ -576,7 +581,7 @@ func TestRoutingProtectionRedactsReasonBeforeEventAndAuthPersistence(t *testing.
 	if !ok || updated == nil {
 		t.Fatal("updated auth missing")
 	}
-	reason, _ := routingProtectionMetadata(updated)["reason"].(string)
+	reason := prorouting.QuotaProtections(updated.Metadata)["routing:"].Reason
 	if reason == "" || strings.Contains(reason, "sk-secret") || strings.Contains(reason, "Bearer private") {
 		t.Fatalf("persisted reason exposed a secret or was lost: %q", reason)
 	}

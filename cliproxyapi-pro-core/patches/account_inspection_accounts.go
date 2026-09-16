@@ -16,6 +16,7 @@ import (
 
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	proinspection "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/inspection"
+	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
 )
 
 func runAccountInspectionWorkers(total int, workers int, beforeNext func() bool, run func(index int) bool) {
@@ -110,9 +111,7 @@ func (s *accountInspectionScheduler) auths() ([]*coreauth.Auth, error) {
 	if s.h == nil {
 		return nil, fmt.Errorf("management handler unavailable")
 	}
-	s.h.mu.Lock()
-	manager := s.h.authManager
-	s.h.mu.Unlock()
+	manager := s.inspectionAuthManager()
 	if manager == nil {
 		return nil, fmt.Errorf("core auth manager unavailable")
 	}
@@ -330,6 +329,7 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 		result = account.baseResult()
 	}
 	result.NextRefreshAt = account.nextRefreshAtMillis()
+	s.fillQuotaProtectionResult(account.Auth, &result)
 	var decision accountInspectionDecision
 	var statusCode *int
 	var err error
@@ -369,6 +369,9 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 	result.ActionReason = decision.ActionReason
 	result.UsedPercent = decision.UsedPercent
 	result.IsQuota = decision.IsQuota
+	result.QuotaResetAt = decision.QuotaResetAt
+	result.QuotaModel = decision.QuotaModel
+	result.QuotaKnown = decision.QuotaKnown || decision.UsedPercent != nil
 	result.Error = decision.Error
 	result.ErrorDetail = decision.ErrorDetail
 	result.ErrorCode = proinspection.DecisionErrorCode(account.Provider, decision, statusCode)
@@ -381,6 +384,10 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 		s.clearInspectionAuthError(ctx, account)
 	} else if statusCode != nil && decision.DeepProbeStatus != accountInspectionDeepProbeTransientError {
 		s.syncInspectionAuthStatus(ctx, account, *statusCode)
+	}
+	if result.QuotaCooling && !result.Disabled && result.Error == "" && result.ErrorCode == "" && result.UsedPercent != nil && proinspection.QuotaRecovered(*result.UsedPercent, settings.UsedPercentThreshold) {
+		result.Action = accountInspectionActionEnable
+		result.ActionReason = "额度恢复，建议解除额度保护"
 	}
 	level := "info"
 	if result.Action == accountInspectionActionDisable {
@@ -399,11 +406,11 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 }
 
 func (s *accountInspectionScheduler) refreshAccountIfDue(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) (accountInspectionAccount, bool, error) {
-	if account.Auth == nil || account.Auth.ID == "" || s == nil || s.h == nil || s.h.authManager == nil {
+	if account.Auth == nil || account.Auth.ID == "" || s == nil || s.h == nil || s.inspectionAuthManager() == nil {
 		return account, false, nil
 	}
 	if account.Provider == "antigravity" {
-		current, ok := s.h.authManager.GetByID(account.Auth.ID)
+		current, ok := s.inspectionAuthManager().GetByID(account.Auth.ID)
 		if !ok || current == nil {
 			return account, false, coreauth.ErrInspectionAuthChanged
 		}
@@ -413,7 +420,7 @@ func (s *accountInspectionScheduler) refreshAccountIfDue(ctx context.Context, ac
 		}
 		return prepared, refreshed, err
 	}
-	updated, refreshed, err := s.h.authManager.RefreshIfDueForInspection(ctx, account.Auth.ID)
+	updated, refreshed, err := s.inspectionAuthManager().RefreshIfDueForInspection(ctx, account.Auth.ID)
 	if err != nil {
 		return account, true, err
 	}
@@ -520,7 +527,7 @@ func isInspectionAuthRecoveryStatus(status int) bool {
 }
 
 func (s *accountInspectionScheduler) syncInspectionAuthError(ctx context.Context, account accountInspectionAccount, code string, message string, status int) {
-	if s == nil || s.h == nil || s.h.authManager == nil || account.AuthIndex == "" {
+	if s == nil || s.h == nil || s.inspectionAuthManager() == nil || account.AuthIndex == "" {
 		return
 	}
 	if !accountInspectionAccountMatchesAuth(account, s.h.authByIndex(account.AuthIndex)) {
@@ -539,7 +546,7 @@ func (s *accountInspectionScheduler) syncInspectionAuthError(ctx context.Context
 }
 
 func (s *accountInspectionScheduler) clearInspectionAuthError(ctx context.Context, account accountInspectionAccount) {
-	if s == nil || s.h == nil || s.h.authManager == nil || account.AuthIndex == "" {
+	if s == nil || s.h == nil || s.inspectionAuthManager() == nil || account.AuthIndex == "" {
 		return
 	}
 	auth := s.h.authByIndex(account.AuthIndex)
@@ -708,6 +715,9 @@ func (s *accountInspectionScheduler) executeManualActions(ctx context.Context, i
 			}
 			s.appendLog("success", fmt.Sprintf("%s %s 成功", proinspection.ResultIdentity(result), action))
 		}
+		if current := s.h.authByIndex(result.AuthIndex); current != nil {
+			s.fillQuotaProtectionResult(current, &result)
+		}
 		outcomes[index] = outcome
 		executedResults[index] = result
 		return true
@@ -762,7 +772,13 @@ func (s *accountInspectionScheduler) applyAutomaticActions(ctx context.Context, 
 			deletedFiles[results[index].FileName] = struct{}{}
 			mu.Unlock()
 		}
-		err := s.executeActionWithLimit(ctx, results[index], action, workers)
+		quotaAction := results[index].IsQuota && action == accountInspectionActionDisable || results[index].QuotaCooling && action == accountInspectionActionEnable
+		var err error
+		if quotaAction {
+			err = s.executeQuotaProtection(ctx, &results[index], settings, action)
+		} else {
+			err = s.executeActionWithLimit(ctx, results[index], action, workers)
+		}
 		mu.Lock()
 		if err != nil {
 			results[index].ExecuteError = err.Error()
@@ -771,7 +787,7 @@ func (s *accountInspectionScheduler) applyAutomaticActions(ctx context.Context, 
 			results[index].Executed = true
 			results[index].Action = action
 			s.clearAutoActionConfirmation(results[index])
-			if action == accountInspectionActionDisable {
+			if action == accountInspectionActionDisable && !quotaAction {
 				results[index].Disabled = true
 			}
 			if action == accountInspectionActionEnable {
@@ -817,7 +833,7 @@ func (s *accountInspectionScheduler) clearAutoActionConfirmation(result accountI
 }
 
 func (s *accountInspectionScheduler) executeAction(ctx context.Context, result accountInspectionResult, action accountInspectionAction) error {
-	if s.h == nil || s.h.authManager == nil {
+	if s.h == nil || s.inspectionAuthManager() == nil {
 		return fmt.Errorf("core auth manager unavailable")
 	}
 	auth, err := s.actionAuthForResult(result)
@@ -826,6 +842,12 @@ func (s *accountInspectionScheduler) executeAction(ctx context.Context, result a
 	}
 	switch action {
 	case accountInspectionActionDisable, accountInspectionActionEnable:
+		if action == accountInspectionActionEnable && !auth.Disabled {
+			hold, ok := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
+			if ok {
+				return s.inspectionAuthManager().ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, hold.Revision, nil)
+			}
+		}
 		return s.h.updateProAuth(ctx, result.AuthIndex, func(auth *coreauth.Auth) {
 			setProAuthDisabledState(auth, action == accountInspectionActionDisable)
 		})
@@ -858,7 +880,7 @@ func (s *accountInspectionScheduler) executeActionWithLimit(ctx context.Context,
 }
 
 func (s *accountInspectionScheduler) actionAuthForResult(result accountInspectionResult) (*coreauth.Auth, error) {
-	if s == nil || s.h == nil || s.h.authManager == nil || strings.TrimSpace(result.AuthIndex) == "" {
+	if s == nil || s.h == nil || s.inspectionAuthManager() == nil || strings.TrimSpace(result.AuthIndex) == "" {
 		return nil, errAccountInspectionResultStale
 	}
 	auth := s.h.authByIndex(result.AuthIndex)
@@ -873,7 +895,7 @@ func (s *accountInspectionScheduler) actionAuthForResult(result accountInspectio
 }
 
 func (s *accountInspectionScheduler) pluginVirtualSourceAuthCount(auth *coreauth.Auth) int {
-	if s == nil || s.h == nil || s.h.authManager == nil || auth == nil || !coreauth.IsPluginVirtualAuth(auth) {
+	if s == nil || s.h == nil || s.inspectionAuthManager() == nil || auth == nil || !coreauth.IsPluginVirtualAuth(auth) {
 		return 0
 	}
 	sourcePath := pluginVirtualSourcePath(auth)
@@ -881,7 +903,7 @@ func (s *accountInspectionScheduler) pluginVirtualSourceAuthCount(auth *coreauth
 		return 0
 	}
 	count := 0
-	for _, candidate := range s.h.authManager.List() {
+	for _, candidate := range s.inspectionAuthManager().List() {
 		if candidate != nil && coreauth.IsPluginVirtualAuth(candidate) && sameAuthSourcePath(pluginVirtualSourcePath(candidate), sourcePath) {
 			count++
 		}

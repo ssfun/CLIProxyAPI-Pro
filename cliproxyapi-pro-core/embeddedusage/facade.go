@@ -88,6 +88,7 @@ var (
 	GetProSetting                             = proobservability.GetProSetting
 	SetProSetting                             = proobservability.SetProSetting
 	SetProSettingAndApplyLatest               = proobservability.SetProSettingAndApplyLatest
+	WithProSettingWriter                      = proobservability.WithProSettingWriter
 	QueueRoutingCursorState                   = proobservability.QueueRoutingCursorState
 	GetRoutingCursorState                     = proobservability.GetRoutingCursorState
 	ListRoutingCursorStates                   = proobservability.ListRoutingCursorStates

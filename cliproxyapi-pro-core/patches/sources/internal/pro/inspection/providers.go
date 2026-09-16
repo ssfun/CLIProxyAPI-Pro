@@ -1056,3 +1056,71 @@ func normalizeFraction(value float64) float64 {
 	}
 	return math.Max(0, math.Min(1, value))
 }
+
+// WithQuotaWindows derives recovery only from windows that actually block this
+// decision. An unknown blocking reset leaves recovery to bounded probing.
+func WithQuotaWindows(decision Decision, windows []map[string]any, threshold float64) Decision {
+	decision.QuotaKnown = decision.UsedPercent != nil
+	for _, window := range windows {
+		used, ok := floatFromAny(window["usedPercent"])
+		if !ok {
+			if remaining, found := floatFromAny(window["remainingFraction"]); found {
+				used, ok = (1-remaining)*100, true
+			}
+		}
+		if !ok {
+			if limit, found := floatFromAny(window["limit"]); found && limit > 0 {
+				if value, found := floatFromAny(window["used"]); found {
+					used, ok = value/limit*100, true
+				}
+			}
+		}
+		if !ok || used < threshold {
+			continue
+		}
+		reset, ok := floatFromAny(window["resetAtMs"])
+		if !ok || reset <= float64(time.Now().UnixMilli()) {
+			decision.QuotaResetAt = 0
+			return decision
+		}
+		if int64(reset) > decision.QuotaResetAt {
+			decision.QuotaResetAt = int64(reset)
+		}
+	}
+	return decision
+}
+
+func AntigravityBlockingWindows(groups []map[string]any, mode AntigravityQuotaMode) []map[string]any {
+	if mode == AntigravityQuotaModeClaudeGPT {
+		for _, group := range groups {
+			if isAntigravityClaudeGptGroup(group) {
+				return anyMapSlice(group["buckets"])
+			}
+		}
+	}
+	var windows []map[string]any
+	for _, group := range groups {
+		windows = append(windows, anyMapSlice(group["buckets"])...)
+	}
+	return windows
+}
+
+// Only provider-defined, unambiguous model windows narrow the routing scope.
+func ClaudeQuotaModel(windows []map[string]any, threshold float64) string {
+	var scopes []string
+	for _, window := range windows {
+		used, ok := floatFromAny(window["usedPercent"])
+		if !ok || used < threshold {
+			continue
+		}
+		switch stringFromProviderValue(window["id"]) {
+		case "seven-day-opus":
+			scopes = append(scopes, "claude-opus-*")
+		case "seven-day-sonnet":
+			scopes = append(scopes, "claude-sonnet-*")
+		default:
+			return ""
+		}
+	}
+	return strings.Join(scopes, ",")
+}

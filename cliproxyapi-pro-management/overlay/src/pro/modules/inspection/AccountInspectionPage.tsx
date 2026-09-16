@@ -1897,7 +1897,8 @@ export function AccountInspectionPage() {
                                 <small>
                                   <span>{resolveProviderDisplayLabel(item.provider)}</span>
                                   <span aria-hidden="true"> · </span>
-                                  <span className={item.disabled ? styles.stateTextMuted : styles.stateTextGood}>{formatCurrentStateLabel(item, t)}</span>
+                                  <span className={item.disabled ? styles.stateTextMuted : item.quotaCooling ? styles.stateTextWarn : styles.stateTextGood}>{formatCurrentStateLabel(item, t)}</span>
+                                  {item.quotaCooling && <span title={item.actionReason}> · {item.quotaRetryAt ? t('monitoring.account_inspection_quota_retry_at', { time: formatTimestamp(item.quotaRetryAt, i18n.language) }) : t('monitoring.account_inspection_quota_manual_release')}</span>}
                                 </small>
                               </div>
                             </div>
@@ -1943,7 +1944,7 @@ export function AccountInspectionPage() {
                                   onClick={() => handleExecuteSingle(item, suggestedAction)}
                                   disabled={restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
                                 >
-                                  {formatActionLabel(suggestedAction, t)}
+                                  {item.quotaCooling && suggestedAction === 'enable' ? t('monitoring.account_inspection_release_quota') : formatActionLabel(suggestedAction, t)}
                                 </Button>
                               ) : null}
                               {additionalActions.map((action) => (
@@ -1954,7 +1955,7 @@ export function AccountInspectionPage() {
                                   onClick={() => handleExecuteSingle(item, action)}
                                   disabled={restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
                                 >
-                                  {formatActionLabel(action, t)}
+                                  {item.quotaCooling && action === 'enable' ? t('monitoring.account_inspection_release_quota') : formatActionLabel(action, t)}
                                 </Button>
                               ))}
                             </div>

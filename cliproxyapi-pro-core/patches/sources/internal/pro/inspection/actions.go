@@ -148,6 +148,8 @@ func MergeManualActionResult(current, executed Result) (Result, bool) {
 	current.Name = executed.Name
 	current.AuthIndex = executed.AuthIndex
 	current.Disabled = executed.Disabled
+	current.QuotaCooling = executed.QuotaCooling
+	current.QuotaRetryAt = executed.QuotaRetryAt
 	current.Executed = executed.Executed
 	current.ExecuteError = executed.ExecuteError
 	if executed.Executed && (executed.Action == ActionDisable || executed.Action == ActionEnable) {

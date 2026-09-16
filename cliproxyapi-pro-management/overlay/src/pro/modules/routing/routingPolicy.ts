@@ -52,6 +52,7 @@ export interface RoutingProtectedAccount {
   reason: string;
   triggeredAt: number;
   releaseAt: number;
+  action?: string;
 }
 
 export interface RoutingProtectionEvent {

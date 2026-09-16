@@ -46,7 +46,7 @@ func NormalizeConfig(input RequestProtectionConfig, providers []string) RequestP
 		policy := input.Providers[provider]
 		policy.StatusCodes = NormalizeStatusCodes(policy.StatusCodes)
 		if len(policy.StatusCodes) == 0 {
-			policy.StatusCodes = []int{http.StatusTooManyRequests}
+			policy.StatusCodes = []int{http.StatusPaymentRequired, http.StatusTooManyRequests}
 		}
 		if policy.Confirmations <= 0 {
 			policy.Confirmations = 1

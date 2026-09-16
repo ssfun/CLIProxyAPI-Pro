@@ -394,9 +394,7 @@ export function InspectionErrorDetailsPanel({
     { label: t('monitoring.filter_provider'), value: item.provider },
     {
       label: t('monitoring.account_inspection_enabled_status'),
-      value: item.disabled
-        ? t('monitoring.account_inspection_state_disabled')
-        : t('monitoring.account_inspection_state_enabled'),
+      value: formatCurrentStateLabel(item, t),
     },
   ].filter((detail) => detail.value);
   const inspectionItems = [
@@ -798,6 +796,7 @@ const getManualActionsByHealthStatus = (
   item: AccountInspectionResultItem,
   healthStatus: ResultHealthStatus
 ): ManualAccountInspectionAction[] => {
+  if (item.quotaCooling && !item.disabled) return ['enable', 'disable', 'delete'];
   if (healthStatus === 'healthy') return [];
   return [item.disabled ? 'enable' : 'disable', 'delete'];
 };
@@ -1105,6 +1104,7 @@ export const formatInspectionResultToast = (
 
 export const formatCurrentStateLabel = (item: AccountInspectionResultItem, t: TFunction) => {
   if (item.disabled) return t('monitoring.account_inspection_state_disabled');
+  if (item.quotaCooling) return t('monitoring.account_inspection_state_quota_cooling');
   return t('monitoring.account_inspection_state_enabled');
 };
 

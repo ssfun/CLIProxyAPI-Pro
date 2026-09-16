@@ -26,6 +26,9 @@ const (
 )
 
 type Decision struct {
+	QuotaResetAt    int64
+	QuotaModel      string
+	QuotaKnown      bool
 	Action          Action
 	ActionReason    string
 	UsedPercent     *float64
@@ -34,6 +37,18 @@ type Decision struct {
 	ErrorDetail     string
 	DeepProbeStatus DeepProbeStatus
 	DeepProbeError  string
+}
+
+// QuotaRecovered applies the same hysteresis at the recovery boundary that is
+// used by the inspection scheduler. At very small thresholds, a zero usage
+// reading is the only healthy value that can exist, so the boundary is
+// inclusive instead of producing an impossible negative comparison.
+func QuotaRecovered(used, threshold float64) bool {
+	recoveryThreshold := threshold - 2
+	if recoveryThreshold <= 0 {
+		return used <= 0
+	}
+	return used < recoveryThreshold
 }
 
 func AuthErrorDecision(disabled bool, status int) Decision {

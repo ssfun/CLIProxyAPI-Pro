@@ -62,6 +62,8 @@ export interface AccountInspectionResultItem extends AccountInspectionAccount {
   tokenRefreshStatus?: 'success' | 'failed' | '';
   tokenRefreshError?: string;
   nextRefreshAt?: number;
+  quotaCooling?: boolean;
+  quotaRetryAt?: number;
   executed?: boolean;
 }
 
@@ -512,6 +514,8 @@ export const accountInspectionBackendResultToItem = (
   tokenRefreshStatus: item.tokenRefreshStatus ?? '',
   tokenRefreshError: item.tokenRefreshError ?? '',
   nextRefreshAt: item.nextRefreshAt ?? 0,
+  quotaCooling: item.quotaCooling ?? false,
+  quotaRetryAt: item.quotaRetryAt ?? 0,
   executed: item.executed,
 });
 

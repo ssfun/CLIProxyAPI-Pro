@@ -296,6 +296,9 @@ new_customization_paths = (
 	'sdk/cliproxy/auth/codex_retry_after_headers_test.go',
 	'sdk/cliproxy/auth/scheduler_runtime_state.go',
     'sdk/cliproxy/auth/inspection_refresh.go',
+    'sdk/cliproxy/auth/pro_quota_protection.go',
+    'internal/pro/routing/quota_protection.go',
+    'internal/api/handlers/management/quota_recovery.go',
     'sdk/cliproxy/auth/inspection_refresh_test.go',
     'sdk/cliproxy/auth/pinned_execution.go',
     'sdk/cliproxy/pro_features_service_test.go',
@@ -5225,7 +5228,18 @@ replace_once(
     'Selected int64',
 )
 
+queue_go_source('internal/pro/routing/quota_protection.go')
+queue_go_source('sdk/cliproxy/auth/pro_quota_protection.go')
+queue_go_source('internal/api/handlers/management/quota_recovery.go')
+
 auth_selector = ROOT / 'sdk/cliproxy/auth/selector.go'
+replace_once(
+    auth_selector,
+    '\tif hasUnauthorizedAuthFailure(auth) {\n',
+    '\tif blocked, retryAt := proQuotaProtectionBlocked(auth, model, now); blocked {\n\t\treturn true, blockReasonCooldown, retryAt\n\t}\n\tif hasUnauthorizedAuthFailure(auth) {\n',
+    'proQuotaProtectionBlocked(auth, model, now)',
+)
+
 replace_once(
     auth_selector,
     '''type RoundRobinSelector struct {
@@ -5273,6 +5287,20 @@ replace_once(
 )
 
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_lifecycle.go'
+replace_once(
+    auth_conductor,
+    '\tauth.Generation = 1\n\tauthClone := auth.Clone()\n',
+    '\tauth.Generation = 1\n\trestoreQuotaProtection(auth)\n\tauthClone := auth.Clone()\n',
+    'restoreQuotaProtection(auth)',
+)
+
+replace_once(
+    auth_conductor,
+    '\tif auth.Generation <= existing.Generation {\n',
+    '\tsetQuotaProtections(auth, proroutingQuotaProtections(existing))\n\tif auth.Generation <= existing.Generation {\n',
+    'setQuotaProtections(auth, proroutingQuotaProtections(existing))',
+)
+
 replace_once(
     auth_conductor,
     '\tupdateModePrepare\n)',

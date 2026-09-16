@@ -3,9 +3,13 @@ package auth
 import (
 	"context"
 	"errors"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/embeddedusage"
+	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
@@ -144,5 +148,99 @@ func TestUpdateStripsRuntimeAccountPolicyMarkers(t *testing.T) {
 		if _, found := stored.Attributes[marker]; found {
 			t.Fatalf("marker %q was persisted", marker)
 		}
+	}
+}
+
+func TestQuotaProtectionSchedulingPersistenceAndCAS(t *testing.T) {
+	t.Setenv("USAGE_DB_PATH", filepath.Join(t.TempDir(), "quota.sqlite"))
+	t.Setenv("USAGE_SERVICE_ENABLED", "false")
+	ctx, cancel := context.WithCancel(context.Background())
+	service, err := embeddedusage.Start(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	embeddedusage.SetDefaultService(service)
+	t.Cleanup(func() { embeddedusage.SetDefaultService(nil); cancel() })
+	m := NewManager(nil, nil, nil)
+	a, err := m.Register(ctx, &Auth{ID: "quota-protection-test", Provider: "codex", FileName: "quota.json", Metadata: map[string]any{"access_token": "original"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry.GetGlobalRegistry().RegisterClient(a.ID, "codex", []*registry.ModelInfo{{ID: "gpt-quota-test"}, {ID: "gpt-other-test"}})
+	t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(a.ID) })
+	hold := prorouting.QuotaProtection{Model: "gpt-quota-test", Recheck: true, RetryAt: time.Now().Add(-time.Minute).UnixMilli()}
+	if err = m.ChangeQuotaProtection(ctx, a, "inspection", 0, &hold); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := m.GetByID(a.ID)
+	rev := prorouting.QuotaProtections(current.Metadata)["inspection"].Revision
+	if current.Disabled {
+		t.Fatal("quota protection disabled account")
+	}
+	if picked, err := m.scheduler.pickSingle(ctx, "codex", "gpt-quota-test", cliproxyexecutor.Options{}, nil); err == nil || picked != nil {
+		t.Fatal("due recheck restriction allowed traffic")
+	}
+	if picked, err := m.scheduler.pickSingle(ctx, "codex", "gpt-other-test", cliproxyexecutor.Options{}, nil); err != nil || picked == nil {
+		t.Fatalf("unrelated model blocked: %v", err)
+	}
+	if err = m.ChangeQuotaProtection(ctx, a, "inspection", 0, nil); !errors.Is(err, ErrQuotaProtectionChanged) {
+		t.Fatalf("stale release: %v", err)
+	}
+	// Generic stale metadata updates and successful requests cannot erase the hold.
+	if _, err = m.Update(ctx, a.Clone()); err != nil {
+		t.Fatal(err)
+	}
+	m.MarkResult(ctx, Result{AuthID: a.ID, Provider: a.Provider, Model: "gpt-other-test", Success: true})
+	current, _ = m.GetByID(a.ID)
+	if prorouting.QuotaProtections(current.Metadata)["inspection"].Revision != rev {
+		t.Fatal("ordinary update lost protection")
+	}
+	restarted := NewManager(nil, nil, nil)
+	restored, err := restarted.Register(ctx, a.Clone())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prorouting.QuotaProtections(restored.Metadata)["inspection"].Revision != rev {
+		t.Fatal("restart lost SQLite restriction")
+	}
+	// Release the inspection source without erasing a concurrent native cooldown.
+	delay := time.Hour
+	m.MarkResult(ctx, Result{AuthID: a.ID, Provider: a.Provider, Model: "gpt-quota-test", RetryAfter: &delay, Error: &Error{HTTPStatus: 429}})
+	current, _ = m.GetByID(a.ID)
+	if err = m.ChangeQuotaProtection(ctx, current, "inspection", rev, nil); err != nil {
+		t.Fatal(err)
+	}
+	current, _ = m.GetByID(a.ID)
+	if blocked, _, _ := isAuthBlockedForModel(current, "gpt-quota-test", time.Now()); !blocked {
+		t.Fatal("release cleared native cooldown")
+	}
+	// Imported absence is authoritative; a restored hold must not undo manual disable.
+	restored.Disabled = true
+	restored.Status = StatusDisabled
+	if _, err = restarted.Update(ctx, restored); err != nil {
+		t.Fatal(err)
+	}
+	if err = restarted.ApplyImportedQuotaProtection(ctx, embeddedusage.ProSetting{}); err != nil {
+		t.Fatal(err)
+	}
+	restored, _ = restarted.GetByID(a.ID)
+	if !restored.Disabled || len(prorouting.QuotaProtections(restored.Metadata)) != 0 {
+		t.Fatal("backup application changed manual disable or retained removed hold")
+	}
+}
+
+func TestTimedQuotaProtectionReturnsToSchedulerWithoutInspection(t *testing.T) {
+	now := time.Now()
+	a := &Auth{ID: "timed-quota-test", Provider: "codex", Metadata: map[string]any{}}
+	setQuotaProtections(a, map[string]prorouting.QuotaProtection{"routing:gpt-test": {Source: "routing:gpt-test", Model: "gpt-test", RetryAt: now.Add(time.Minute).UnixMilli()}})
+	if blocked, _, _ := isAuthBlockedForModel(a, "gpt-test", now); !blocked {
+		t.Fatal("active cooldown allowed traffic")
+	}
+	if blocked, _, _ := isAuthBlockedForModel(a, "gpt-test", now.Add(2*time.Minute)); blocked {
+		t.Fatal("expired quota restriction requires full inspection")
+	}
+	a.Disabled = true
+	if blocked, reason, _ := isAuthBlockedForModel(a, "gpt-test", now.Add(2*time.Minute)); !blocked || reason != blockReasonDisabled {
+		t.Fatal("expiry overrode manual disable")
 	}
 }

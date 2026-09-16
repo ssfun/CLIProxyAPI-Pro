@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -17,9 +18,11 @@ import (
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	proinspection "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/inspection"
 	proquota "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/quota"
+	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
 )
 
 func TestAntigravityInspectionBindsPreparedTokenToAutomaticAction(t *testing.T) {
+	startProQuotaTestService(t)
 	for _, tc := range []struct {
 		name             string
 		remaining        float64
@@ -69,7 +72,7 @@ func TestAntigravityInspectionBindsPreparedTokenToAutomaticAction(t *testing.T) 
 				metadata["accessToken"] = "stale-alias-test-token"
 			}
 			registered, err := manager.Register(ctx, &coreauth.Auth{
-				ID: "antigravity-prepared-token", FileName: "prepared-token.json", Provider: "antigravity",
+				ID: "antigravity-prepared-token-" + t.Name(), FileName: "prepared-token.json", Provider: "antigravity",
 				Disabled: tc.disabled,
 				Metadata: metadata,
 			})
@@ -240,7 +243,7 @@ func TestAntigravityInspectionBindsPreparedTokenToAutomaticAction(t *testing.T) 
 				}
 				return
 			}
-			if !results[0].Executed || results[0].ExecuteError != "" || current.Disabled != !tc.disabled {
+			if results[0].Executed == tc.disabled || results[0].ExecuteError != "" || current.Disabled != tc.disabled || results[0].QuotaCooling == tc.disabled {
 				t.Fatalf("automatic action: executed:%v error:%s disabled:%v", results[0].Executed, results[0].ExecuteError, current.Disabled)
 			}
 		})
@@ -852,6 +855,7 @@ func (e inspectionProbeRefreshExecutor) Refresh(_ context.Context, auth *coreaut
 }
 
 func TestOAuthInspectionUsesPreparedToken(t *testing.T) {
+	startProQuotaTestService(t)
 	for _, provider := range []string{"claude", "codex", "kimi"} {
 		for _, alias := range []string{"canonical", "camel", "mixed"} {
 			for _, refresh := range []bool{false, true} {
@@ -867,7 +871,7 @@ func TestOAuthInspectionUsesPreparedToken(t *testing.T) {
 						if alias == "mixed" {
 							metadata["accessToken"] = "stale-alias"
 						}
-						registered, err := manager.Register(ctx, &coreauth.Auth{ID: "probe-token", FileName: "probe-token.json", Provider: provider, Metadata: metadata, Runtime: inspectionProbeRefreshDue(refresh)})
+						registered, err := manager.Register(ctx, &coreauth.Auth{ID: "probe-token-" + t.Name(), FileName: "probe-token.json", Provider: provider, Metadata: metadata, Runtime: inspectionProbeRefreshDue(refresh)})
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -927,7 +931,7 @@ func TestOAuthInspectionUsesPreparedToken(t *testing.T) {
 						if result.Error != "" || result.UsedPercent == nil || *result.UsedPercent != float64(used) || result.IsQuota != (used >= 95) {
 							t.Fatalf("quota result: used=%v quota=%v error=%s", result.UsedPercent, result.IsQuota, result.Error)
 						}
-						if current.Disabled != (used >= 95) || results[0].Executed != (used >= 95) {
+						if current.Disabled || results[0].Executed != (used >= 95) || results[0].QuotaCooling != (used >= 95) {
 							t.Fatalf("action: executed=%v disabled=%v", results[0].Executed, current.Disabled)
 						}
 						if result.AccessTokenSHA256 != coreauth.AccessTokenSHA256(current) || result.TokenRefreshTriggered != refresh {
@@ -986,5 +990,92 @@ func TestOAuthInspectionSkipsReauthenticatedAccount(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestQuotaRecoveryRechecksWithoutFullInspection(t *testing.T) {
+	ctx := startProQuotaTestService(t)
+	for _, tc := range []struct {
+		name, body                   string
+		status                       int
+		disabled, replace, recovered bool
+	}{
+		{name: "recovered", body: `{"five_hour":{"utilization":10}}`, status: 200, recovered: true},
+		{name: "hysteresis", body: `{"five_hour":{"utilization":94}}`, status: 200},
+		{name: "unknown", body: `{}`, status: 200},
+		{name: "failed", body: `{}`, status: 500},
+		{name: "manual disable", body: `{"five_hour":{"utilization":10}}`, status: 200, disabled: true},
+		{name: "new protection during probe", body: `{"five_hour":{"utilization":10}}`, status: 200, replace: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ACCOUNT_INSPECTION_SCHEDULE_PATH", filepath.Join(t.TempDir(), "schedule.json"))
+			m := coreauth.NewManager(nil, nil, nil)
+			a, err := m.Register(ctx, &coreauth.Auth{ID: "recovery-" + tc.name, FileName: tc.name + ".json", Provider: "claude", Metadata: map[string]any{"access_token": "token"}, Runtime: inspectionProbeRefreshDue(false)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings := proinspection.DefaultSettings()
+			settings.UsedPercentThreshold = 95
+			settings.AutoExecuteQuotaRecoveryEnable = true
+			raw, _ := json.Marshal(settings)
+			hold := prorouting.QuotaProtection{Recheck: true, RetryAt: time.Now().Add(-time.Minute).UnixMilli(), Settings: raw}
+			if err = m.ChangeQuotaProtection(ctx, a, inspectionQuotaSource, 0, &hold); err != nil {
+				t.Fatal(err)
+			}
+			a, _ = m.GetByID(a.ID)
+			before := prorouting.QuotaProtections(a.Metadata)[inspectionQuotaSource]
+			if tc.disabled {
+				a.Disabled = true
+				a.Status = coreauth.StatusDisabled
+				if _, err = m.Update(ctx, a); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var requests atomic.Int32
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				if tc.replace && strings.HasSuffix(r.URL.Path, "/usage") {
+					current, _ := m.GetByID(a.ID)
+					changed := before
+					changed.RetryAt = time.Now().Add(time.Hour).UnixMilli()
+					if err := m.ChangeQuotaProtection(ctx, current, inspectionQuotaSource, before.Revision, &changed); err != nil {
+						t.Error(err)
+					}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if strings.HasSuffix(r.URL.Path, "/profile") {
+					_, _ = w.Write([]byte(`{}`))
+					return
+				}
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			transport := server.Client().Transport.(*http.Transport).Clone()
+			transport.TLSClientConfig.ServerName = "example.com"
+			transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+			}
+			old := http.DefaultTransport
+			http.DefaultTransport = transport
+			defer func() { http.DefaultTransport = old; transport.CloseIdleConnections() }()
+			s := newAccountInspectionScheduler(&Handler{authManager: m}, nil)
+			s.schedule.Settings = settings
+			s.recoverQuotaProtections(ctx)
+			current, _ := m.GetByID(a.ID)
+			after, exists := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]
+			if exists == tc.recovered || current.Disabled != tc.disabled {
+				t.Fatalf("exists=%v disabled=%v", exists, current.Disabled)
+			}
+			if tc.disabled && requests.Load() != 0 {
+				t.Fatal("manually disabled account was probed")
+			}
+			if !tc.recovered && !tc.disabled && after.RetryAt <= time.Now().UnixMilli() {
+				t.Fatal("failed/unknown quota caused hot-loop retry")
+			}
+			if tc.replace && after.RetryAt < time.Now().Add(50*time.Minute).UnixMilli() {
+				t.Fatal("late healthy result erased newer protection")
+			}
+		})
 	}
 }

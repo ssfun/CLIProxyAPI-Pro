@@ -184,6 +184,7 @@ func (h *Handler) startAccountInspectionScheduler(quota proinspection.QuotaGatew
 	scheduler := schedulerForHandler(h)
 	if scheduler != nil {
 		unregisterHooks := []func(){
+			embeddedusage.RegisterProSettingConsumer("quota-protection", scheduler.applyImportedQuotaProtection),
 			embeddedusage.RegisterAccountInspectionScheduleHandlers(scheduler.exportSchedule, scheduler.importSchedule),
 			embeddedusage.RegisterAccountInspectionSnapshotHandlers(scheduler.exportResultSnapshot, scheduler.importResultSnapshot),
 			embeddedusage.RegisterLegacyQuotaCleanupHandler(func(ctx context.Context) error {
@@ -212,6 +213,14 @@ func (h *Handler) startAccountInspectionScheduler(quota proinspection.QuotaGatew
 			}()
 		}
 	}
+}
+
+func (s *accountInspectionScheduler) applyImportedQuotaProtection(ctx context.Context, item embeddedusage.ProSetting) error {
+	manager := s.inspectionAuthManager()
+	if manager == nil {
+		return nil
+	}
+	return manager.ApplyImportedQuotaProtection(ctx, item)
 }
 
 func schedulerForHandler(h *Handler) *accountInspectionScheduler {
@@ -568,6 +577,7 @@ func (s *accountInspectionScheduler) loop(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		s.maybeRunDue()
+		s.recoverQuotaProtections(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -970,7 +980,7 @@ func (s *accountInspectionScheduler) refreshTokenNow(ctx context.Context, item a
 	if restoredSnapshot {
 		return accountInspectionResult{}, errAccountInspectionRestoredSnapshotReadOnly
 	}
-	if s.h == nil || s.h.authManager == nil {
+	if s.h == nil || s.inspectionAuthManager() == nil {
 		return accountInspectionResult{}, fmt.Errorf("core auth manager unavailable")
 	}
 	boundItem, err := s.bindActionItemToSnapshot(item)
@@ -1001,7 +1011,7 @@ func (s *accountInspectionScheduler) refreshTokenNow(ctx context.Context, item a
 			return result, errors.New(result.TokenRefreshError)
 		}
 		s.appendLog("info", fmt.Sprintf("主动刷新令牌 %s", account.identity()))
-		updated, refreshed, refreshErr := s.h.authManager.ForceRefreshForInspection(ctx, account.Auth.ID)
+		updated, refreshed, refreshErr := s.inspectionAuthManager().ForceRefreshForInspection(ctx, account.Auth.ID)
 		if errors.Is(refreshErr, coreauth.ErrInspectionAuthChanged) {
 			// Keep the original observation and never write this control-flow
 			// outcome into the replacement credential's authentication status.
@@ -1165,4 +1175,15 @@ func (s *accountInspectionScheduler) run(ctx context.Context, cancel context.Can
 	broadcast := s.statusBroadcastLocked()
 	s.mu.Unlock()
 	broadcast.send()
+}
+
+// Management can replace its manager during config reload. Background inspection
+// reads the reference under the same mutex used by SetAuthManager.
+func (s *accountInspectionScheduler) inspectionAuthManager() *coreauth.Manager {
+	if s == nil || s.h == nil {
+		return nil
+	}
+	s.h.mu.Lock()
+	defer s.h.mu.Unlock()
+	return s.h.authManager
 }

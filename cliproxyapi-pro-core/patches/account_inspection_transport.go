@@ -61,7 +61,7 @@ func (s *accountInspectionScheduler) prepareAntigravityInspectionAccount(ctx con
 	}
 	updated.LastRefreshedAt = time.Now()
 	updated.NextRefreshAfter = time.Time{}
-	saved, err := s.h.authManager.CommitInspectionRefresh(ctx, account.Auth, updated)
+	saved, err := s.inspectionAuthManager().CommitInspectionRefresh(ctx, account.Auth, updated)
 	if err != nil {
 		return account, true, err
 	}
@@ -108,10 +108,10 @@ func (s *accountInspectionScheduler) apiCall(ctx context.Context, auth *coreauth
 		req.Header.Set(key, value)
 	}
 	if accountInspectionShouldUseExecutorHTTPRequest(auth) {
-		if s == nil || s.h == nil || s.h.authManager == nil {
+		if s == nil || s.h == nil || s.inspectionAuthManager() == nil {
 			return accountInspectionHTTPResult{}, fmt.Errorf("core auth manager unavailable")
 		}
-		resp, err := s.h.authManager.HttpRequest(reqCtx, auth, req)
+		resp, err := s.inspectionAuthManager().HttpRequest(reqCtx, auth, req)
 		if err != nil {
 			return accountInspectionHTTPResult{}, err
 		}
@@ -200,7 +200,7 @@ func (s *accountInspectionScheduler) inspectAntigravity(ctx context.Context, acc
 		}
 		s.persistQuotaState(ctx, account, quotaSuccessState(quotaState))
 		used := proinspection.AntigravityUsedPercent(groups, settings.AntigravityQuotaMode)
-		decision := quotaDecision(account, used, used != nil, settings.UsedPercentThreshold)
+		decision := proinspection.WithQuotaWindows(quotaDecision(account, used, used != nil, settings.UsedPercentThreshold), proinspection.AntigravityBlockingWindows(groups, settings.AntigravityQuotaMode), settings.UsedPercentThreshold)
 		if settings.AntigravityDeepProbeEnabled && proinspection.ShouldAntigravityDeepProbe(decision) {
 			return s.applyAntigravityDeepProbe(ctx, account, settings, decision, status)
 		}
@@ -364,7 +364,9 @@ func (s *accountInspectionScheduler) inspectClaude(ctx context.Context, account 
 	}
 	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"windows": windows, "extraUsage": extraUsage, "planType": emptyStringAsNil(planType), "rawShapeHash": proquota.JSONShapeHash(usageResp.Body)}))
 	used := proinspection.MaxUsedPercentFromWindows(windows)
-	return quotaDecision(account, used, len(windows) > 0, settings.UsedPercentThreshold), status, nil
+	decision := proinspection.WithQuotaWindows(quotaDecision(account, used, len(windows) > 0, settings.UsedPercentThreshold), windows, settings.UsedPercentThreshold)
+	decision.QuotaModel = proinspection.ClaudeQuotaModel(windows, settings.UsedPercentThreshold)
+	return decision, status, nil
 }
 
 func (s *accountInspectionScheduler) inspectCodex(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) (accountInspectionDecision, *int, error) {
@@ -392,7 +394,7 @@ func (s *accountInspectionScheduler) inspectCodex(ctx context.Context, account a
 	if payload != nil && len(windows) > 0 {
 		s.persistQuotaState(ctx, account, quotaSuccessState(codexQuotaStateValues(account.Auth, payload, windows, resp.Body)))
 	}
-	decision := codexDecision(account, resp.StatusCode, used, isQuota, settings.UsedPercentThreshold)
+	decision := proinspection.WithQuotaWindows(codexDecision(account, resp.StatusCode, used, isQuota, settings.UsedPercentThreshold), windows, settings.UsedPercentThreshold)
 	if proinspection.IsAccountErrorStatus(resp.StatusCode) {
 		decision = proinspection.WithHTTPErrorDetail(decision, resp.Body)
 	}
@@ -454,7 +456,7 @@ func (s *accountInspectionScheduler) inspectKimi(ctx context.Context, account ac
 		return accountInspectionDecision{}, status, err
 	}
 	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"rows": rows, "rawShapeHash": proquota.JSONShapeHash(resp.Body)}))
-	return quotaDecision(account, used, len(rows) > 0, settings.UsedPercentThreshold), status, nil
+	return proinspection.WithQuotaWindows(quotaDecision(account, used, len(rows) > 0, settings.UsedPercentThreshold), rows, settings.UsedPercentThreshold), status, nil
 }
 
 func (s *accountInspectionScheduler) inspectXAI(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) (accountInspectionDecision, *int, error) {

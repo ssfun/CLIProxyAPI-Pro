@@ -82,7 +82,7 @@ function RoutingRuntimeDetailPanel({
 }) {
   const item = detail.item;
   const accountName = item.fileName || item.authIndex || item.authId || '-';
-  const action = detail.kind === 'active' ? 'disabled' : detail.item.action;
+  const action = detail.kind === 'active' ? (detail.item.action || 'disabled') : detail.item.action;
   const accountItems = [
     { label: t('routing_policy.runtime.provider'), value: item.provider || '-' },
     { label: t('routing_policy.runtime.account'), value: accountName },

@@ -74,6 +74,7 @@ type routingPolicyResponse struct {
 var setAndApplyLatestRoutingPolicyProSetting = embeddedusage.SetProSettingAndApplyLatest
 
 type routingProtectionActiveAccount struct {
+	Action      string `json:"action,omitempty"`
 	Provider    string `json:"provider"`
 	AuthID      string `json:"authId"`
 	AuthIndex   string `json:"authIndex"`
@@ -270,6 +271,15 @@ func (c *routingPolicyController) HandleUsage(ctx context.Context, record coreus
 		c.appendEvent(event)
 		return
 	}
+	if statusCode == http.StatusTooManyRequests || statusCode == http.StatusPaymentRequired || routingProtectionHasQuotaEvidence(record) {
+		if err := c.protectRequestQuota(ctx, auth, record.Model, policy, &event); err != nil {
+			event.Action = "error"
+			event.Reason = err.Error()
+		}
+		c.clearConfirmations(auth.ID, provider)
+		c.appendEvent(event)
+		return
+	}
 	disabled, err := c.disableAuth(ctx, auth, event)
 	if err != nil {
 		event.Action = "error"
@@ -409,6 +419,9 @@ func (c *routingPolicyController) disableAuth(ctx context.Context, auth *coreaut
 }
 
 func (c *routingPolicyController) releaseAuth(ctx context.Context, auth *coreauth.Auth) (bool, error) {
+	if hasRoutingQuotaProtection(auth) {
+		return c.releaseQuotaProtections(ctx, auth, false)
+	}
 	if auth == nil {
 		return false, fmt.Errorf("auth not found")
 	}
@@ -442,6 +455,11 @@ func (c *routingPolicyController) reconcile(now time.Time) {
 		return
 	}
 	for _, auth := range c.h.authManager.List() {
+		if hasRoutingQuotaProtection(auth) {
+			if _, err := c.releaseQuotaProtections(context.Background(), auth, true); err != nil {
+				log.WithError(err).Warn("quota cooldown release failed")
+			}
+		}
 		if auth == nil || !routingProtectionOwned(auth) {
 			continue
 		}
@@ -737,7 +755,7 @@ func (h *Handler) ReleaseRoutingProtectedAuth(c *gin.Context) {
 		return
 	}
 	auth.EnsureIndex()
-	if !routingProtectionOwned(auth) {
+	if !routingProtectionOwned(auth) && !hasRoutingQuotaProtection(auth) {
 		c.JSON(http.StatusConflict, gin.H{"error": "auth is not managed by routing request protection"})
 		return
 	}
@@ -831,6 +849,14 @@ func (h *Handler) routingProtectionActiveAccounts() []routingProtectionActiveAcc
 	}
 	active := make([]routingProtectionActiveAccount, 0)
 	for _, auth := range h.authManager.List() {
+		if auth != nil {
+			for source, hold := range prorouting.QuotaProtections(auth.Metadata) {
+				if !strings.HasPrefix(source, "routing:") {
+					continue
+				}
+				active = append(active, routingProtectionActiveAccount{Action: "cooldown", Provider: auth.Provider, AuthID: auth.ID, AuthIndex: auth.Index, FileName: routingProtectionAuthFileName(auth), StatusCode: 429, Reason: hold.Reason, TriggeredAt: hold.Revision / int64(time.Millisecond), ReleaseAt: hold.RetryAt})
+			}
+		}
 		if auth == nil || !routingProtectionOwned(auth) {
 			continue
 		}

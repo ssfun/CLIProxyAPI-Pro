@@ -58,7 +58,7 @@ func (s *accountInspectionScheduler) refreshAccountPoliciesIfQuotaChanged() {
 }
 
 func (s *accountInspectionScheduler) cleanupLegacyQuotaCacheFromAuth(ctx context.Context, account accountInspectionAccount) error {
-	if s == nil || s.h == nil || s.h.authManager == nil || account.AuthIndex == "" {
+	if s == nil || s.h == nil || s.inspectionAuthManager() == nil || account.AuthIndex == "" {
 		return nil
 	}
 	auth := s.h.authByIndex(account.AuthIndex)
@@ -78,10 +78,10 @@ func (s *accountInspectionScheduler) cleanupLegacyQuotaCacheFromAuth(ctx context
 }
 
 func (s *accountInspectionScheduler) cleanupLegacyQuotaCaches(ctx context.Context) {
-	if s == nil || s.h == nil || s.h.authManager == nil {
+	if s == nil || s.h == nil || s.inspectionAuthManager() == nil {
 		return
 	}
-	for _, auth := range s.h.authManager.List() {
+	for _, auth := range s.inspectionAuthManager().List() {
 		if auth == nil || auth.Metadata == nil {
 			continue
 		}

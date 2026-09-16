@@ -3,6 +3,7 @@ package inspection
 import (
 	"strconv"
 	"testing"
+	"time"
 )
 
 func TestAntigravityParserBuildsCanonicalGroups(t *testing.T) {
@@ -119,5 +120,33 @@ func TestKimiParserNormalizesLimits(t *testing.T) {
 	}
 	if rows[0]["resetAtMs"] != int64(1767830400000) || rows[0]["periodHours"] != float64(168) {
 		t.Fatalf("kimi timeline fields = %+v", rows[0])
+	}
+}
+
+func TestQuotaRecoveryUsesOnlyBlockingWindows(t *testing.T) {
+	now := time.Now()
+	short := now.Add(time.Hour).UnixMilli()
+	long := now.Add(7 * 24 * time.Hour).UnixMilli()
+	used := 100.0
+	windows := []map[string]any{{"usedPercent": 100.0, "resetAtMs": float64(short)}, {"usedPercent": 20.0, "resetAtMs": float64(long)}}
+	decision := WithQuotaWindows(Decision{UsedPercent: &used, IsQuota: true}, windows, 95)
+	if decision.QuotaResetAt != short {
+		t.Fatalf("healthy weekly window extended cooldown: %d", decision.QuotaResetAt)
+	}
+	windows[1]["usedPercent"] = 100.0
+	if got := WithQuotaWindows(Decision{}, windows, 95); got.QuotaResetAt != long {
+		t.Fatal("did not wait for both exhausted windows")
+	}
+	delete(windows[1], "resetAtMs")
+	if got := WithQuotaWindows(Decision{}, windows, 95); got.QuotaResetAt != 0 {
+		t.Fatal("unknown reset treated as certain")
+	}
+	windows = []map[string]any{{"id": "seven-day-opus", "usedPercent": 100.0}, {"id": "five-hour", "usedPercent": 5.0}}
+	if got := ClaudeQuotaModel(windows, 95); got != "claude-opus-*" {
+		t.Fatalf("scope=%s", got)
+	}
+	windows[1]["usedPercent"] = 100.0
+	if got := ClaudeQuotaModel(windows, 95); got != "" {
+		t.Fatal("credential limit incorrectly scoped to one model")
 	}
 }

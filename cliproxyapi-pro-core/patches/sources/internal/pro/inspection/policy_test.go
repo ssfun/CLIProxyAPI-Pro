@@ -59,3 +59,17 @@ func TestHealthyDecisionReenablesDisabledAccount(t *testing.T) {
 		t.Fatalf("healthy decision = %+v", got)
 	}
 }
+
+func TestQuotaRecoveredHandlesLowThresholds(t *testing.T) {
+	for _, threshold := range []float64{0, 1, 2} {
+		if !QuotaRecovered(0, threshold) {
+			t.Fatalf("zero usage did not recover at threshold %v", threshold)
+		}
+	}
+	if QuotaRecovered(1, 2) {
+		t.Fatal("non-zero usage recovered at a zero hysteresis boundary")
+	}
+	if !QuotaRecovered(92.9, 95) || QuotaRecovered(93, 95) {
+		t.Fatal("normal hysteresis boundary changed")
+	}
+}

@@ -8,6 +8,12 @@ import (
 )
 
 type Result struct {
+	QuotaResetAt          int64    `json:"quotaResetAt,omitempty"`
+	QuotaModel            string   `json:"-"`
+	QuotaKnown            bool     `json:"-"`
+	QuotaCooling          bool     `json:"quotaCooling,omitempty"`
+	QuotaRetryAt          int64    `json:"quotaRetryAt,omitempty"`
+	QuotaRevision         int64    `json:"-"`
 	AuthID                string   `json:"-"`
 	AccessTokenSHA256     string   `json:"-"`
 	Key                   string   `json:"key"`
@@ -335,7 +341,7 @@ func AutoActionForResult(result Result, settings Settings) Action {
 	if result.Action == ActionDisable && result.IsQuota && settings.AutoExecuteQuotaLimitDisable {
 		return ActionDisable
 	}
-	if result.Action == ActionEnable && settings.AutoExecuteQuotaRecoveryEnable {
+	if result.Action == ActionEnable && result.QuotaCooling && !result.Disabled && settings.AutoExecuteQuotaRecoveryEnable {
 		return ActionEnable
 	}
 	return ActionNone

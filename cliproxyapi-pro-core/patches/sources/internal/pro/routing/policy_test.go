@@ -81,4 +81,8 @@ func TestNormalizeConfigOwnsProviderPolicyBounds(t *testing.T) {
 	if len(xai.StatusCodes) != 1 || xai.StatusCodes[0] != 429 || xai.Confirmations != 5 || xai.ConfirmationWindowSeconds != 86400 {
 		t.Fatalf("normalized xai policy = %+v", xai)
 	}
+	defaults := NormalizeConfig(RequestProtectionConfig{}, []string{"codex"}).Providers["codex"]
+	if len(defaults.StatusCodes) != 2 || defaults.StatusCodes[0] != http.StatusPaymentRequired || defaults.StatusCodes[1] != http.StatusTooManyRequests {
+		t.Fatalf("default status codes = %#v", defaults.StatusCodes)
+	}
 }
