@@ -11,6 +11,7 @@ python3 -m py_compile \
   "${repo_root}/cliproxyapi-pro-core/patches/apply_upstream_patches.py" \
   "${repo_root}/cliproxyapi-pro-management/apply_customizations.py" \
   "${repo_root}/scripts/validation/check_patch_surface.py" \
+  "${repo_root}/scripts/validation/compare_go_test_results.py" \
   "${repo_root}/scripts/validation/check_workflow_actions.py" \
   "${repo_root}/scripts/validation/api_key_policy_runtime_smoke.py" \
   "${repo_root}/scripts/validation/run_api_key_policy_binary_smoke.py" \

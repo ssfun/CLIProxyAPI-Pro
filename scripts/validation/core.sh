@@ -71,6 +71,65 @@ fi
 git -C "${upstream_root}" restore --worktree -- "${late_guarded_source}"
 rm -f "${late_preflight_log}"
 
+test_flags=(-count=1)
+if [[ "${VALIDATION_RACE:-0}" == "1" ]]; then
+  test_flags+=(-race)
+fi
+
+baseline_test_log="${validation_tmp}/go-test-baseline.jsonl"
+candidate_test_log="${validation_tmp}/go-test-candidate.jsonl"
+
+run_go_test_group() {
+  local log_path="$1"
+  local group_name="$2"
+  shift 2
+  if ! go -C "${upstream_root}" test "${test_flags[@]}" -json "$@" >>"${log_path}" 2>&1; then
+    printf '%s\n' "{\"Action\":\"fail\",\"Package\":\"[command:${group_name}]\"}" >>"${log_path}"
+    return 1
+  fi
+}
+
+run_upstream_test_groups() {
+  local log_path="$1"
+  local include_pro_packages="$2"
+  local status=0
+
+  run_go_test_group "${log_path}" core-packages \
+  ./sdk/auth \
+  ./internal/client/claude/models \
+  ./internal/api \
+  ./internal/api/handlers/management \
+  ./internal/managementasset \
+  ./internal/pluginhost \
+  ./internal/pluginstore \
+  ./internal/redisqueue \
+  ./internal/requestmeta \
+  ./internal/runtime/executor/helps \
+  ./internal/translator/codex/claude \
+  ./internal/translator/codex/openai/chat-completions \
+  ./internal/translator/codex/openai/responses \
+  ./internal/translator/gemini/openai/responses \
+  ./sdk/api/handlers \
+  ./sdk/api/handlers/claude \
+  ./sdk/cliproxy/auth \
+  || status=1
+
+  if [[ "${include_pro_packages}" == "1" ]]; then
+    run_go_test_group "${log_path}" pro-packages ./internal/pro/... || status=1
+    run_go_test_group "${log_path}" embeddedusage ./internal/embeddedusage/... || status=1
+  fi
+
+  run_go_test_group "${log_path}" runtime-executor ./internal/runtime/executor || status=1
+  run_go_test_group "${log_path}" sdk-cliproxy ./sdk/cliproxy || status=1
+  return "${status}"
+}
+
+baseline_status=0
+run_upstream_test_groups "${baseline_test_log}" 0 || baseline_status=$?
+if [[ "${baseline_status}" -ne 0 ]]; then
+  echo "NOTICE: clean upstream has test failures; they will be tolerated only if the same failures remain after customization" >&2
+fi
+
 python3 "${repo_root}/cliproxyapi-pro-core/patches/apply_upstream_patches.py"
 python3 "${repo_root}/scripts/validation/check_patch_surface.py" \
   "${upstream_root}" \
@@ -112,33 +171,13 @@ if [[ "${patched_diff_hash}" != "${reapplied_diff_hash}" ]]; then
   exit 1
 fi
 
-test_flags=(-count=1)
-if [[ "${VALIDATION_RACE:-0}" == "1" ]]; then
-  test_flags+=(-race)
+candidate_status=0
+run_upstream_test_groups "${candidate_test_log}" 1 || candidate_status=$?
+if [[ "${candidate_status}" -ne 0 ]]; then
+  echo "NOTICE: customized Core test command returned non-zero; comparing failures against clean upstream" >&2
 fi
-
-go -C "${upstream_root}" test "${test_flags[@]}" ./internal/embeddedusage/...
-go -C "${upstream_root}" test "${test_flags[@]}" \
-  ./sdk/auth \
-  ./internal/client/claude/models \
-  ./internal/api \
-  ./internal/api/handlers/management \
-  ./internal/managementasset \
-  ./internal/pluginhost \
-  ./internal/pluginstore \
-  ./internal/redisqueue \
-  ./internal/requestmeta \
-  ./internal/runtime/executor/helps \
-  ./internal/translator/codex/claude \
-  ./internal/translator/codex/openai/chat-completions \
-  ./internal/translator/codex/openai/responses \
-  ./internal/translator/gemini/openai/responses \
-  ./internal/pro/... \
-  ./sdk/api/handlers \
-  ./sdk/api/handlers/claude \
-  ./sdk/cliproxy/auth
-go -C "${upstream_root}" test "${test_flags[@]}" ./internal/runtime/executor
-go -C "${upstream_root}" test "${test_flags[@]}" ./sdk/cliproxy
+python3 "${repo_root}/scripts/validation/compare_go_test_results.py" \
+  "${baseline_test_log}" "${candidate_test_log}"
 
 build_dir="${validation_tmp}/server"
 mkdir -p "${build_dir}"
