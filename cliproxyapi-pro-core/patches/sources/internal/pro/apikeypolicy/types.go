@@ -38,6 +38,7 @@ var (
 	ErrOrphaned                = errors.New("api key policy is orphaned")
 	ErrNotOrphaned             = errors.New("api key policy belongs to a configured upstream key")
 	ErrQuotaUnavailable        = errors.New("api key quota unavailable")
+	ErrQuotaPricingUnavailable = errors.New("api key quota pricing is unavailable")
 	ErrQuotaSettlementStale    = errors.New("api key quota settlement is stale")
 	ErrQuotaNotConfigured      = errors.New("api key quota is not configured")
 	ErrQuotaResetConfirmation  = errors.New("api key quota reset requires confirmation")
@@ -162,8 +163,8 @@ func InheritContext(destination, source context.Context) context.Context {
 	return destination
 }
 
-// WithQuotaAdmission installs a server-owned admission callback for protocols
-// that multiplex multiple chargeable turns over one authenticated connection.
+// WithQuotaAdmission installs a server-owned callback so request quota can be
+// charged at the execution boundary. Multiplexed protocols invoke it per turn.
 func WithQuotaAdmission(ctx context.Context, admit func(context.Context, RequestPolicyDecision) (RequestPolicyDecision, error)) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -174,8 +175,9 @@ func WithQuotaAdmission(ctx context.Context, admit func(context.Context, Request
 	return context.WithValue(ctx, quotaAdmissionContextKey{}, quotaAdmissionFunc(admit))
 }
 
-// AdmitQuotaTurn reserves one request unit and returns a context containing a
-// fresh admission/settlement pair. Control frames can skip this call.
+// AdmitQuotaTurn reserves one request unit and returns its admission/settlement
+// context. An already admitted execution is returned unchanged; control frames
+// can skip this call.
 func AdmitQuotaTurn(ctx context.Context) (context.Context, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -183,6 +185,9 @@ func AdmitQuotaTurn(ctx context.Context) (context.Context, error) {
 	admit, _ := ctx.Value(quotaAdmissionContextKey{}).(quotaAdmissionFunc)
 	decision, ok := DecisionFromContext(ctx)
 	if admit == nil || !ok {
+		return ctx, nil
+	}
+	if _, admitted := decision.QuotaAttribution(); admitted {
 		return ctx, nil
 	}
 	admitted, err := admit(ctx, decision)
@@ -457,6 +462,17 @@ func (e *QuotaExceededError) Error() string {
 
 func (e *QuotaExceededError) StatusCode() int { return 429 }
 
+type MissingQuotaPriceRulesError struct {
+	Models []string
+}
+
+func (e *MissingQuotaPriceRulesError) Error() string {
+	if e == nil || len(e.Models) == 0 {
+		return "cost quota requires active price rules for every allowed model"
+	}
+	return fmt.Sprintf("cost quota requires active price rules for: %s", strings.Join(e.Models, ", "))
+}
+
 // AuditRecord is retained across policy backups. Fingerprints and raw keys are
 // intentionally absent; policy_id may refer to a policy that was deleted by
 // the audited security operation.
@@ -584,6 +600,46 @@ func (c ProfileCatalog) modelMatchesProviders(model string, allowedProviders []s
 		}
 	}
 	return false
+}
+
+// RequiredCostQuotaModels returns every effective model that any saved Profile
+// can execute. Empty model/provider allowlists expand against the current
+// server catalog because they represent allow-all rather than allow-none.
+func RequiredCostQuotaModels(policy Policy, catalog ProfileCatalog) []string {
+	required := make(map[string]struct{})
+	add := func(model string) {
+		if model = normalizeModel(model); model != "" {
+			required[model] = struct{}{}
+		}
+	}
+	profiles := policy.Profiles
+	if len(profiles) == 0 {
+		for _, model := range catalog.Models {
+			add(model)
+		}
+	}
+	for _, profile := range profiles {
+		if len(profile.Models) == 0 {
+			for _, model := range catalog.Models {
+				if catalog.modelMatchesProviders(model, profile.Providers) {
+					add(model)
+				}
+			}
+		} else {
+			for _, model := range profile.Models {
+				add(model)
+			}
+		}
+		for _, mapping := range profile.Mappings {
+			add(mapping.Target)
+		}
+	}
+	models := make([]string, 0, len(required))
+	for model := range required {
+		models = append(models, model)
+	}
+	sort.Strings(models)
+	return models
 }
 
 type RequestPolicySnapshot struct {

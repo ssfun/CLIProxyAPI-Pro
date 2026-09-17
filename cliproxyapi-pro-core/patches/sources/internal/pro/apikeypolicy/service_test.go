@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,11 +26,16 @@ func newTestService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
+	allowTestCostQuotas(service)
 	if err := service.SetTakeover(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = service.Close() })
 	return service
+}
+
+func allowTestCostQuotas(service *Service) {
+	service.SetCostQuotaValidator(func(context.Context, Policy) error { return nil })
 }
 
 func TestQuotaSummariesExposeRollingRecoveryAndIsolatedBlockState(t *testing.T) {
@@ -1121,6 +1127,81 @@ func TestProfileCatalogRejectsUnknownProviderAndModel(t *testing.T) {
 	}
 }
 
+func TestCostQuotaSaveRequiresPriceCoverageAcrossEverySavedProfile(t *testing.T) {
+	service := newTestService(t)
+	catalog := NewProfileCatalog(
+		[]string{"codex", "claude"},
+		[]string{"gpt-5", "claude-opus"},
+		map[string][]string{"gpt-5": {"codex"}, "claude-opus": {"claude"}},
+	)
+	service.SetCatalogProvider(func() (ProfileCatalog, error) { return catalog, nil })
+	priced := map[string]struct{}{"gpt-5": {}}
+	service.SetCostQuotaValidator(func(_ context.Context, policy Policy) error {
+		var missing []string
+		for _, model := range RequiredCostQuotaModels(policy, catalog) {
+			if _, ok := priced[model]; !ok {
+				missing = append(missing, model)
+			}
+		}
+		if len(missing) > 0 {
+			return &MissingQuotaPriceRulesError{Models: missing}
+		}
+		return nil
+	})
+	identity := testIdentity(t, "price-coverage-key")
+	policy, err := service.Create(context.Background(), identity, "Coverage", ProfileInput{
+		Name: "Codex", Providers: []string{"codex"}, Models: []string{"gpt-5"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err = service.CreateProfile(context.Background(), policy.ID, policy.Version, ProfileInput{
+		Name: "Claude", Providers: []string{"claude"}, Models: []string{"claude-opus"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	costLimit := 10.0
+	_, err = service.UpdateWorkspace(context.Background(), policy.ID, policy.Version, WorkspaceUpdate{
+		DisplayName: policy.DisplayName,
+		Quota:       QuotaUpdate{Present: true, Value: &QuotaInput{Enabled: true, Cost: &costLimit}},
+	})
+	var missing *MissingQuotaPriceRulesError
+	if !errors.As(err, &missing) || !reflect.DeepEqual(missing.Models, []string{"claude-opus"}) {
+		t.Fatalf("cost quota price coverage error = %#v, %v", missing, err)
+	}
+	stored, getErr := service.Get(context.Background(), policy.ID)
+	if getErr != nil || stored.Quota != nil || stored.Version != policy.Version {
+		t.Fatalf("rejected cost quota partially persisted: policy=%#v error=%v", stored, getErr)
+	}
+	priced["claude-opus"] = struct{}{}
+	updated, err := service.UpdateWorkspace(context.Background(), policy.ID, policy.Version, WorkspaceUpdate{
+		DisplayName: policy.DisplayName,
+		Quota:       QuotaUpdate{Present: true, Value: &QuotaInput{Enabled: true, Cost: &costLimit}},
+	})
+	if err != nil || updated.Quota == nil || updated.Quota.Cost == nil {
+		t.Fatalf("priced cost quota save = %#v error=%v", updated.Quota, err)
+	}
+}
+
+func TestRequiredCostQuotaModelsExpandsAllowAllAndMappingTargets(t *testing.T) {
+	catalog := NewProfileCatalog(
+		[]string{"codex", "claude"},
+		[]string{"gpt-5", "gpt-5-mini", "claude-opus"},
+		map[string][]string{"gpt-5": {"codex"}, "gpt-5-mini": {"codex"}, "claude-opus": {"claude"}},
+	)
+	policy := Policy{Profiles: []Profile{{
+		Providers: []string{"codex"},
+		Mappings:  []ModelMapping{{Source: "smart", Target: "gpt-5-mini"}},
+	}}}
+	if got := RequiredCostQuotaModels(policy, catalog); !reflect.DeepEqual(got, []string{"gpt-5", "gpt-5-mini"}) {
+		t.Fatalf("required priced models = %#v", got)
+	}
+	if got := RequiredCostQuotaModels(Policy{}, catalog); !reflect.DeepEqual(got, []string{"claude-opus", "gpt-5", "gpt-5-mini"}) {
+		t.Fatalf("profile-less required priced models = %#v", got)
+	}
+}
+
 func TestUsageAttributionDoesNotInventPassthroughProfile(t *testing.T) {
 	passthrough := PassthroughDecision().UsageAttribution()
 	if passthrough.PolicyMode != ModePassthrough || passthrough.APIKeyPolicyID != "" || passthrough.ProfileID != "" {
@@ -1273,6 +1354,14 @@ func TestAdmitQuotaTurnCreatesFreshPerTurnAdmission(t *testing.T) {
 	if inheritedDecision.Snapshot == nil || inheritedDecision.Snapshot.QuotaAdmissionID != firstDecision.Snapshot.QuotaAdmissionID {
 		t.Fatalf("request context overwrote per-turn admission: %#v", inheritedDecision)
 	}
+	reused, err := AdmitQuotaTurn(first)
+	if err != nil {
+		t.Fatalf("already admitted execution was charged again: %v", err)
+	}
+	reusedDecision, _ := DecisionFromContext(reused)
+	if reusedDecision.Snapshot == nil || reusedDecision.Snapshot.QuotaAdmissionID != firstDecision.Snapshot.QuotaAdmissionID {
+		t.Fatalf("already admitted execution changed admission: %#v", reusedDecision)
+	}
 	if _, err = AdmitQuotaTurn(base); err == nil {
 		t.Fatal("second websocket turn bypassed request quota")
 	}
@@ -1360,7 +1449,7 @@ func TestCostQuotaSettlementIsIdempotentWithoutRepricing(t *testing.T) {
 	}
 }
 
-func TestMissingCostPriceSettlesTokensAtZeroCostWithoutBlocking(t *testing.T) {
+func TestMissingCostPriceFailsClosedAndBlocksFurtherAdmission(t *testing.T) {
 	service := newTestService(t)
 	service.SetCostEstimator(func(context.Context, QuotaUsageDelta) (int64, error) {
 		return 0, ErrQuotaPriceMissing
@@ -1386,15 +1475,15 @@ func TestMissingCostPriceSettlesTokensAtZeroCostWithoutBlocking(t *testing.T) {
 	}
 	if err = SettleQuotaUsage(WithDecision(context.Background(), admitted), "missing-price", QuotaUsageDelta{
 		Provider: "codex", Model: "missing-price", InputTokens: 3, TotalTokens: 3,
-	}); err != nil {
-		t.Fatalf("missing price settlement failed: %v", err)
+	}); !errors.Is(err, errQuotaPricingUnavailable) {
+		t.Fatalf("missing price settlement = %v, want pricing unavailable", err)
 	}
 	loaded, err := service.Get(context.Background(), created.ID)
-	if err != nil || loaded.Quota == nil || loaded.Quota.Usage.TotalTokensUsed != 3 || loaded.Quota.Usage.CostUsed != 0 {
+	if err != nil || loaded.Quota == nil || loaded.Quota.Usage.TotalTokensUsed != 0 || loaded.Quota.Usage.CostUsed != 0 {
 		t.Fatalf("missing-price usage = %#v error=%v", loaded.Quota, err)
 	}
-	if _, err = service.AdmitDecision(context.Background(), decision); err != nil {
-		t.Fatalf("missing price blocked the key: %v", err)
+	if _, err = service.AdmitDecision(context.Background(), decision); !errors.Is(err, ErrQuotaUnavailable) {
+		t.Fatalf("missing price admission = %v, want fail closed", err)
 	}
 }
 
@@ -1483,6 +1572,7 @@ func TestPricingStoreFailurePersistsBlockedSettlementAcrossRestart(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	allowTestCostQuotas(service)
 	identity := testIdentity(t, "restart-pricing-key")
 	tokenLimit := int64(100)
 	costLimit := 10.0
@@ -1560,6 +1650,7 @@ func TestPolicyBackupRestoresPendingQuotaSettlementAndBlockedState(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	allowTestCostQuotas(source)
 	identity := testIdentity(t, "pending-backup-key")
 	tokenLimit := int64(100)
 	costLimit := 10.0

@@ -707,6 +707,8 @@ type Service struct {
 	settlementBlocked      map[quotaPricingBlockKey]int
 	costEstimatorMu        sync.RWMutex
 	costEstimator          func(context.Context, QuotaUsageDelta) (int64, error)
+	costQuotaValidatorMu   sync.RWMutex
+	costQuotaValidator     func(context.Context, Policy) error
 	quotaLifecycleMu       sync.Mutex
 	quotaRuntimeMu         sync.Mutex
 	quotaRuntimePaused     bool
@@ -737,7 +739,6 @@ const quotaHistorySettlementGrace = 7 * 24 * time.Hour
 var errQuotaPricingUnavailable = errors.New("api key quota pricing is unavailable")
 
 // ErrQuotaPriceMissing means the requested model has no active price rule.
-// Token usage is still persisted and the event receives a zero-cost quote.
 var ErrQuotaPriceMissing = errors.New("api key quota price is missing")
 
 func (s *Service) SetCostEstimator(estimator func(context.Context, QuotaUsageDelta) (int64, error)) {
@@ -747,6 +748,28 @@ func (s *Service) SetCostEstimator(estimator func(context.Context, QuotaUsageDel
 	s.costEstimatorMu.Lock()
 	s.costEstimator = estimator
 	s.costEstimatorMu.Unlock()
+}
+
+func (s *Service) SetCostQuotaValidator(validator func(context.Context, Policy) error) {
+	if s == nil {
+		return
+	}
+	s.costQuotaValidatorMu.Lock()
+	s.costQuotaValidator = validator
+	s.costQuotaValidatorMu.Unlock()
+}
+
+func (s *Service) validateCostQuotaPolicy(ctx context.Context, policy Policy) error {
+	if policy.Quota == nil || !policy.Quota.Enabled || policy.Quota.Cost == nil {
+		return nil
+	}
+	s.costQuotaValidatorMu.RLock()
+	validator := s.costQuotaValidator
+	s.costQuotaValidatorMu.RUnlock()
+	if validator == nil {
+		return ErrQuotaPricingUnavailable
+	}
+	return validator(ctx, policy)
 }
 
 func (s *Service) SetConfiguredAPIKeys(keys []string) {
@@ -1649,11 +1672,7 @@ func (s *Service) recordQuotaUsageAtGeneration(ctx context.Context, attribution 
 		}
 		costMicros, err = estimator(ctx, usage)
 		if errors.Is(err, ErrQuotaPriceMissing) {
-			quoted = true
-			if err = s.quotePendingQuotaSettlement(ctx, eventID, 0); err != nil {
-				return 0, true, err
-			}
-			return 0, true, s.persistQuotaUsage(ctx, attribution, eventID, totalTokens, 0)
+			return 0, false, fmt.Errorf("%w: %v", errQuotaPricingUnavailable, err)
 		}
 		if err != nil || costMicros < 0 {
 			if err == nil {
@@ -2193,7 +2212,7 @@ func (s *Service) CreateWorkspace(ctx context.Context, identity AuthenticatedAPI
 			return Policy{}, err
 		}
 	}
-	policies, err := s.write(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	policies, err := s.writePolicy(ctx, policyID, true, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `insert into api_key_policies(id, api_key_hash, display_name, profile_enabled, active_profile_id, version, created_at_ms, updated_at_ms) values(?, ?, ?, ?, null, 1, ?, ?)`, policyID, identity.Hash(), displayName, initial != nil, now, now); err != nil {
 			return sqliteConstraint(err)
 		}
@@ -2280,7 +2299,8 @@ func (s *Service) UpdateWorkspace(ctx context.Context, policyID string, version 
 		}
 	}
 	now := time.Now().UnixMilli()
-	policies, err := s.write(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	validateCostQuota := update.Profile != nil || update.ProfileEnabled != nil || update.Quota.Present
+	policies, err := s.writePolicy(ctx, policyID, validateCostQuota, func(ctx context.Context, tx *sql.Tx) error {
 		if err := requireVersion(ctx, tx, policyID, version); err != nil {
 			return err
 		}
@@ -2566,7 +2586,7 @@ func (s *Service) CreateProfile(ctx context.Context, policyID string, version in
 		return Policy{}, err
 	}
 	now := time.Now().UnixMilli()
-	policies, err := s.write(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	policies, err := s.writePolicy(ctx, policyID, true, func(ctx context.Context, tx *sql.Tx) error {
 		if err := requireVersion(ctx, tx, policyID, version); err != nil {
 			return err
 		}
@@ -2603,7 +2623,7 @@ func (s *Service) ReplaceProfile(ctx context.Context, policyID, profileID string
 		return Policy{}, err
 	}
 	now := time.Now().UnixMilli()
-	policies, err := s.write(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	policies, err := s.writePolicy(ctx, policyID, true, func(ctx context.Context, tx *sql.Tx) error {
 		if err := requireVersion(ctx, tx, policyID, version); err != nil {
 			return err
 		}
@@ -2657,7 +2677,7 @@ func (s *Service) ActivateProfile(ctx context.Context, policyID, profileID strin
 
 func (s *Service) DeleteProfile(ctx context.Context, policyID, profileID string, version int64, confirmation ...string) (Policy, error) {
 	now := time.Now().UnixMilli()
-	policies, err := s.write(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	policies, err := s.writePolicy(ctx, policyID, true, func(ctx context.Context, tx *sql.Tx) error {
 		if err := requireVersion(ctx, tx, policyID, version); err != nil {
 			return err
 		}
@@ -2763,6 +2783,10 @@ func (s *Service) PurgeOrphaned(ctx context.Context, policyID string, version in
 }
 
 func (s *Service) write(ctx context.Context, operation func(context.Context, *sql.Tx) error) ([]Policy, error) {
+	return s.writePolicy(ctx, "", false, operation)
+}
+
+func (s *Service) writePolicy(ctx context.Context, policyID string, validateCostQuota bool, operation func(context.Context, *sql.Tx) error) ([]Policy, error) {
 	if s == nil || s.store == nil {
 		return nil, ErrUnavailable
 	}
@@ -2777,12 +2801,22 @@ func (s *Service) write(ctx context.Context, operation func(context.Context, *sq
 			return err
 		}
 		defer tx.Rollback()
-		if err := operation(ctx, tx); err != nil {
+		transactionCtx := probackup.WithTransaction(ctx, tx)
+		if err := operation(transactionCtx, tx); err != nil {
 			return err
 		}
-		policies, err := listPolicies(ctx, tx)
+		policies, err := listPolicies(transactionCtx, tx)
 		if err != nil {
 			return err
+		}
+		if validateCostQuota {
+			policy, err := findPolicy(policies, policyID)
+			if err != nil {
+				return err
+			}
+			if err := s.validateCostQuotaPolicy(transactionCtx, policy); err != nil {
+				return err
+			}
 		}
 		current := s.index.Load()
 		takeoverEnabled := current != nil && current.takeoverEnabled
@@ -2790,17 +2824,18 @@ func (s *Service) write(ctx context.Context, operation func(context.Context, *sq
 		if err != nil {
 			return err
 		}
-		next.disabledKeys, err = listDisabledKeys(ctx, tx)
+		next.disabledKeys, err = listDisabledKeys(transactionCtx, tx)
 		if err != nil {
 			return err
 		}
-		next.concurrencyLimits, err = listConcurrencyLimits(ctx, tx)
+		next.concurrencyLimits, err = listConcurrencyLimits(transactionCtx, tx)
 		if err != nil {
 			return err
 		}
 		if err := tx.Commit(); err != nil {
 			return err
 		}
+		probackup.RunAfterCommit(transactionCtx)
 		// The database commit is the durable linearization point. Publishing the
 		// already-built immutable index performs no fallible I/O afterward.
 		s.publishNextLocked(next)

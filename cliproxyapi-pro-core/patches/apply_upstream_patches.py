@@ -1619,7 +1619,7 @@ insert_before(
 \t\t\tc.Next()
 \t\t\treturn
 \t\t}
-\t\tdecision, ok := apikeypolicy.DecisionFromContext(c.Request.Context())
+\t\t_, ok := apikeypolicy.DecisionFromContext(c.Request.Context())
 \t\tif !ok {
 \t\t\tc.Next()
 \t\t\treturn
@@ -1632,20 +1632,8 @@ insert_before(
 \t\t\t}
 \t\t\tdefer release()
 \t\t}
-\t\tupgrade := strings.EqualFold(strings.TrimSpace(c.GetHeader("Upgrade")), "websocket")
-\t\tdeferredRealtime := c.Request.Method == http.MethodPost && (path == "/v1/realtime" || path == "/v1/realtime/calls")
-\t\tif upgrade && (path == "/v1/responses" || path == "/v1/realtime") || deferredRealtime {
-\t\t\trequestCtx := apikeypolicy.WithQuotaAdmission(c.Request.Context(), policy.AdmitDecision)
-\t\t\tc.Request = c.Request.WithContext(requestCtx)
-\t\t\tc.Next()
-\t\t\treturn
-\t\t}
-\t\tadmitted, err := policy.AdmitDecision(c.Request.Context(), decision)
-\t\tif err != nil {
-\t\t\twriteAPIKeyPolicyMiddlewareError(c, strings.HasPrefix(c.Request.URL.Path, "/v1/realtime"), err)
-\t\t\treturn
-\t\t}
-\t\tc.Request = c.Request.WithContext(apikeypolicy.WithDecision(c.Request.Context(), admitted))
+\t\trequestCtx := apikeypolicy.WithQuotaAdmission(c.Request.Context(), policy.AdmitDecision)
+\t\tc.Request = c.Request.WithContext(requestCtx)
 \t\tc.Next()
 \t}
 }
@@ -2243,6 +2231,14 @@ func applyAPIKeyProviderPolicy(ctx context.Context, providers []string) ([]strin
 \treturn filtered, nil
 }
 
+func admitAPIKeyQuota(ctx context.Context) (context.Context, *interfaces.ErrorMessage) {
+\tadmitted, err := apikeypolicy.AdmitQuotaTurn(ctx)
+\tif err != nil {
+\t\treturn ctx, apiKeyPolicyExecutionError(err)
+\t}
+\treturn admitted, nil
+}
+
 func requireAPIKeyExecutionProvider(ctx context.Context, provider string) *interfaces.ErrorMessage {
 \tdecision, configured := apikeypolicy.DecisionFromContext(ctx)
 \tif !configured {
@@ -2259,7 +2255,12 @@ func apiKeyPolicyExecutionError(err error) *interfaces.ErrorMessage {
 \tcode := "api_key_policy_unavailable"
 \tmessage := "API key policy is unavailable"
 \terrorType := "server_error"
-\tif policyErr, ok := err.(*apikeypolicy.PolicyError); ok {
+\tif quotaErr, ok := err.(*apikeypolicy.QuotaExceededError); ok {
+\t\tstatus = http.StatusTooManyRequests
+\t\tcode = "api_key_quota_exceeded"
+\t\tmessage = quotaErr.Error()
+\t\terrorType = "permission_error"
+\t} else if policyErr, ok := err.(*apikeypolicy.PolicyError); ok {
 \t\tstatus = http.StatusForbidden
 \t\tcode = policyErr.Code
 \t\tmessage = policyErr.Message
@@ -2355,6 +2356,21 @@ replace_once(
 )
 replace_once(
     handlers_execution_source,
+    '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
+\tresp, err := h.AuthManager.Execute(ctx, providers, req, opts)
+''',
+    '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
+\tctx, errMsg = admitAPIKeyQuota(ctx)
+\tif errMsg != nil {
+\t\tlifecycle.completeError(ctx, errMsg)
+\t\treturn nil, nil, errMsg
+\t}
+\tresp, err := h.AuthManager.Execute(ctx, providers, req, opts)
+''',
+    'ctx, errMsg = admitAPIKeyQuota(ctx)\n\tif errMsg != nil {\n\t\tlifecycle.completeError(ctx, errMsg)\n\t\treturn nil, nil, errMsg\n\t}\n\tresp, err := h.AuthManager.Execute',
+)
+replace_once(
+    handlers_execution_source,
     '''func (h *BaseAPIHandler) executeCountWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string, execOptions modelExecutionOptions) ([]byte, http.Header, *interfaces.ErrorMessage) {
 \toriginalRequestedModel := modelName
 \trouteDecision := h.applyModelRouter(ctx, handlerType, modelName, rawJSON, false, execOptions)
@@ -2402,6 +2418,51 @@ replace_once(
 \treqMeta := requestExecutionMetadata(ctx)
 ''',
     'adjustExecutionProvidersForEntryProtocol(handlerType, providers)\n\tproviders, errMsg = applyAPIKeyProviderPolicy',
+)
+replace_once(
+    handlers_execution_source,
+    '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
+\tresp, err := h.AuthManager.ExecuteCount(ctx, providers, req, opts)
+''',
+    '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
+\tctx, errMsg = admitAPIKeyQuota(ctx)
+\tif errMsg != nil {
+\t\tlifecycle.completeError(ctx, errMsg)
+\t\treturn nil, nil, errMsg
+\t}
+\tresp, err := h.AuthManager.ExecuteCount(ctx, providers, req, opts)
+''',
+    'ctx, errMsg = admitAPIKeyQuota(ctx)\n\tif errMsg != nil {\n\t\tlifecycle.completeError(ctx, errMsg)\n\t\treturn nil, nil, errMsg\n\t}\n\tresp, err := h.AuthManager.ExecuteCount',
+)
+replace_once(
+    handlers_execution_source,
+    '''\texecCtx = enrichContextWithSessionHierarchy(execCtx, opts.Headers, req.Payload, opts.Metadata)
+\tvar reporter *helps.UsageReporter
+''',
+    '''\texecCtx = enrichContextWithSessionHierarchy(execCtx, opts.Headers, req.Payload, opts.Metadata)
+\texecCtx, interceptErr = admitAPIKeyQuota(execCtx)
+\tif interceptErr != nil {
+\t\tlifecycle.completeError(execCtx, interceptErr)
+\t\treturn nil, nil, interceptErr
+\t}
+\tvar reporter *helps.UsageReporter
+''',
+    'execCtx, interceptErr = admitAPIKeyQuota(execCtx)',
+)
+replace_once(
+    handlers_execution_source,
+    '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
+\tresp, errCount := host.CountPluginExecutor(ctx, executorPluginID, req, opts)
+''',
+    '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
+\tctx, interceptErr = admitAPIKeyQuota(ctx)
+\tif interceptErr != nil {
+\t\tlifecycle.completeError(ctx, interceptErr)
+\t\treturn nil, nil, interceptErr
+\t}
+\tresp, errCount := host.CountPluginExecutor(ctx, executorPluginID, req, opts)
+''',
+    'ctx, interceptErr = admitAPIKeyQuota(ctx)\n\tif interceptErr != nil {\n\t\tlifecycle.completeError(ctx, interceptErr)\n\t\treturn nil, nil, interceptErr\n\t}\n\tresp, errCount := host.CountPluginExecutor',
 )
 
 handlers_stream_source = ROOT / 'sdk/api/handlers/handlers_stream.go'
@@ -2476,6 +2537,42 @@ replace_once(
 \treqMeta := requestExecutionMetadata(ctx)
 ''',
     'adjustExecutionProvidersForEntryProtocol(entryProtocol, providers)\n\tproviders, errMsg = applyAPIKeyProviderPolicy',
+)
+replace_once(
+    handlers_stream_source,
+    '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
+\tstreamResult, err := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
+''',
+    '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
+\tctx, errMsg = admitAPIKeyQuota(ctx)
+\tif errMsg != nil {
+\t\tlifecycle.completeError(ctx, errMsg)
+\t\terrChan := make(chan *interfaces.ErrorMessage, 1)
+\t\terrChan <- errMsg
+\t\tclose(errChan)
+\t\treturn nil, nil, errChan
+\t}
+\tstreamResult, err := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
+''',
+    'ctx, errMsg = admitAPIKeyQuota(ctx)\n\tif errMsg != nil {\n\t\tlifecycle.completeError(ctx, errMsg)',
+)
+replace_once(
+    handlers_stream_source,
+    '''\texecCtx = enrichContextWithSessionHierarchy(execCtx, opts.Headers, req.Payload, opts.Metadata)
+\tvar reporter *helps.UsageReporter
+''',
+    '''\texecCtx = enrichContextWithSessionHierarchy(execCtx, opts.Headers, req.Payload, opts.Metadata)
+\texecCtx, interceptErr = admitAPIKeyQuota(execCtx)
+\tif interceptErr != nil {
+\t\tlifecycle.completeError(execCtx, interceptErr)
+\t\terrChan := make(chan *interfaces.ErrorMessage, 1)
+\t\terrChan <- interceptErr
+\t\tclose(errChan)
+\t\treturn nil, nil, errChan
+\t}
+\tvar reporter *helps.UsageReporter
+''',
+    'execCtx, interceptErr = admitAPIKeyQuota(execCtx)\n\tif interceptErr != nil {\n\t\tlifecycle.completeError(execCtx, interceptErr)',
 )
 
 handlers_context_source = ROOT / 'sdk/api/handlers/handlers_context.go'

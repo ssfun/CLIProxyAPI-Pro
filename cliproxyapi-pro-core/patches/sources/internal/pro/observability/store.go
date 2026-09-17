@@ -386,12 +386,18 @@ func (s *Store) executor(ctx context.Context) sqlExecutor {
 	if transaction := transactionContext(ctx); transaction != nil && transaction.tx != nil {
 		return transaction.tx
 	}
+	if tx := probackup.Transaction(ctx); tx != nil {
+		return tx
+	}
 	return s.db
 }
 
 func (s *Store) beginTx(ctx context.Context, options *sql.TxOptions) (*storeTx, error) {
 	if transaction := transactionContext(ctx); transaction != nil && transaction.tx != nil {
 		return &storeTx{Tx: transaction.tx}, nil
+	}
+	if tx := probackup.Transaction(ctx); tx != nil {
+		return &storeTx{Tx: tx}, nil
 	}
 	tx, err := s.db.BeginTx(ctx, options)
 	if err != nil {
@@ -406,6 +412,9 @@ func runAfterCommit(ctx context.Context, callback func()) {
 	}
 	if transaction := transactionContext(ctx); transaction != nil {
 		transaction.afterCommit = append(transaction.afterCommit, callback)
+		return
+	}
+	if probackup.AfterCommit(ctx, callback) {
 		return
 	}
 	callback()
