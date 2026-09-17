@@ -80,6 +80,9 @@ func (s *accountInspectionScheduler) recoverQuotaProtections(ctx context.Context
 	if stopped || running {
 		return
 	}
+	if !s.inspectionAuthManager().HasStoredQuotaProtections(ctx) {
+		return
+	}
 	auths := s.inspectionAuthManager().List()
 	sort.Slice(auths, func(i, j int) bool { return recoveryTime(auths[i]) < recoveryTime(auths[j]) })
 	due := make([]*coreauth.Auth, 0, 4)

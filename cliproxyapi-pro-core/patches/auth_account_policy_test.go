@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/embeddedusage"
-	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/embeddedusage"
+	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
@@ -298,5 +299,33 @@ func TestImportedLegacyRoutingQuotaProtectionIsIgnored(t *testing.T) {
 	}
 	if err = m.SweepLegacyRoutingQuotaProtections(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSweepLegacyRoutingQuotaProtectionsLeavesUnprotectedAuthsUnchanged(t *testing.T) {
+	t.Setenv("USAGE_DB_PATH", filepath.Join(t.TempDir(), "quota.sqlite"))
+	t.Setenv("USAGE_SERVICE_ENABLED", "false")
+	ctx, cancel := context.WithCancel(context.Background())
+	service, err := embeddedusage.Start(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	embeddedusage.SetDefaultService(service)
+	t.Cleanup(func() { embeddedusage.SetDefaultService(nil); cancel() })
+	m := NewManager(nil, nil, nil)
+	a, err := m.Register(ctx, &Auth{ID: "clean-auth", Provider: "codex", FileName: "clean.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := m.GetByID(a.ID)
+	if err = m.SweepLegacyRoutingQuotaProtections(ctx); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := m.GetByID(a.ID)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("legacy sweep mutated an unprotected auth")
+	}
+	if m.HasStoredQuotaProtections(ctx) {
+		t.Fatal("empty quota protection store reported holdings")
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -990,6 +991,22 @@ func TestOAuthInspectionSkipsReauthenticatedAccount(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestQuotaRecoverySkipsIdleScanWithoutStoredProtections(t *testing.T) {
+	ctx := startProQuotaTestService(t)
+	m := coreauth.NewManager(nil, nil, nil)
+	a, err := m.Register(ctx, &coreauth.Auth{ID: "idle-recovery", FileName: "idle.json", Provider: "claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := m.GetByID(a.ID)
+	s := newAccountInspectionScheduler(&Handler{authManager: m}, nil)
+	s.recoverQuotaProtections(ctx)
+	after, _ := m.GetByID(a.ID)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("idle quota recovery mutated auth state")
 	}
 }
 

@@ -3512,48 +3512,6 @@ insert_before(
 
 openai_compat_execute = ROOT / 'internal/runtime/executor/openai_compat_executor.go'
 replace_once(
-    ROOT / 'internal/runtime/executor/helps/openai_compat_tool_results.go',
-    '\t\tif message.Get("role").String() == "tool" {\n',
-    '\t\t// Claude tool images now arrive in a user message, possibly merged with user text.\n'
-    '\t\tisToolImageRelay := message.Get("role").String() == "user" && message.Get("content.0.text").String() == "Images returned by the preceding tool call(s):"\n'
-    '\t\tif message.Get("role").String() == "tool" || isToolImageRelay {\n',
-    '|| isToolImageRelay',
-)
-replace_once(
-    ROOT / 'internal/runtime/executor/openai_compat_executor_tool_results_test.go',
-    '''\t\t\ttoolContent := gjson.GetBytes(gotBody, "messages.1.content")
-\t\t\tif tt.wantString {
-\t\t\t\tif toolContent.Type != gjson.String {
-\t\t\t\t\tt.Fatalf("tool content type = %s, want string; body=%s", toolContent.Type, string(gotBody))
-\t\t\t\t}
-\t\t\t\twant := "image inspected\\n\\n[image omitted: unsupported by upstream]"
-\t\t\t\tif toolContent.String() != want {
-\t\t\t\t\tt.Fatalf("tool content = %q, want %q", toolContent.String(), want)
-\t\t\t\t}
-\t\t\t} else if !toolContent.IsArray() {
-\t\t\t\tt.Fatalf("tool content type = %s, want array; body=%s", toolContent.Type, string(gotBody))
-\t\t\t}
-''',
-    '''\t\t\ttoolContent := gjson.GetBytes(gotBody, "messages.1.content")
-\t\t\tif toolContent.Type != gjson.String || toolContent.String() != "image inspected" {
-\t\t\t\tt.Fatalf("tool text changed: %s", gotBody)
-\t\t\t}
-\t\t\tif gjson.GetBytes(gotBody, "messages.2.role").String() != "user" {
-\t\t\t\tt.Fatalf("missing relayed tool image user message: %s", gotBody)
-\t\t\t}
-\t\t\trelayContent := gjson.GetBytes(gotBody, "messages.2.content")
-\t\t\tif tt.wantString {
-\t\t\t\twant := "Images returned by the preceding tool call(s):\\n\\n[image omitted: unsupported by upstream]"
-\t\t\t\tif relayContent.Type != gjson.String || relayContent.String() != want {
-\t\t\t\t\tt.Fatalf("text-only relay content = %s, want %q", relayContent.Raw, want)
-\t\t\t\t}
-\t\t\t} else if !relayContent.IsArray() || relayContent.Get("1.image_url.url").String() != "data:image/png;base64,AA==" {
-\t\t\t\tt.Fatalf("relayed tool image lost: %s", gotBody)
-\t\t\t}
-''',
-    'relayed tool image lost',
-)
-replace_once(
     openai_compat_execute,
     '''\thelps.AppendAPIResponseChunk(ctx, e.cfg, body)
 \treporter.Publish(ctx, helps.ParseOpenAIUsage(body))

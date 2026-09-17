@@ -135,15 +135,62 @@ func (m *Manager) ChangeQuotaProtection(ctx context.Context, base *Auth, source 
 	return err
 }
 
+func (m *Manager) HasStoredQuotaProtections(ctx context.Context) bool {
+	if m == nil {
+		return false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	item, found, err := embeddedusage.GetProSetting(ctx, prorouting.QuotaProtectionNamespace)
+	if err != nil || !found {
+		return false
+	}
+	records, err := decodeQuotaProtectionRecords(item)
+	return err == nil && len(records) > 0
+}
+
 func (m *Manager) SweepLegacyRoutingQuotaProtections(ctx context.Context) error {
 	if m == nil {
 		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	item, _, err := embeddedusage.GetProSetting(ctx, prorouting.QuotaProtectionNamespace)
 	if err != nil {
 		return err
 	}
-	return m.ApplyImportedQuotaProtection(ctx, item)
+	records, err := decodeQuotaProtectionRecords(item)
+	if err != nil {
+		return err
+	}
+	droppedRecords := dropLegacyRoutingQuotaRecords(records)
+	m.mu.Lock()
+	changedAuth := false
+	for _, auth := range m.auths {
+		if auth == nil {
+			continue
+		}
+		cleaned, dropped := prorouting.WithoutLegacyRoutingQuotaProtections(prorouting.ParseQuotaProtections(auth.Metadata))
+		if !dropped {
+			continue
+		}
+		setQuotaProtections(auth, cleaned)
+		auth.Generation++
+		auth.UpdatedAt = time.Now()
+		changedAuth = true
+	}
+	m.mu.Unlock()
+	if droppedRecords {
+		if err := persistQuotaProtectionRecords(ctx, records); err != nil {
+			return err
+		}
+	}
+	if changedAuth {
+		m.RefreshSchedulerAll()
+	}
+	return nil
 }
 
 func (m *Manager) ApplyImportedQuotaProtection(ctx context.Context, item embeddedusage.ProSetting) error {
@@ -156,17 +203,52 @@ func (m *Manager) ApplyImportedQuotaProtection(ctx context.Context, item embedde
 	}
 	dropped := dropLegacyRoutingQuotaRecords(records)
 	m.mu.Lock()
+	changedAuth := dropped
 	for _, auth := range m.auths {
-		applyQuotaProtectionRecord(auth, records[auth.ID])
+		if auth == nil {
+			continue
+		}
+		next := importedQuotaProtections(auth, records[auth.ID])
+		if quotaProtectionStateEqual(auth, next) {
+			continue
+		}
+		setQuotaProtections(auth, next)
 		auth.Generation++
 		auth.UpdatedAt = time.Now()
+		changedAuth = true
 	}
 	m.mu.Unlock()
-	m.RefreshSchedulerAll()
+	if changedAuth {
+		m.RefreshSchedulerAll()
+	}
 	if !dropped {
 		return nil
 	}
 	return persistQuotaProtectionRecords(ctx, records)
+}
+
+func importedQuotaProtections(auth *Auth, record quotaProtectionRecord) map[string]prorouting.QuotaProtection {
+	if auth == nil || record.Identity != authRuntimeIdentityFingerprint(auth) {
+		return nil
+	}
+	cleaned, _ := prorouting.WithoutLegacyRoutingQuotaProtections(record.Protections)
+	if len(cleaned) == 0 {
+		return nil
+	}
+	return cleaned
+}
+
+func quotaProtectionStateEqual(auth *Auth, next map[string]prorouting.QuotaProtection) bool {
+	current := prorouting.ParseQuotaProtections(auth.Metadata)
+	if len(current) == 0 && len(next) == 0 {
+		return true
+	}
+	if len(current) != len(next) {
+		return false
+	}
+	currentRaw, _ := json.Marshal(current)
+	nextRaw, _ := json.Marshal(next)
+	return string(currentRaw) == string(nextRaw)
 }
 
 func proQuotaProtectionBlocked(auth *Auth, model string, now time.Time) (bool, time.Time) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -178,6 +179,21 @@ func TestClearLegacyRoutingQuotaProtectionsRemovesRetiredHolds(t *testing.T) {
 	}
 	if _, ok := got[inspectionQuotaSource]; !ok {
 		t.Fatal("inspection hold was cleared")
+	}
+}
+
+func TestClearLegacyRoutingQuotaProtectionsLeavesUnprotectedAuthsUnchanged(t *testing.T) {
+	_ = startProQuotaTestService(t)
+	manager := coreauth.NewManager(nil, nil, nil)
+	auth, err := manager.Register(context.Background(), &coreauth.Auth{ID: "clean-routing", Provider: "codex", FileName: "clean.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := manager.GetByID(auth.ID)
+	clearLegacyRoutingQuotaProtections(&Handler{authManager: manager})
+	after, _ := manager.GetByID(auth.ID)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("legacy routing sweep mutated an unprotected auth")
 	}
 }
 
