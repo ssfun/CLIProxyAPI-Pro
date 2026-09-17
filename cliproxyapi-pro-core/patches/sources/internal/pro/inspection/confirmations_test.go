@@ -52,3 +52,35 @@ func TestConfirmationCounterResetClearsPortableState(t *testing.T) {
 		t.Fatalf("confirmation after reset = %v, %d", confirmed, count)
 	}
 }
+
+func TestConfirmationCounterFollowsNormalCredentialRefreshChain(t *testing.T) {
+	counter := NewConfirmationCounter()
+	if confirmed, count, _ := counter.ConfirmWithFingerprint("auth|delete|invalid", "epoch-1:gen-1:token-a", "epoch-1:gen-2:token-b", 2); confirmed || count != 1 {
+		t.Fatalf("first confirmation = %v, %d", confirmed, count)
+	}
+	counter.BeginRun()
+	if confirmed, count, _ := counter.ConfirmWithFingerprint("auth|delete|invalid", "epoch-1:gen-2:token-b", "epoch-1:gen-3:token-c", 2); !confirmed || count != 2 {
+		t.Fatalf("refreshed credential confirmation = %v, %d", confirmed, count)
+	}
+}
+
+func TestConfirmationCounterResetsWhenCredentialChangesBetweenRuns(t *testing.T) {
+	counter := NewConfirmationCounter()
+	if confirmed, count, _ := counter.ConfirmWithFingerprint("auth|delete|invalid", "epoch-1:gen-1:token-a", "epoch-1:gen-1:token-a", 2); confirmed || count != 1 {
+		t.Fatalf("first confirmation = %v, %d", confirmed, count)
+	}
+	counter.BeginRun()
+	if confirmed, count, _ := counter.ConfirmWithFingerprint("auth|delete|invalid", "epoch-2:gen-1:token-b", "epoch-2:gen-1:token-b", 2); confirmed || count != 1 {
+		t.Fatalf("replacement credential confirmation = %v, %d, want reset", confirmed, count)
+	}
+}
+
+func TestConfirmationCounterResetsChangedCredentialWithinRun(t *testing.T) {
+	counter := NewConfirmationCounter()
+	if confirmed, count, _ := counter.ConfirmWithFingerprint("auth|delete|invalid", "epoch-1:gen-1:token-a", "epoch-1:gen-1:token-a", 2); confirmed || count != 1 {
+		t.Fatalf("first confirmation = %v, %d", confirmed, count)
+	}
+	if confirmed, count, _ := counter.ConfirmWithFingerprint("auth|delete|invalid", "epoch-2:gen-1:token-b", "epoch-2:gen-1:token-b", 2); confirmed || count != 1 {
+		t.Fatalf("same-run replacement confirmation = %v, %d, want reset", confirmed, count)
+	}
+}

@@ -2,7 +2,9 @@ package management
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -168,18 +170,46 @@ func accountFromAuth(auth *coreauth.Auth) accountInspectionAccount {
 	email := accountInspectionAuthEmail(auth)
 	displayName := firstNonEmptyStringValue(email, fileName)
 	return accountInspectionAccount{
-		Auth:              auth,
-		AuthID:            strings.TrimSpace(auth.ID),
-		Key:               proinspection.AccountKey(fileName, auth.Index),
-		Provider:          provider,
-		FileName:          fileName,
-		DisplayName:       displayName,
-		Email:             email,
-		Name:              name,
-		AuthIndex:         auth.Index,
-		AccessTokenSHA256: coreauth.AccessTokenSHA256(auth),
-		Disabled:          auth.Disabled,
+		Auth:                  auth,
+		AuthID:                strings.TrimSpace(auth.ID),
+		Key:                   proinspection.AccountKey(fileName, auth.Index),
+		Provider:              provider,
+		FileName:              fileName,
+		DisplayName:           displayName,
+		Email:                 email,
+		Name:                  name,
+		AuthIndex:             auth.Index,
+		AccessTokenSHA256:     coreauth.AccessTokenSHA256(auth),
+		CredentialFingerprint: accountInspectionCredentialFingerprint(auth),
+		Disabled:              auth.Disabled,
 	}
+}
+
+func accountInspectionCredentialFingerprint(auth *coreauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	if auth.RegistrationEpoch > 0 {
+		return fmt.Sprintf("registration:%d", auth.RegistrationEpoch)
+	}
+	// Registered runtime auths always have a registration epoch. Keep a
+	// credential-material fallback for isolated or legacy auth objects so the
+	// confirmation boundary still fails closed instead of becoming unbound.
+	digest := sha256.New()
+	for _, key := range []string{"access_token", "accessToken", "token", "Token", "refresh_token", "refreshToken", "id_token", "idToken", "session_id"} {
+		value, ok := auth.Metadata[key]
+		if !ok {
+			continue
+		}
+		raw, err := json.Marshal(value)
+		if err != nil {
+			raw = []byte(fmt.Sprint(value))
+		}
+		_, _ = fmt.Fprintf(digest, "%s:%d:", key, len(raw))
+		_, _ = digest.Write(raw)
+		_, _ = digest.Write([]byte{'\n'})
+	}
+	return "credential:" + hex.EncodeToString(digest.Sum(nil))
 }
 
 func accountInspectionProvider(auth *coreauth.Auth) string {
@@ -287,6 +317,7 @@ func sampleAccounts(accounts []accountInspectionAccount, sampleSize int) []accou
 }
 
 func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) accountInspectionResult {
+	observedCredentialFingerprint := account.CredentialFingerprint
 	result := account.baseResult()
 	if account.AuthIndex == "" {
 		result.ActionReason = "缺少 auth_index，保留账号"
@@ -328,6 +359,7 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 		account = refreshed
 		result = account.baseResult()
 	}
+	result.CredentialObserved = observedCredentialFingerprint
 	result.NextRefreshAt = account.nextRefreshAtMillis()
 	s.fillQuotaProtectionResult(account.Auth, &result)
 	var decision accountInspectionDecision
@@ -443,18 +475,20 @@ func (account accountInspectionAccount) nextRefreshAtMillis() int64 {
 
 func (account accountInspectionAccount) baseResult() accountInspectionResult {
 	return accountInspectionResult{
-		AuthID:            account.AuthID,
-		Key:               account.Key,
-		Provider:          account.Provider,
-		FileName:          account.FileName,
-		DisplayName:       account.DisplayName,
-		Email:             account.Email,
-		Name:              account.Name,
-		AuthIndex:         account.AuthIndex,
-		AccessTokenSHA256: account.AccessTokenSHA256,
-		Disabled:          account.Disabled,
-		Action:            accountInspectionActionKeep,
-		ActionReason:      "无需处理",
+		AuthID:             account.AuthID,
+		Key:                account.Key,
+		Provider:           account.Provider,
+		FileName:           account.FileName,
+		DisplayName:        account.DisplayName,
+		Email:              account.Email,
+		Name:               account.Name,
+		AuthIndex:          account.AuthIndex,
+		AccessTokenSHA256:  account.AccessTokenSHA256,
+		CredentialObserved: account.CredentialFingerprint,
+		CredentialFinal:    account.CredentialFingerprint,
+		Disabled:           account.Disabled,
+		Action:             accountInspectionActionKeep,
+		ActionReason:       "无需处理",
 	}
 }
 
@@ -811,7 +845,12 @@ func (s *accountInspectionScheduler) confirmAutoAction(result accountInspectionR
 	}
 	confirmations := s.autoActionConfirmations
 	s.mu.Unlock()
-	return confirmations.Confirm(key, required)
+	return confirmations.ConfirmWithFingerprint(
+		key,
+		result.CredentialObserved,
+		result.CredentialFinal,
+		required,
+	)
 }
 
 func (s *accountInspectionScheduler) clearAutoActionConfirmation(result accountInspectionResult) {

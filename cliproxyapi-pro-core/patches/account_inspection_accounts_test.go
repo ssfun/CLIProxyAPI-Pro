@@ -320,6 +320,74 @@ func TestAutoActionConfirmationDelaysExecution(t *testing.T) {
 	}
 }
 
+func TestAutoActionConfirmationDoesNotCrossCredentialReplacement(t *testing.T) {
+	scheduler := &accountInspectionScheduler{}
+	action := accountInspectionActionDelete
+	oldCredential := testInspectionAuthInvalidResult("account", "codex", action)
+	oldCredential.CredentialObserved = "epoch-1:gen-1:token-a"
+	oldCredential.CredentialFinal = "epoch-1:gen-1:token-a"
+
+	confirmed, count, required := scheduler.confirmAutoAction(oldCredential, action, 2)
+	if confirmed || count != 1 || required != 2 {
+		t.Fatalf("old credential confirmation = confirmed:%v count:%d required:%d", confirmed, count, required)
+	}
+	scheduler.autoActionConfirmations.BeginRun()
+
+	replacement := oldCredential
+	replacement.CredentialObserved = "epoch-2:gen-1:token-b"
+	replacement.CredentialFinal = "epoch-2:gen-1:token-b"
+	confirmed, count, required = scheduler.confirmAutoAction(replacement, action, 2)
+	if confirmed || count != 1 || required != 2 {
+		t.Fatalf("replacement confirmation = confirmed:%v count:%d required:%d, want reset", confirmed, count, required)
+	}
+}
+
+func TestAccountInspectionCredentialFingerprintTracksCredentialIdentityOnly(t *testing.T) {
+	base := &coreauth.Auth{
+		RegistrationEpoch: 4,
+		Generation:        1,
+		Status:            coreauth.StatusActive,
+		Metadata: map[string]any{
+			"access_token":  "access-a",
+			"refresh_token": "refresh-a",
+		},
+	}
+	baseFingerprint := accountInspectionCredentialFingerprint(base)
+	if baseFingerprint == "" {
+		t.Fatal("base credential fingerprint is empty")
+	}
+
+	statusOnly := base.Clone()
+	statusOnly.Generation = 2
+	statusOnly.Status = coreauth.StatusError
+	statusOnly.LastError = &coreauth.Error{Code: "inspection_probe_error", Message: "temporary"}
+	if got := accountInspectionCredentialFingerprint(statusOnly); got != baseFingerprint {
+		t.Fatalf("status-only fingerprint = %q, want %q", got, baseFingerprint)
+	}
+
+	refreshed := base.Clone()
+	refreshed.Generation = 2
+	refreshed.Metadata["access_token"] = "access-b"
+	refreshed.Metadata["refresh_token"] = "refresh-b"
+	if got := accountInspectionCredentialFingerprint(refreshed); got != baseFingerprint {
+		t.Fatalf("normal refresh fingerprint = %q, want %q", got, baseFingerprint)
+	}
+
+	replacement := base.Clone()
+	replacement.RegistrationEpoch = 5
+	if got := accountInspectionCredentialFingerprint(replacement); got == baseFingerprint {
+		t.Fatal("replacement credential fingerprint did not change")
+	}
+
+	legacy := base.Clone()
+	legacy.RegistrationEpoch = 0
+	legacyFingerprint := accountInspectionCredentialFingerprint(legacy)
+	legacy.Metadata["refresh_token"] = "refresh-c"
+	if got := accountInspectionCredentialFingerprint(legacy); got == legacyFingerprint {
+		t.Fatal("legacy credential-material fingerprint did not change")
+	}
+}
+
 func TestExecuteActionDisablesGeminiCLIPluginVirtualSourceFile(t *testing.T) {
 	authDir := t.TempDir()
 	authPath := filepath.Join(authDir, "gemini-cli.json")

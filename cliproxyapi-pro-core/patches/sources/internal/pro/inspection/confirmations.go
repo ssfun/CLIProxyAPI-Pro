@@ -13,8 +13,9 @@ type ConfirmationCounter struct {
 }
 
 type ConfirmationEntry struct {
-	Count        int   `json:"count"`
-	LastSequence int64 `json:"lastSequence"`
+	Count           int    `json:"count"`
+	LastSequence    int64  `json:"lastSequence"`
+	LastFingerprint string `json:"lastFingerprint,omitempty"`
 }
 
 type ConfirmationState struct {
@@ -38,6 +39,10 @@ func (c *ConfirmationCounter) BeginRun() int64 {
 }
 
 func (c *ConfirmationCounter) Confirm(key string, required int) (bool, int, int) {
+	return c.ConfirmWithFingerprint(key, "", "", required)
+}
+
+func (c *ConfirmationCounter) ConfirmWithFingerprint(key, observedFingerprint, finalFingerprint string, required int) (bool, int, int) {
 	if required <= 1 {
 		return true, 1, 1
 	}
@@ -49,17 +54,37 @@ func (c *ConfirmationCounter) Confirm(key string, required int) (bool, int, int)
 	if c.entries == nil {
 		c.entries = make(map[string]ConfirmationEntry)
 	}
+	observedFingerprint = strings.TrimSpace(observedFingerprint)
+	finalFingerprint = strings.TrimSpace(finalFingerprint)
+	if finalFingerprint == "" {
+		finalFingerprint = observedFingerprint
+	}
 	entry := c.entries[key]
 	if entry.LastSequence == c.sequence {
+		if observedFingerprint != "" && entry.LastFingerprint != observedFingerprint {
+			c.entries[key] = ConfirmationEntry{Count: 1, LastSequence: c.sequence, LastFingerprint: finalFingerprint}
+			c.mu.Unlock()
+			return false, 1, required
+		}
 		count := entry.Count
 		c.mu.Unlock()
 		return count >= required, count, required
 	}
+
+	consecutive := entry.LastSequence == c.sequence-1
+	// A normal inspection refresh forms a chain where the previous run's final
+	// credential fingerprint is the next run's observed fingerprint. A credential
+	// replacement between runs breaks that chain and must restart destructive-action
+	// confirmation from 1. Legacy persisted entries without a fingerprint are also
+	// reset once when fingerprint-aware confirmation is first used.
+	if consecutive && observedFingerprint != "" && entry.LastFingerprint != observedFingerprint {
+		consecutive = false
+	}
 	count := 1
-	if entry.LastSequence == c.sequence-1 {
+	if consecutive {
 		count = entry.Count + 1
 	}
-	c.entries[key] = ConfirmationEntry{Count: count, LastSequence: c.sequence}
+	c.entries[key] = ConfirmationEntry{Count: count, LastSequence: c.sequence, LastFingerprint: finalFingerprint}
 	c.mu.Unlock()
 	return count >= required, count, required
 }

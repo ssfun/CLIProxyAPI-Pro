@@ -119,7 +119,7 @@ UI 会在主布局中启动 `QuotaPersistenceBootstrap`，把已保存的配额�
 - `GET /account-inspection/schedule`
 - `GET /account-inspection/status`
 - `GET /account-inspection/logs`（WebSocket/WSS 日志和状态流）
-- `PUT|PATCH /account-inspection/schedule`
+- `PUT /account-inspection/schedule`
 - `POST /account-inspection/run`
 - `POST /account-inspection/inspect-one`
 - `POST /account-inspection/pause`
