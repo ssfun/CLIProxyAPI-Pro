@@ -56,12 +56,19 @@ func StartForPath(ctx context.Context, configFilePath string) (*Service, error) 
 	service.server.webDAVClient = service.webDAVClient
 	if cfg.Enabled {
 		redisqueue.SetEnabled(true)
+		redisqueue.SetPersistenceQueueConfig(
+			cfg.PersistenceQueueRetentionSeconds,
+			cfg.PersistenceQueueMaxItems,
+			cfg.PersistenceQueueMaxBytes,
+		)
+		redisqueue.SetPersistenceEnabled(true)
 		redisqueue.SetUsageStatisticsEnabled(true)
 		service.startWorker(func() { service.collect(ctx) })
 		service.startWorker(func() { service.maintain(ctx) })
 		service.startWorker(func() { service.runWebDAVBackups(ctx) })
 		service.startWorker(func() { service.runModelPriceSync(ctx) })
 	} else {
+		redisqueue.SetPersistenceEnabled(false)
 		redisqueue.SetEnabled(false)
 		redisqueue.SetUsageStatisticsEnabled(false)
 		log.Info("embedded usage collection disabled; shared Pro policy storage remains available")
@@ -157,7 +164,7 @@ func (s *Service) collect(ctx context.Context) {
 		didWork := len(pending) > 0
 		err := s.module.Run(ctx, func() error {
 			if len(pending) == 0 {
-				items := redisqueue.PopOldest(s.cfg.BatchSize)
+				items := redisqueue.PopOldestPersistence(s.cfg.BatchSize)
 				didWork = len(items) > 0
 				for _, item := range items {
 					event, err := internalusage.NormalizeRaw(item)

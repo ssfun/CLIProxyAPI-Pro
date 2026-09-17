@@ -9,11 +9,14 @@ import (
 )
 
 type Config struct {
-	Enabled      bool
-	DBPath       string
-	BatchSize    int
-	PollInterval time.Duration
-	QueryLimit   int
+	Enabled                          bool
+	DBPath                           string
+	BatchSize                        int
+	PollInterval                     time.Duration
+	QueryLimit                       int
+	PersistenceQueueRetentionSeconds int
+	PersistenceQueueMaxItems         int
+	PersistenceQueueMaxBytes         int64
 }
 
 const usageEventsPageLimit = 5000
@@ -43,11 +46,14 @@ func ResolveDataDirForPath(configFilePath string) string {
 func LoadConfigForPath(configFilePath string) Config {
 	dataDir := ResolveDataDirForPath(configFilePath)
 	return Config{
-		Enabled:      envBool("USAGE_SERVICE_ENABLED", true),
-		DBPath:       env("USAGE_DB_PATH", filepath.Join(dataDir, "usage.sqlite")),
-		BatchSize:    envInt("USAGE_BATCH_SIZE", 100),
-		PollInterval: time.Duration(envInt("USAGE_POLL_INTERVAL_MS", 500)) * time.Millisecond,
-		QueryLimit:   envInt("USAGE_QUERY_LIMIT", 50000),
+		Enabled:                          envBool("USAGE_SERVICE_ENABLED", true),
+		DBPath:                           env("USAGE_DB_PATH", filepath.Join(dataDir, "usage.sqlite")),
+		BatchSize:                        envInt("USAGE_BATCH_SIZE", 100),
+		PollInterval:                     time.Duration(envInt("USAGE_POLL_INTERVAL_MS", 500)) * time.Millisecond,
+		QueryLimit:                       envInt("USAGE_QUERY_LIMIT", 50000),
+		PersistenceQueueRetentionSeconds: envInt("USAGE_QUEUE_RETENTION_SECONDS", 3600),
+		PersistenceQueueMaxItems:         envInt("USAGE_QUEUE_MAX_ITEMS", 100000),
+		PersistenceQueueMaxBytes:         int64(envInt("USAGE_QUEUE_MAX_BYTES", 256*1024*1024)),
 	}
 }
 

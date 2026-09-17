@@ -43,3 +43,20 @@ func TestResolveDataDirForPathPrecedence(t *testing.T) {
 		t.Fatalf("explicit data dir = %q, want %q", got, explicit)
 	}
 }
+
+func TestLoadConfigForPathLoadsPersistenceQueueBounds(t *testing.T) {
+	t.Setenv("USAGE_QUEUE_RETENTION_SECONDS", "7200")
+	t.Setenv("USAGE_QUEUE_MAX_ITEMS", "12345")
+	t.Setenv("USAGE_QUEUE_MAX_BYTES", "987654")
+	t.Setenv("USAGE_QUERY_LIMIT", "75000")
+
+	cfg := LoadConfigForPath(filepath.Join(t.TempDir(), "config.yaml"))
+	if cfg.PersistenceQueueRetentionSeconds != 7200 ||
+		cfg.PersistenceQueueMaxItems != 12345 ||
+		cfg.PersistenceQueueMaxBytes != 987654 {
+		t.Fatalf("persistence queue config = %+v", cfg)
+	}
+	if cfg.QueryLimit != 75000 {
+		t.Fatalf("query limit = %d, want configurable maximum 75000", cfg.QueryLimit)
+	}
+}

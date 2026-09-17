@@ -1148,9 +1148,14 @@ func (s *Store) rebuildUsageSummary(ctx context.Context) error {
 }
 
 func (s *Store) AddDeadLetter(ctx context.Context, payload string, parseErr error) error {
+	payload = internalusage.ScrubDiagnosticPayload(payload)
+	errorMessage := ""
+	if parseErr != nil {
+		errorMessage = internalusage.ScrubDiagnosticPayload(parseErr.Error())
+	}
 	_, err := s.executor(ctx).ExecContext(ctx,
 		`insert into dead_letter_events(payload, error, created_at_ms) values(?, ?, ?)`,
-		payload, parseErr.Error(), time.Now().UnixMilli(),
+		payload, errorMessage, time.Now().UnixMilli(),
 	)
 	return err
 }
@@ -1587,55 +1592,7 @@ func (s *Store) RecentDeadLetters(ctx context.Context, limit int) ([]DeadLetterS
 }
 
 func redactDeadLetterPayload(payload string) string {
-	payload = strings.TrimSpace(payload)
-	if payload == "" {
-		return ""
-	}
-	var value any
-	if err := json.Unmarshal([]byte(payload), &value); err != nil {
-		return payload
-	}
-	redacted, err := json.Marshal(redactDeadLetterValue(value))
-	if err != nil {
-		return payload
-	}
-	return string(redacted)
-}
-
-func redactDeadLetterValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(typed))
-		for key, child := range typed {
-			if isDeadLetterSecretKey(key) {
-				out[key] = "[redacted]"
-			} else {
-				out[key] = redactDeadLetterValue(child)
-			}
-		}
-		return out
-	case []any:
-		out := make([]any, 0, len(typed))
-		for _, child := range typed {
-			out = append(out, redactDeadLetterValue(child))
-		}
-		return out
-	default:
-		return value
-	}
-}
-
-func isDeadLetterSecretKey(key string) bool {
-	normalized := strings.ToLower(strings.ReplaceAll(key, "-", "_"))
-	return normalized == "api_key" ||
-		normalized == "apikey" ||
-		normalized == "authorization" ||
-		normalized == "cookie" ||
-		normalized == "set_cookie" ||
-		normalized == "access_token" ||
-		normalized == "refresh_token" ||
-		normalized == "token" ||
-		strings.Contains(normalized, "secret")
+	return internalusage.ScrubDiagnosticPayload(payload)
 }
 
 func (s *Store) UsageAggregates(ctx context.Context, options UsageAggregateOptions) ([]UsageAggregateBucket, error) {

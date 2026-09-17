@@ -67,6 +67,50 @@ func TestNormalizeRawExtractsDiagnosticsAndRedactsSecrets(t *testing.T) {
 	}
 }
 
+func TestNormalizeRawScrubsSensitiveValuesAndAllowListsResponseHeaders(t *testing.T) {
+	event, err := NormalizeRaw([]byte(`{
+		"timestamp":"2026-09-18T00:00:00Z",
+		"model":"gpt-test",
+		"message":"request used x-api-key=plain-secret-value",
+		"failed":true,
+		"fail":{"body":"{\"error\":{\"message\":\"upstream rejected Bearer abcdefghijklmnop and sk-abcdefghijklmno\"}}"},
+		"response_headers":{
+			"X-Api-Key":"header-secret-value",
+			"Authorization":"Bearer response-secret-value",
+			"X-Upstream-Request-Id":"request-id-1",
+			"Retry-After":"30",
+			"X-Unreviewed-Header":"must-not-persist"
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("NormalizeRaw() error = %v", err)
+	}
+	for _, secret := range []string{"plain-secret-value", "abcdefghijklmnop", "sk-abcdefghijklmno", "header-secret-value", "response-secret-value", "must-not-persist"} {
+		if strings.Contains(event.RawJSON, secret) || strings.Contains(event.ErrorMessage, secret) {
+			t.Fatalf("secret %q persisted in event: error=%q raw=%s", secret, event.ErrorMessage, event.RawJSON)
+		}
+	}
+	if !strings.Contains(event.ErrorMessage, "[redacted]") {
+		t.Fatalf("error message = %q, want redaction marker", event.ErrorMessage)
+	}
+	if !strings.Contains(event.RawJSON, "X-Upstream-Request-Id") || !strings.Contains(event.RawJSON, "Retry-After") {
+		t.Fatalf("safe response headers were not retained: %s", event.RawJSON)
+	}
+	if strings.Contains(event.RawJSON, "X-Unreviewed-Header") || strings.Contains(event.RawJSON, "X-Api-Key") {
+		t.Fatalf("non-allowlisted response headers persisted: %s", event.RawJSON)
+	}
+}
+
+func TestScrubDiagnosticPayloadHandlesInvalidJSON(t *testing.T) {
+	got := ScrubDiagnosticPayload("parse failed with Authorization: Bearer abcdefghijklmnop and api_key=sk-abcdefghijklmno")
+	if strings.Contains(got, "abcdefghijklmnop") || strings.Contains(got, "sk-abcdefghijklmno") {
+		t.Fatalf("ScrubDiagnosticPayload() = %q, want secrets removed", got)
+	}
+	if !strings.Contains(got, "[redacted]") {
+		t.Fatalf("ScrubDiagnosticPayload() = %q, want redaction marker", got)
+	}
+}
+
 func TestNormalizeRawUsesCanonicalTokenBreakdownAcrossProviderSemantics(t *testing.T) {
 	tests := []struct {
 		name           string

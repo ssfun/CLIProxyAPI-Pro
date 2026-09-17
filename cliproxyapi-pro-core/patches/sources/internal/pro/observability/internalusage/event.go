@@ -159,6 +159,9 @@ type Payload struct {
 }
 
 var endpointPattern = regexp.MustCompile(`^(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(\S+)`)
+var authorizationTextPattern = regexp.MustCompile("(?i)\\b(?:bearer|basic)\\s+[A-Za-z0-9._~+/=-]{6,}")
+var credentialTextPattern = regexp.MustCompile("\\b(?:sk-[A-Za-z0-9_-]{8,}|AIza[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{12,}|eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,})\\b")
+var labeledSecretTextPattern = regexp.MustCompile("(?i)\\b(?:x[-_])?(?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|authorization)\\b\\s*[:=]\\s*[\"']?[^\\s,\"';}]+")
 
 func NormalizeRaw(raw []byte) (Event, error) {
 	var payload any
@@ -216,7 +219,7 @@ func NormalizeRaw(raw []byte) (Event, error) {
 			errorMessage = readString(fail, "body")
 		}
 	}
-	errorMessage = summarizeErrorMessage(errorMessage)
+	errorMessage = scrubSensitiveText(summarizeErrorMessage(errorMessage))
 	upstreamRequestID := readString(record, "upstream_request_id")
 	if upstreamRequestID == "" {
 		upstreamRequestID = readHeaderValue(record, "x-upstream-request-id", "x-request-id", "openai-request-id", "anthropic-request-id", "cf-ray")
@@ -852,6 +855,10 @@ func redactValue(value any) any {
 				result[key] = "[redacted]"
 				continue
 			}
+			if normalizeHeaderName(key) == "response-headers" {
+				result[key] = redactResponseHeaders(child)
+				continue
+			}
 			result[key] = redactValue(child)
 		}
 		return result
@@ -861,6 +868,8 @@ func redactValue(value any) any {
 			result = append(result, redactValue(child))
 		}
 		return result
+	case string:
+		return scrubSensitiveText(item)
 	default:
 		return value
 	}
@@ -871,10 +880,62 @@ func isSecretKey(key string) bool {
 	return normalized == "api_key" ||
 		normalized == "apikey" ||
 		normalized == "authorization" ||
+		normalized == "proxy_authorization" ||
 		normalized == "cookie" ||
 		normalized == "set_cookie" ||
 		normalized == "access_token" ||
 		normalized == "refresh_token" ||
 		normalized == "token" ||
+		strings.HasSuffix(normalized, "_api_key") ||
 		strings.Contains(normalized, "secret")
+}
+
+func redactResponseHeaders(value any) any {
+	headers, ok := value.(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	result := make(map[string]any)
+	for key, child := range headers {
+		if isSafeResponseHeader(key) {
+			result[key] = redactValue(child)
+		}
+	}
+	return result
+}
+
+func isSafeResponseHeader(key string) bool {
+	normalized := normalizeHeaderName(key)
+	switch normalized {
+	case "content-type", "retry-after", "x-request-id", "x-upstream-request-id",
+		"openai-request-id", "anthropic-request-id", "cf-ray", "openai-processing-ms",
+		"x-envoy-upstream-service-time":
+		return true
+	default:
+		return strings.HasPrefix(normalized, "x-ratelimit-") ||
+			strings.HasPrefix(normalized, "ratelimit-") ||
+			strings.HasPrefix(normalized, "anthropic-ratelimit-")
+	}
+}
+
+func scrubSensitiveText(value string) string {
+	value = authorizationTextPattern.ReplaceAllString(value, "[redacted]")
+	value = credentialTextPattern.ReplaceAllString(value, "[redacted]")
+	return labeledSecretTextPattern.ReplaceAllString(value, "[redacted]")
+}
+
+func ScrubDiagnosticPayload(payload string) string {
+	payload = strings.TrimSpace(payload)
+	if payload == "" {
+		return ""
+	}
+	var value any
+	if err := json.Unmarshal([]byte(payload), &value); err != nil {
+		return scrubSensitiveText(payload)
+	}
+	redacted, err := json.Marshal(redactValue(value))
+	if err != nil {
+		return scrubSensitiveText(payload)
+	}
+	return string(redacted)
 }

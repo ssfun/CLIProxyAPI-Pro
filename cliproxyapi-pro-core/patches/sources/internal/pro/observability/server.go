@@ -20,6 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/pro/observability/internalusage"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/redisqueue"
 	probackup "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/backup"
 )
 
@@ -389,6 +390,16 @@ func usageEventPageLimit(requestedLimit int) int {
 	return requestedLimit
 }
 
+func usageSnapshotLimit(requestedLimit, configuredLimit int) int {
+	if configuredLimit <= 0 {
+		configuredLimit = 50000
+	}
+	if requestedLimit <= 0 || requestedLimit > configuredLimit {
+		return configuredLimit
+	}
+	return requestedLimit
+}
+
 func (s *Server) loadUsageEventPage(ctx context.Context, afterID int64, requestedLimit int) ([]internalusage.Event, int, bool, error) {
 	limit := usageEventPageLimit(requestedLimit)
 	events, err := s.store.EventsAfter(ctx, afterID, limit+1)
@@ -617,13 +628,7 @@ func (s *Server) handleUsageHistoryEvents(c *gin.Context) {
 }
 
 func (s *Server) handleUsage(c *gin.Context) {
-	limit := parseQueryInt(c, "limit", s.cfg.QueryLimit)
-	if limit <= 0 {
-		limit = s.cfg.QueryLimit
-	}
-	if limit <= 0 {
-		limit = 50000
-	}
+	limit := usageSnapshotLimit(parseQueryInt(c, "limit", s.cfg.QueryLimit), s.cfg.QueryLimit)
 	latestID, _, err := s.store.LatestCursor(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1668,16 +1673,24 @@ func (s *Server) handleStatus(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	queueStats := redisqueue.PersistenceStats()
 	c.JSON(http.StatusOK, gin.H{
-		"service":           "embedded-usage-service",
-		"dbPath":            s.cfg.DBPath,
-		"events":            events,
-		"deadLetters":       deadLetters,
-		"deadLetterSamples": deadLetterSamples,
-		"latestId":          latestID,
-		"latestTimestampMs": latestTimestamp,
-		"generation":        state.Generation,
-		"resetAtMs":         state.ResetAtMS,
+		"service":               "embedded-usage-service",
+		"dbPath":                s.cfg.DBPath,
+		"events":                events,
+		"deadLetters":           deadLetters,
+		"deadLetterSamples":     deadLetterSamples,
+		"latestId":              latestID,
+		"latestTimestampMs":     latestTimestamp,
+		"generation":            state.Generation,
+		"resetAtMs":             state.ResetAtMS,
+		"queueDepth":            queueStats.Depth,
+		"queueBytes":            queueStats.Bytes,
+		"queueOldestAgeMs":      queueStats.OldestAgeMS,
+		"droppedEventsTotal":    queueStats.DroppedEventsTotal,
+		"queueRetentionSeconds": queueStats.RetentionSeconds,
+		"queueMaxItems":         queueStats.MaxItems,
+		"queueMaxBytes":         queueStats.MaxBytes,
 	})
 }
 

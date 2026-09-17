@@ -104,8 +104,13 @@ func TestCollectorRetriesPoppedBatchAfterSQLiteFailure(t *testing.T) {
 	defer cancel()
 	redisqueue.SetEnabled(false)
 	redisqueue.SetEnabled(true)
+	redisqueue.SetPersistenceQueueConfig(3600, 1000, 1024*1024)
+	redisqueue.SetPersistenceEnabled(true)
 	redisqueue.SetUsageStatisticsEnabled(true)
-	t.Cleanup(func() { redisqueue.SetEnabled(false) })
+	t.Cleanup(func() {
+		redisqueue.SetPersistenceEnabled(false)
+		redisqueue.SetEnabled(false)
+	})
 	if _, err := store.db.ExecContext(ctx, `create trigger fail_usage_insert before insert on usage_events begin select raise(abort, 'forced usage write failure'); end`); err != nil {
 		t.Fatalf("create trigger error = %v", err)
 	}
@@ -139,4 +144,62 @@ func TestCollectorRetriesPoppedBatchAfterSQLiteFailure(t *testing.T) {
 	cancel()
 	<-done
 	t.Fatal("collector did not retry the popped batch after SQLite recovered")
+}
+
+func TestCollectorPersistsUsageWhileLegacySubscriberIsConnected(t *testing.T) {
+	store := openTestStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	redisqueue.SetEnabled(false)
+	redisqueue.SetEnabled(true)
+	redisqueue.SetPersistenceQueueConfig(3600, 1000, 1024*1024)
+	redisqueue.SetPersistenceEnabled(true)
+	redisqueue.SetUsageStatisticsEnabled(true)
+	t.Cleanup(func() {
+		redisqueue.SetPersistenceEnabled(false)
+		redisqueue.SetEnabled(false)
+	})
+
+	subscriber, unsubscribe := redisqueue.SubscribeUsage()
+	defer unsubscribe()
+	select {
+	case <-subscriber:
+	case <-time.After(time.Second):
+		t.Fatal("usage subscriber did not receive initial capability payload")
+	}
+
+	service := &Service{ctx: ctx, cfg: Config{BatchSize: 10, PollInterval: 5 * time.Millisecond}, store: store}
+	done := make(chan struct{})
+	go func() {
+		service.collect(ctx)
+		close(done)
+	}()
+
+	payload, err := json.Marshal(testUsageEvent(0, false, 10))
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	redisqueue.Enqueue(payload)
+	select {
+	case got := <-subscriber:
+		if string(got) != string(payload) {
+			t.Fatalf("subscriber payload = %s, want %s", got, payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("legacy subscriber did not receive usage payload")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		events, _, countErr := store.Counts(ctx)
+		if countErr == nil && events == 1 {
+			cancel()
+			<-done
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	t.Fatal("collector did not persist usage while legacy subscriber was connected")
 }

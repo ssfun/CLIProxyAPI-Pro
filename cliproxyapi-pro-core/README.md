@@ -69,6 +69,8 @@ Docker 镜像中的默认 SQLite 数据位置：
 
 `/usage/events` 和 `/usage/stream` 的 detail 会携带稳定事件 `id`，管理端用它进行增量去重和断线追平。usage 响应还会返回持久化的 `generation`；手动重置或保留期清理推进版本后，SSE 会发送 `reset` 事件，已打开页面据此替换完整快照。SSE 在事件成功写入 SQLite 后由进程内通知立即唤醒，仅保留低频 keepalive，不再为每个连接每秒轮询数据库。
 
+SQLite 采集使用独立于旧 usage pub/sub 和 pull queue 的有界 persistence queue，因此订阅者或其他 queue consumer 不会截走待持久化事件。`/usage/status` 会返回队列深度、字节数、最老事件年龄、容量和累计丢弃数；SQLite 长时间不可用导致超出保留期或容量时不会静默丢弃。
+
 detail 还会保留 upstream `ClientRequestMetadata` 提供的 `client_ip`、`x_forwarded_for` 和 `user_agent`。其中 `client_ip` 是直连 peer 地址，`x_forwarded_for` 是未经可信代理校验的原始转发链，只用于请求诊断与搜索，不参与访问控制、路由或请求保护判断。这些字段受日志保留策略管理，也会进入 usage JSONL/WebDAV 备份。
 
 历史 `/usage/events` 分页支持 `from_ms`、`to_ms`、`provider`、`model`、`auth_index`、`api_key_hash`、`status` 和 `search`。可选的逗号分隔 `search_auth_indexes` 会与原始事件文本 `search` 按 OR 联合，其他结构化过滤条件仍按 AND 叠加；首个响应返回的稳定快照 cursor 会在后续页面保留完整过滤范围。
@@ -331,7 +333,10 @@ Release workflow 会从 Core、models 和定制层三个不可变提交中取最
 - `USAGE_DB_PATH` — 默认 `USAGE_DATA_DIR/usage.sqlite`；未设置 `USAGE_DATA_DIR` 的原生二进制使用 `config.yaml` 同目录下的 `usage/usage.sqlite`。
 - `USAGE_BATCH_SIZE` — 默认 `100`。
 - `USAGE_POLL_INTERVAL_MS` — 默认 `500`。
-- `USAGE_QUERY_LIMIT` — 默认 `50000`。
+- `USAGE_QUERY_LIMIT` — 默认 `50000`；作为 `GET /usage` 单次详情返回量的服务端最大值，请求参数只能降低该值。
+- `USAGE_QUEUE_RETENTION_SECONDS` — 持久化采集队列保留时间，默认 `3600` 秒。
+- `USAGE_QUEUE_MAX_ITEMS` — 持久化采集队列最大事件数，默认 `100000`。
+- `USAGE_QUEUE_MAX_BYTES` — 持久化采集队列最大字节数，默认 `268435456`（256 MiB）。
 
 ### 账号巡检
 

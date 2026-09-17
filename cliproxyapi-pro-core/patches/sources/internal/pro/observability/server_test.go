@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/pro/observability/internalusage"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/redisqueue"
 	probackup "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/backup"
 )
 
@@ -780,6 +781,31 @@ func TestHandleUsageReturnsFullSummaryWithLimitedDetails(t *testing.T) {
 	}
 }
 
+func TestHandleUsageClampsRequestedLimitToConfiguredMaximum(t *testing.T) {
+	store := openTestStore(t)
+	insertTestUsageEvents(t, store,
+		testUsageEvent(0, false, 10),
+		testUsageEvent(1, false, 20),
+		testUsageEvent(2, false, 30),
+	)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	server := NewServer(Config{Enabled: true, QueryLimit: 2, BatchSize: 100}, store)
+	server.RegisterGinRoutes(router.Group("/usage"))
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/usage?limit=999999999", nil)
+	router.ServeHTTP(recorder, request)
+	payload := decodeUsagePayload(t, recorder)
+
+	if payload.DetailsCount != 2 || payload.DetailsLimit != 2 || !payload.DetailsLimited {
+		t.Fatalf("detail metadata = count:%d limit:%d limited:%v, want configured maximum 2", payload.DetailsCount, payload.DetailsLimit, payload.DetailsLimited)
+	}
+	if payload.TotalRequests != 3 {
+		t.Fatalf("total requests = %d, want full summary 3", payload.TotalRequests)
+	}
+}
+
 func TestHandleUsageEventsDetailsLimitedTracksRemainingRows(t *testing.T) {
 	store := openTestStore(t)
 	insertTestUsageEvents(t, store,
@@ -1454,6 +1480,16 @@ func TestUsageExportImportPreservesUpstreamDiagnostics(t *testing.T) {
 
 func TestHandleStatusIncludesDeadLetterSamples(t *testing.T) {
 	store := openTestStore(t)
+	redisqueue.SetEnabled(false)
+	redisqueue.SetEnabled(true)
+	redisqueue.SetPersistenceQueueConfig(3600, 1, 1024)
+	redisqueue.SetPersistenceEnabled(true)
+	redisqueue.Enqueue([]byte("dropped"))
+	redisqueue.Enqueue([]byte("queued"))
+	t.Cleanup(func() {
+		redisqueue.SetPersistenceEnabled(false)
+		redisqueue.SetEnabled(false)
+	})
 	if err := store.AddDeadLetter(context.Background(), "bad payload", errTestParse); err != nil {
 		t.Fatalf("AddDeadLetter() error = %v", err)
 	}
@@ -1468,11 +1504,18 @@ func TestHandleStatusIncludesDeadLetterSamples(t *testing.T) {
 	var payload struct {
 		DeadLetters       int64              `json:"deadLetters"`
 		DeadLetterSamples []DeadLetterSample `json:"deadLetterSamples"`
+		QueueDepth        int                `json:"queueDepth"`
+		QueueBytes        int64              `json:"queueBytes"`
+		QueueMaxItems     int64              `json:"queueMaxItems"`
+		DroppedEvents     uint64             `json:"droppedEventsTotal"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 	if payload.DeadLetters != 1 || len(payload.DeadLetterSamples) != 1 || payload.DeadLetterSamples[0].Error == "" {
 		t.Fatalf("status payload = %+v, want dead letter sample", payload)
+	}
+	if payload.QueueDepth != 1 || payload.QueueBytes != int64(len("queued")) || payload.QueueMaxItems != 1 || payload.DroppedEvents != 1 {
+		t.Fatalf("status queue payload = %+v, want observable queued event", payload)
 	}
 }

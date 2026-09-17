@@ -1173,6 +1173,34 @@ func TestRecentDeadLettersLimitsPayload(t *testing.T) {
 	if strings.Contains(samples[0].Payload, "sk-secret") || !strings.Contains(samples[0].Payload, "[redacted]") {
 		t.Fatalf("dead letter payload was not redacted: %s", samples[0].Payload)
 	}
+	var storedPayload string
+	if err := store.db.QueryRowContext(ctx, `select payload from dead_letter_events limit 1`).Scan(&storedPayload); err != nil {
+		t.Fatalf("query stored dead letter error = %v", err)
+	}
+	if strings.Contains(storedPayload, "sk-secret") || !strings.Contains(storedPayload, "[redacted]") {
+		t.Fatalf("dead letter was not redacted before storage: %s", storedPayload)
+	}
+}
+
+func TestAddDeadLetterScrubsInvalidPayloadAndErrorBeforeStorage(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	if err := store.AddDeadLetter(
+		ctx,
+		"invalid payload x-api-key=plain-secret-value",
+		errors.New("decode failed with Bearer abcdefghijklmnop"),
+	); err != nil {
+		t.Fatalf("AddDeadLetter() error = %v", err)
+	}
+	var payload, errorMessage string
+	if err := store.db.QueryRowContext(ctx, `select payload, error from dead_letter_events limit 1`).Scan(&payload, &errorMessage); err != nil {
+		t.Fatalf("query stored dead letter error = %v", err)
+	}
+	for _, secret := range []string{"plain-secret-value", "abcdefghijklmnop"} {
+		if strings.Contains(payload, secret) || strings.Contains(errorMessage, secret) {
+			t.Fatalf("dead letter secret %q reached storage: payload=%q error=%q", secret, payload, errorMessage)
+		}
+	}
 }
 
 func TestQuotaCacheRejectsStaleWritesAndTracksGeneration(t *testing.T) {

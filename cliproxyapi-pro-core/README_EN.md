@@ -69,6 +69,8 @@ The embedded service exposes these management routes:
 
 Details returned by `/usage/events` and `/usage/stream` include a stable event `id`, which the management UI uses for incremental deduplication and cursor catch-up. Usage responses also include a persistent `generation`; manual resets and retention cleanup advance it, and SSE emits a `reset` event so open pages replace their complete snapshot. SSE connections are awakened by an in-process notification after SQLite commits, with only a low-frequency keepalive instead of one database poll per connection per second.
 
+SQLite ingestion uses a bounded persistence queue that is independent from the legacy usage pub/sub and pull queue, so subscribers and other queue consumers cannot steal events awaiting persistence. `/usage/status` reports queue depth, bytes, oldest-event age, limits, and cumulative drops; retention or capacity loss during an extended SQLite outage is therefore observable.
+
 Details also preserve `client_ip`, `x_forwarded_for`, and `user_agent` from upstream `ClientRequestMetadata`. `client_ip` is the direct peer address, while `x_forwarded_for` is the raw forwarding chain without trusted-proxy validation. These fields are for diagnostics and search only and never participate in access control, routing, or request protection. They follow the usage retention policy and are included in usage JSONL/WebDAV backups.
 
 Historical `/usage/events` paging accepts `from_ms`, `to_ms`, `provider`, `model`, `auth_index`, `api_key_hash`, `status`, and `search`. The optional comma-separated `search_auth_indexes` is ORed with raw event-text `search`, while the other structured filters remain AND conditions. The first response returns a stable snapshot cursor that carries the complete filter scope across later pages.
@@ -323,7 +325,10 @@ Release workflows derive `SOURCE_DATE_EPOCH` from the newest immutable Core, mod
 - `USAGE_DB_PATH` — defaults to `USAGE_DATA_DIR/usage.sqlite`; native binaries without `USAGE_DATA_DIR` use `usage/usage.sqlite` beside `config.yaml`.
 - `USAGE_BATCH_SIZE` — default `100`.
 - `USAGE_POLL_INTERVAL_MS` — default `500`.
-- `USAGE_QUERY_LIMIT` — default `50000`.
+- `USAGE_QUERY_LIMIT` — default `50000`; the server-side maximum detail count for one `GET /usage` response. A request may only lower it.
+- `USAGE_QUEUE_RETENTION_SECONDS` — persistence-ingestion queue retention, default `3600` seconds.
+- `USAGE_QUEUE_MAX_ITEMS` — maximum persistence-ingestion queue events, default `100000`.
+- `USAGE_QUEUE_MAX_BYTES` — maximum persistence-ingestion queue bytes, default `268435456` (256 MiB).
 
 ### Account inspection
 

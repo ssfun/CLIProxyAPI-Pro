@@ -34,6 +34,7 @@ internal/pluginhost/host_model_stream_callbacks.go
 internal/pluginhost/snapshot.go
 internal/pluginstore/auth.go
 internal/redisqueue/plugin.go
+internal/redisqueue/queue.go
 internal/runtime/executor/claude_executor_auth.go
 internal/runtime/executor/claude_executor_execute.go
 internal/runtime/executor/claude_executor_stream.go

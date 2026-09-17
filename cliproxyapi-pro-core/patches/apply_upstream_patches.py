@@ -276,6 +276,7 @@ new_customization_paths = (
 	'internal/pro/observability/config_test.go',
 	'internal/redisqueue/speed_test.go',
 	'internal/redisqueue/api_key_policy_usage_test.go',
+	'internal/redisqueue/persistence_queue_test.go',
 	'sdk/api/handlers/handlers_speed_test.go',
 	'sdk/api/handlers/api_key_policy_test.go',
 	'sdk/api/handlers/api_key_policy_context_test.go',
@@ -2971,6 +2972,7 @@ for speed_source in (
 ):
     queue_go_source(speed_source)
 queue_go_source('internal/redisqueue/api_key_policy_usage_test.go')
+queue_go_source('internal/redisqueue/persistence_queue_test.go')
 
 handlers_source = ROOT / 'sdk/api/handlers/handlers.go'
 add_go_import(handlers_source, '"' + import_path('internal/logging') + '"\n', '\tapikeypolicy "' + import_path('internal/pro/apikeypolicy') + '"\n')
@@ -4790,6 +4792,280 @@ write(
     re.sub(r'github\.com/router-for-me/CLIProxyAPI/v\d+', MODULE_PATH, read_text(patch_dir / 'auth_account_policy_test.go')),
 )
 
+redisqueue_queue = ROOT / 'internal/redisqueue/queue.go'
+replace_once(
+    redisqueue_queue,
+    '''\tdefaultRetentionSeconds int64 = 60
+\tmaxRetentionSeconds     int64 = 3600
+\tusageSubscriberBuffer         = 256
+''',
+    '''\tdefaultRetentionSeconds            int64 = 60
+\tmaxRetentionSeconds                int64 = 3600
+\tdefaultPersistenceRetentionSeconds int64 = 3600
+\tdefaultPersistenceMaxItems         int64 = 100000
+\tdefaultPersistenceMaxBytes         int64 = 256 * 1024 * 1024
+\tusageSubscriberBuffer                    = 256
+''',
+    'defaultPersistenceRetentionSeconds',
+)
+insert_before(
+    redisqueue_queue,
+    'type queue struct {\n',
+    '''type PersistenceQueueStats struct {
+\tDepth              int
+\tBytes              int64
+\tOldestAgeMS        int64
+\tDroppedEventsTotal uint64
+\tRetentionSeconds   int64
+\tMaxItems           int64
+\tMaxBytes           int64
+}
+
+type persistenceQueue struct {
+\tmu      sync.Mutex
+\titems   []queueItem
+\thead    int
+\tbytes   int64
+\tdropped uint64
+}
+
+''',
+    'type PersistenceQueueStats struct',
+)
+replace_once(
+    redisqueue_queue,
+    '''\tenabled          atomic.Bool
+\tretentionSeconds atomic.Int64
+\tglobal           queue
+\terrorGlobal      queue
+''',
+    '''\tenabled                     atomic.Bool
+\tretentionSeconds            atomic.Int64
+\tpersistenceEnabled          atomic.Bool
+\tpersistenceRetentionSeconds atomic.Int64
+\tpersistenceMaxItems         atomic.Int64
+\tpersistenceMaxBytes         atomic.Int64
+\tglobal                      queue
+\terrorGlobal                 queue
+\tpersistenceGlobal           persistenceQueue
+''',
+    'persistenceRetentionSeconds atomic.Int64',
+)
+replace_once(
+    redisqueue_queue,
+    '''func init() {
+\tretentionSeconds.Store(defaultRetentionSeconds)
+}
+''',
+    '''func init() {
+\tretentionSeconds.Store(defaultRetentionSeconds)
+\tpersistenceRetentionSeconds.Store(defaultPersistenceRetentionSeconds)
+\tpersistenceMaxItems.Store(defaultPersistenceMaxItems)
+\tpersistenceMaxBytes.Store(defaultPersistenceMaxBytes)
+}
+''',
+    'persistenceRetentionSeconds.Store(defaultPersistenceRetentionSeconds)',
+)
+replace_once(
+    redisqueue_queue,
+    '''\tif !value {
+\t\tglobal.clear()
+\t\terrorGlobal.clear()
+\t}
+''',
+    '''\tif !value {
+\t\tglobal.clear()
+\t\terrorGlobal.clear()
+\t\tpersistenceGlobal.clear()
+\t}
+''',
+    'persistenceGlobal.clear()',
+)
+insert_before(
+    redisqueue_queue,
+    'func Enqueue(payload []byte) {\n',
+    '''func SetPersistenceEnabled(value bool) {
+\tpersistenceEnabled.Store(value)
+\tif !value {
+\t\tpersistenceGlobal.clear()
+\t}
+}
+
+func SetPersistenceQueueConfig(retention int, maxItems int, maxBytes int64) {
+\tnormalizedRetention := int64(retention)
+\tif normalizedRetention <= 0 {
+\t\tnormalizedRetention = defaultPersistenceRetentionSeconds
+\t}
+\tnormalizedMaxItems := int64(maxItems)
+\tif normalizedMaxItems <= 0 {
+\t\tnormalizedMaxItems = defaultPersistenceMaxItems
+\t}
+\tif maxBytes <= 0 {
+\t\tmaxBytes = defaultPersistenceMaxBytes
+\t}
+\tpersistenceRetentionSeconds.Store(normalizedRetention)
+\tpersistenceMaxItems.Store(normalizedMaxItems)
+\tpersistenceMaxBytes.Store(maxBytes)
+}
+
+func PopOldestPersistence(count int) [][]byte {
+\tif !Enabled() || !persistenceEnabled.Load() || count <= 0 {
+\t\treturn nil
+\t}
+\treturn persistenceGlobal.popOldest(count)
+}
+
+func PersistenceStats() PersistenceQueueStats {
+\treturn persistenceGlobal.stats()
+}
+
+''',
+    'func SetPersistenceEnabled(value bool)',
+)
+replace_once(
+    redisqueue_queue,
+    '''\tif len(payload) == 0 {
+\t\treturn
+\t}
+\tif global.publishToSubscribers(payload) {
+''',
+    '''\tif len(payload) == 0 {
+\t\treturn
+\t}
+\tif persistenceEnabled.Load() {
+\t\tpersistenceGlobal.enqueue(payload)
+\t}
+\tif global.publishToSubscribers(payload) {
+''',
+    'persistenceGlobal.enqueue(payload)',
+)
+insert_before(
+    redisqueue_queue,
+    'func (q *queue) clear() {\n',
+    '''func (q *persistenceQueue) clear() {
+\tq.mu.Lock()
+\tq.items = nil
+\tq.head = 0
+\tq.bytes = 0
+\tq.dropped = 0
+\tq.mu.Unlock()
+}
+
+func (q *persistenceQueue) enqueue(payload []byte) {
+\tnow := time.Now()
+\tcloned := append([]byte(nil), payload...)
+
+\tq.mu.Lock()
+\tdefer q.mu.Unlock()
+\tq.pruneLocked(now)
+\tq.items = append(q.items, queueItem{enqueuedAt: now, payload: cloned})
+\tq.bytes += int64(len(cloned))
+\tq.enforceCapacityLocked()
+\tq.maybeCompactLocked()
+}
+
+func (q *persistenceQueue) popOldest(count int) [][]byte {
+\tnow := time.Now()
+\tq.mu.Lock()
+\tdefer q.mu.Unlock()
+\tq.pruneLocked(now)
+\tavailable := len(q.items) - q.head
+\tif available <= 0 {
+\t\tq.resetItemsLocked()
+\t\treturn nil
+\t}
+\tif count > available {
+\t\tcount = available
+\t}
+\tout := make([][]byte, 0, count)
+\tfor index := 0; index < count; index++ {
+\t\titem := q.items[q.head+index]
+\t\tout = append(out, item.payload)
+\t\tq.bytes -= int64(len(item.payload))
+\t}
+\tq.head += count
+\tq.maybeCompactLocked()
+\treturn out
+}
+
+func (q *persistenceQueue) stats() PersistenceQueueStats {
+\tnow := time.Now()
+\tq.mu.Lock()
+\tdefer q.mu.Unlock()
+\tq.pruneLocked(now)
+\tdepth := len(q.items) - q.head
+\toldestAgeMS := int64(0)
+\tif depth > 0 {
+\t\toldestAgeMS = now.Sub(q.items[q.head].enqueuedAt).Milliseconds()
+\t\tif oldestAgeMS < 0 {
+\t\t\toldestAgeMS = 0
+\t\t}
+\t}
+\treturn PersistenceQueueStats{
+\t\tDepth:              depth,
+\t\tBytes:              q.bytes,
+\t\tOldestAgeMS:        oldestAgeMS,
+\t\tDroppedEventsTotal: q.dropped,
+\t\tRetentionSeconds:   persistenceRetentionSeconds.Load(),
+\t\tMaxItems:           persistenceMaxItems.Load(),
+\t\tMaxBytes:           persistenceMaxBytes.Load(),
+\t}
+}
+
+func (q *persistenceQueue) pruneLocked(now time.Time) {
+\tretention := persistenceRetentionSeconds.Load()
+\tif retention <= 0 {
+\t\tretention = defaultPersistenceRetentionSeconds
+\t}
+\tcutoff := now.Add(-time.Duration(retention) * time.Second)
+\tfor q.head < len(q.items) && q.items[q.head].enqueuedAt.Before(cutoff) {
+\t\tq.dropHeadLocked()
+\t}
+\tq.maybeCompactLocked()
+}
+
+func (q *persistenceQueue) enforceCapacityLocked() {
+\tmaxItems := persistenceMaxItems.Load()
+\tmaxBytes := persistenceMaxBytes.Load()
+\tfor q.head < len(q.items) && ((maxItems > 0 && int64(len(q.items)-q.head) > maxItems) || (maxBytes > 0 && q.bytes > maxBytes)) {
+\t\tq.dropHeadLocked()
+\t}
+}
+
+func (q *persistenceQueue) dropHeadLocked() {
+\tif q.head >= len(q.items) {
+\t\treturn
+\t}
+\tq.bytes -= int64(len(q.items[q.head].payload))
+\tq.head++
+\tq.dropped++
+}
+
+func (q *persistenceQueue) maybeCompactLocked() {
+\tif q.head == 0 {
+\t\treturn
+\t}
+\tif q.head >= len(q.items) {
+\t\tq.resetItemsLocked()
+\t\treturn
+\t}
+\tif q.head < 1024 && q.head*2 < len(q.items) {
+\t\treturn
+\t}
+\tq.items = append([]queueItem(nil), q.items[q.head:]...)
+\tq.head = 0
+}
+
+func (q *persistenceQueue) resetItemsLocked() {
+\tq.items = nil
+\tq.head = 0
+\tq.bytes = 0
+}
+
+''',
+    'func (q *persistenceQueue) clear()',
+)
+
 redisqueue_plugin = ROOT / 'internal/redisqueue/plugin.go'
 add_go_import(
     redisqueue_plugin,
@@ -6018,8 +6294,10 @@ format_go_writes([
     'internal/pluginstore/auth.go',
     'internal/pluginstore/gitstore_auth_test.go',
     'internal/redisqueue/plugin.go',
+    'internal/redisqueue/queue.go',
     'internal/redisqueue/speed_test.go',
 	'internal/redisqueue/api_key_policy_usage_test.go',
+	'internal/redisqueue/persistence_queue_test.go',
     'internal/requestmeta/observer.go',
     'internal/requestmeta/observer_test.go',
     'internal/runtime/executor/helps/logging_helpers.go',
