@@ -140,13 +140,7 @@ func newInspectionQuotaHold(auth *coreauth.Auth, result *accountInspectionResult
 	if !settings.AutoExecuteQuotaRecoveryEnable {
 		return hold
 	}
-	hold.RetryAt = result.QuotaResetAt
-	now := time.Now()
-	if hold.RetryAt <= now.UnixMilli() {
-		hold.RetryAt = now.Add(prorouting.RecoveryBackoff(authIDForHold(auth), 0)).UnixMilli()
-	} else {
-		hold.RetryAt += int64(prorouting.RecoveryBackoff(authIDForHold(auth), 0)-time.Minute)/int64(time.Millisecond) + 1000
-	}
+	hold.RetryAt = prorouting.ScheduleRecheckAt(result.QuotaResetAt, authIDForHold(auth), time.Now())
 	return hold
 }
 
@@ -228,10 +222,7 @@ func (s *accountInspectionScheduler) recoverQuotaAccount(ctx context.Context, au
 	recovered := result.Error == "" && result.ErrorCode == "" && result.QuotaKnown && result.UsedPercent != nil && proinspection.QuotaRecovered(*result.UsedPercent, threshold)
 	if !recovered {
 		hold.Failures++
-		hold.RetryAt = time.Now().Add(prorouting.RecoveryBackoff(auth.ID, hold.Failures)).UnixMilli()
-		if result.IsQuota && result.QuotaResetAt > hold.RetryAt {
-			hold.RetryAt = result.QuotaResetAt + 1000
-		}
+		hold.RetryAt = prorouting.NextRecheckAt(result.QuotaResetAt, auth.ID, hold.Failures, time.Now())
 		next = &hold
 	}
 	if err := s.inspectionAuthManager().ChangeQuotaProtection(ctx, current, inspectionQuotaSource, hold.Revision, next); err != nil {
@@ -301,20 +292,38 @@ func coveredByUpstreamQuota(auth *coreauth.Auth, result *accountInspectionResult
 			return true
 		}
 	}
-	model := strings.TrimSpace(result.QuotaModel)
-	if model == "" {
+	if strings.TrimSpace(result.QuotaModel) == "" || len(auth.ModelStates) == 0 {
 		return false
 	}
-	state := auth.ModelStates[model]
-	if state == nil {
-		return false
+	coveredUntil := time.Time{}
+	for _, pattern := range strings.Split(result.QuotaModel, ",") {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		patternCovered := false
+		for key, state := range auth.ModelStates {
+			if state == nil || !prorouting.ModelMatchesProtection(pattern, key) {
+				continue
+			}
+			if !state.Unavailable && !state.Quota.Exceeded {
+				return false
+			}
+			next := state.NextRetryAfter
+			if state.Quota.NextRecoverAt.After(next) {
+				next = state.Quota.NextRecoverAt
+			}
+			if !next.After(now) {
+				return false
+			}
+			patternCovered = true
+			if coveredUntil.IsZero() || next.Before(coveredUntil) {
+				coveredUntil = next
+			}
+		}
+		if !patternCovered {
+			return false
+		}
 	}
-	if !state.Unavailable && !state.Quota.Exceeded {
-		return false
-	}
-	next := state.NextRetryAfter
-	if state.Quota.NextRecoverAt.After(next) {
-		next = state.Quota.NextRecoverAt
-	}
-	return next.After(now) && (result.QuotaResetAt <= 0 || next.UnixMilli() >= result.QuotaResetAt)
+	return !coveredUntil.IsZero() && (result.QuotaResetAt <= 0 || coveredUntil.UnixMilli() >= result.QuotaResetAt)
 }

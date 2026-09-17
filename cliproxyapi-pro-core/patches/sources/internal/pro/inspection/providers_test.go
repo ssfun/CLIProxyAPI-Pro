@@ -150,3 +150,38 @@ func TestQuotaRecoveryUsesOnlyBlockingWindows(t *testing.T) {
 		t.Fatal("credential limit incorrectly scoped to one model")
 	}
 }
+
+func TestQuotaModelScopeUsesProviderWindows(t *testing.T) {
+	if got := QuotaModelScope("codex", []map[string]any{
+		{"id": "five-hour", "usedPercent": 100.0},
+		{"id": "gpt-5-codex-weekly-0", "labelParams": map[string]any{"name": "gpt-5-codex"}, "usedPercent": 100.0},
+	}, 95); got != "" {
+		t.Fatalf("shared five-hour plus model window must stay credential-wide, got %q", got)
+	}
+	if got := QuotaModelScope("codex", []map[string]any{
+		{"id": "gpt-5-codex-weekly-0", "labelParams": map[string]any{"name": "gpt-5-codex"}, "usedPercent": 100.0},
+	}, 95); got != "gpt-5-codex*" {
+		t.Fatalf("codex additional window scope = %q", got)
+	}
+	if got := QuotaModelScope("kimi", []map[string]any{
+		{"label": "kimi-k2.5", "used": 100, "limit": 100},
+	}, 95); got != "kimi-k2.5*" {
+		t.Fatalf("kimi model scope = %q", got)
+	}
+	if got := QuotaModelScope("kimi", []map[string]any{
+		{"label": "Weekly", "used": 100, "limit": 100},
+	}, 95); got != "" {
+		t.Fatalf("kimi period window must stay credential-wide, got %q", got)
+	}
+	groups := []map[string]any{
+		{"id": "claude-gpt", "buckets": []map[string]any{{"remainingFraction": 0.0}}},
+		{"id": "gemini", "buckets": []map[string]any{{"remainingFraction": 0.8}}},
+	}
+	if got := AntigravityQuotaModel(groups, AntigravityQuotaModeClaudeGPT, 95); got != "claude-*,gpt-*" {
+		t.Fatalf("antigravity claude-gpt scope = %q", got)
+	}
+	groups[1]["buckets"] = []map[string]any{{"remainingFraction": 0.0}}
+	if got := AntigravityQuotaModel(groups, AntigravityQuotaModeMaxUsed, 95); got != "claude-*,gpt-*,gemini-*" {
+		t.Fatalf("antigravity all groups scope = %q", got)
+	}
+}

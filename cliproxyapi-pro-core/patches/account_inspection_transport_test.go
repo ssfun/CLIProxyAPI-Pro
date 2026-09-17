@@ -1092,7 +1092,7 @@ func TestInspectionQuotaProtectionSkipsWhenUpstreamAlreadyCovers(t *testing.T) {
 	}
 	auth.Quota = coreauth.QuotaState{}
 	auth.ModelStates = map[string]*coreauth.ModelState{
-		"claude-opus-*": {Unavailable: true, NextRetryAfter: now.Add(time.Hour)},
+		"claude-opus-4-6": {Unavailable: true, NextRetryAfter: now.Add(time.Hour)},
 	}
 	result.QuotaModel = "claude-opus-*"
 	if !coveredByUpstreamQuota(auth, result) {

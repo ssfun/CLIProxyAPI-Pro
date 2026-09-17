@@ -69,18 +69,48 @@ func WithoutLegacyRoutingQuotaProtections(protections map[string]QuotaProtection
 }
 
 func ProtectionBlocks(p QuotaProtection, model string, now time.Time) bool {
-	if p.Model != "" {
-		matches := false
-		for _, pattern := range strings.Split(p.Model, ",") {
-			if ok, _ := path.Match(strings.ToLower(pattern), strings.ToLower(model)); ok {
-				matches = true
-			}
-		}
-		if !matches {
-			return false
-		}
+	if p.Model != "" && !ModelMatchesProtection(p.Model, model) {
+		return false
 	}
 	return p.Recheck || p.RetryAt == 0 || p.RetryAt > now.UnixMilli()
+}
+
+func ModelMatchesProtection(patterns, model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return false
+	}
+	for _, pattern := range strings.Split(patterns, ",") {
+		pattern = strings.ToLower(strings.TrimSpace(pattern))
+		if pattern == "" {
+			continue
+		}
+		if ok, _ := path.Match(pattern, model); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func RecoveryJitter(authID string) time.Duration {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(authID))
+	return time.Duration(h.Sum32()%15000) * time.Millisecond
+}
+
+func ScheduleRecheckAt(resetAt int64, authID string, now time.Time) int64 {
+	jitter := RecoveryJitter(authID)
+	if resetAt > now.UnixMilli() {
+		return resetAt + int64(jitter/time.Millisecond)
+	}
+	return now.Add(time.Minute + jitter).UnixMilli()
+}
+
+func NextRecheckAt(resetAt int64, authID string, failures int, now time.Time) int64 {
+	if resetAt > now.UnixMilli() {
+		return ScheduleRecheckAt(resetAt, authID, now)
+	}
+	return now.Add(RecoveryBackoff(authID, failures)).UnixMilli()
 }
 
 // Bound unknown resets and failures; stable per-account jitter spreads wakeups.
@@ -95,7 +125,5 @@ func RecoveryBackoff(authID string, failures int) time.Duration {
 	if delay > 30*time.Minute {
 		delay = 30 * time.Minute
 	}
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(authID))
-	return delay + time.Duration(h.Sum32()%15000)*time.Millisecond
+	return delay + RecoveryJitter(authID)
 }

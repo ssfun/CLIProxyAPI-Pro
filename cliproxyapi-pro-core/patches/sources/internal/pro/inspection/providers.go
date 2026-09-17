@@ -933,6 +933,9 @@ func maxFloatPtr(values []float64) *float64 {
 }
 
 func firstAny(data map[string]any, keys ...string) any {
+	if data == nil {
+		return nil
+	}
 	for _, key := range keys {
 		if value, ok := data[key]; ok {
 			return value
@@ -1062,19 +1065,7 @@ func normalizeFraction(value float64) float64 {
 func WithQuotaWindows(decision Decision, windows []map[string]any, threshold float64) Decision {
 	decision.QuotaKnown = decision.UsedPercent != nil
 	for _, window := range windows {
-		used, ok := floatFromAny(window["usedPercent"])
-		if !ok {
-			if remaining, found := floatFromAny(window["remainingFraction"]); found {
-				used, ok = (1-remaining)*100, true
-			}
-		}
-		if !ok {
-			if limit, found := floatFromAny(window["limit"]); found && limit > 0 {
-				if value, found := floatFromAny(window["used"]); found {
-					used, ok = value/limit*100, true
-				}
-			}
-		}
+		used, ok := windowUsedPercent(window)
 		if !ok || used < threshold {
 			continue
 		}
@@ -1107,12 +1098,98 @@ func AntigravityBlockingWindows(groups []map[string]any, mode AntigravityQuotaMo
 
 // Only provider-defined, unambiguous model windows narrow the routing scope.
 func ClaudeQuotaModel(windows []map[string]any, threshold float64) string {
-	var scopes []string
+	return QuotaModelScope("claude", windows, threshold)
+}
+
+func QuotaModelScope(provider string, windows []map[string]any, threshold float64) string {
+	exhausted := exhaustedQuotaWindows(windows, threshold)
+	if len(exhausted) == 0 {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "claude":
+		return claudeQuotaModelFromWindows(exhausted)
+	case "codex":
+		return codexQuotaModelFromWindows(exhausted)
+	case "kimi":
+		return kimiQuotaModelFromWindows(exhausted)
+	default:
+		return ""
+	}
+}
+
+func AntigravityQuotaModel(groups []map[string]any, mode AntigravityQuotaMode, threshold float64) string {
+	var patterns []string
+	seen := map[string]struct{}{}
+	for _, group := range groups {
+		if mode == AntigravityQuotaModeClaudeGPT && !isAntigravityClaudeGptGroup(group) {
+			continue
+		}
+		if len(exhaustedQuotaWindows(anyMapSlice(group["buckets"]), threshold)) == 0 {
+			continue
+		}
+		id := normalizeWindowID(stringFromProviderValue(group["id"]))
+		if id == "" {
+			id = canonicalAntigravityGroupID(stringFromProviderValue(group["label"]), stringFromProviderValue(group["description"]))
+		}
+		pattern := antigravityGroupQuotaPattern(id)
+		if pattern == "" {
+			return ""
+		}
+		if _, ok := seen[pattern]; ok {
+			continue
+		}
+		seen[pattern] = struct{}{}
+		patterns = append(patterns, pattern)
+	}
+	return strings.Join(patterns, ",")
+}
+
+func antigravityGroupQuotaPattern(id string) string {
+	switch normalizeWindowID(id) {
+	case "claude-gpt":
+		return "claude-*,gpt-*"
+	case "gemini":
+		return "gemini-*"
+	default:
+		return ""
+	}
+}
+
+func exhaustedQuotaWindows(windows []map[string]any, threshold float64) []map[string]any {
+	out := make([]map[string]any, 0)
 	for _, window := range windows {
-		used, ok := floatFromAny(window["usedPercent"])
+		used, ok := windowUsedPercent(window)
 		if !ok || used < threshold {
 			continue
 		}
+		out = append(out, window)
+	}
+	return out
+}
+
+func windowUsedPercent(window map[string]any) (float64, bool) {
+	used, ok := floatFromAny(window["usedPercent"])
+	if ok {
+		return used, true
+	}
+	if remaining, found := floatFromAny(window["remainingFraction"]); found {
+		return (1 - remaining) * 100, true
+	}
+	limit, found := floatFromAny(window["limit"])
+	if !found || limit <= 0 {
+		return 0, false
+	}
+	value, found := floatFromAny(window["used"])
+	if !found {
+		return 0, false
+	}
+	return value / limit * 100, true
+}
+
+func claudeQuotaModelFromWindows(windows []map[string]any) string {
+	var scopes []string
+	for _, window := range windows {
 		switch stringFromProviderValue(window["id"]) {
 		case "seven-day-opus":
 			scopes = append(scopes, "claude-opus-*")
@@ -1122,5 +1199,116 @@ func ClaudeQuotaModel(windows []map[string]any, threshold float64) string {
 			return ""
 		}
 	}
-	return strings.Join(scopes, ",")
+	return uniqueJoinedPatterns(scopes)
+}
+
+func codexQuotaModelFromWindows(windows []map[string]any) string {
+	var scopes []string
+	for _, window := range windows {
+		pattern := codexWindowQuotaPattern(window)
+		if pattern == "" {
+			return ""
+		}
+		scopes = append(scopes, pattern)
+	}
+	return uniqueJoinedPatterns(scopes)
+}
+
+func kimiQuotaModelFromWindows(windows []map[string]any) string {
+	var scopes []string
+	for _, window := range windows {
+		pattern := modelPatternFromLabel(firstNonEmptyStringValue(
+			stringFromProviderValue(window["label"]),
+			stringFromProviderValue(window["name"]),
+			stringFromProviderValue(window["id"]),
+		))
+		if pattern == "" {
+			return ""
+		}
+		scopes = append(scopes, pattern)
+	}
+	return uniqueJoinedPatterns(scopes)
+}
+
+func codexWindowQuotaPattern(window map[string]any) string {
+	id := stringFromProviderValue(window["id"])
+	if isCredentialQuotaWindowID(id) {
+		return ""
+	}
+	params, _ := window["labelParams"].(map[string]any)
+	name := firstNonEmptyStringValue(
+		stringFromProviderValue(firstAny(params, "name")),
+		strings.TrimSuffix(strings.TrimSuffix(id, "-weekly"), "-monthly"),
+	)
+	if isCredentialQuotaWindowID(name) {
+		return ""
+	}
+	return modelPatternFromLabel(name)
+}
+
+func isCredentialQuotaWindowID(value string) bool {
+	id := normalizeWindowID(value)
+	switch id {
+	case "", "five-hour", "weekly", "monthly", "seven-day", "seven-day-oauth-apps", "seven-day-cowork", "iguana-necktie", "code-review-five-hour", "code-review-weekly", "code-review-monthly":
+		return true
+	}
+	if strings.HasPrefix(id, "code-review-") {
+		return true
+	}
+	if strings.Contains(id, "five-hour") || strings.Contains(id, "primary-window") || strings.Contains(id, "secondary-window") {
+		if modelPatternFromLabel(id) == "" {
+			return true
+		}
+	}
+	return false
+}
+
+func modelPatternFromLabel(value string) string {
+	raw := strings.ToLower(strings.TrimSpace(value))
+	if raw == "" {
+		return ""
+	}
+	normalized := normalizeWindowID(raw)
+	if isPeriodQuotaLabel(normalized) || isPeriodQuotaLabel(raw) {
+		return ""
+	}
+	if strings.Contains(normalized, "five-hour") || strings.Contains(normalized, "code-review") {
+		return ""
+	}
+	if !(strings.Contains(raw, "gpt") || strings.Contains(raw, "codex") || strings.Contains(raw, "o1") || strings.Contains(raw, "o3") || strings.Contains(raw, "o4") || strings.Contains(raw, "kimi") || strings.Contains(raw, "moonshot") || strings.Contains(raw, "claude") || strings.Contains(raw, "gemini") || strings.Contains(raw, "grok")) {
+		return ""
+	}
+	name := strings.Trim(raw, " *")
+	if name == "" {
+		return ""
+	}
+	if strings.ContainsAny(name, " *?") {
+		return name
+	}
+	return name + "*"
+}
+
+func isPeriodQuotaLabel(value string) bool {
+	switch normalizeWindowID(value) {
+	case "weekly", "daily", "monthly", "5h", "5-hour", "five-hour", "3-hour", "hour", "hours", "day", "days", "week", "weeks", "month", "months":
+		return true
+	}
+	return false
+}
+
+func uniqueJoinedPatterns(values []string) string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return strings.Join(out, ",")
 }

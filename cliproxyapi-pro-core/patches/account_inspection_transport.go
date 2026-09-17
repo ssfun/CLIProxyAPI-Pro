@@ -201,6 +201,7 @@ func (s *accountInspectionScheduler) inspectAntigravity(ctx context.Context, acc
 		s.persistQuotaState(ctx, account, quotaSuccessState(quotaState))
 		used := proinspection.AntigravityUsedPercent(groups, settings.AntigravityQuotaMode)
 		decision := proinspection.WithQuotaWindows(quotaDecision(account, used, used != nil, settings.UsedPercentThreshold), proinspection.AntigravityBlockingWindows(groups, settings.AntigravityQuotaMode), settings.UsedPercentThreshold)
+		decision.QuotaModel = proinspection.AntigravityQuotaModel(groups, settings.AntigravityQuotaMode, settings.UsedPercentThreshold)
 		if settings.AntigravityDeepProbeEnabled && proinspection.ShouldAntigravityDeepProbe(decision) {
 			return s.applyAntigravityDeepProbe(ctx, account, settings, decision, status)
 		}
@@ -395,6 +396,7 @@ func (s *accountInspectionScheduler) inspectCodex(ctx context.Context, account a
 		s.persistQuotaState(ctx, account, quotaSuccessState(codexQuotaStateValues(account.Auth, payload, windows, resp.Body)))
 	}
 	decision := proinspection.WithQuotaWindows(codexDecision(account, resp.StatusCode, used, isQuota, settings.UsedPercentThreshold), windows, settings.UsedPercentThreshold)
+	decision.QuotaModel = proinspection.QuotaModelScope("codex", windows, settings.UsedPercentThreshold)
 	if proinspection.IsAccountErrorStatus(resp.StatusCode) {
 		decision = proinspection.WithHTTPErrorDetail(decision, resp.Body)
 	}
@@ -456,7 +458,9 @@ func (s *accountInspectionScheduler) inspectKimi(ctx context.Context, account ac
 		return accountInspectionDecision{}, status, err
 	}
 	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"rows": rows, "rawShapeHash": proquota.JSONShapeHash(resp.Body)}))
-	return proinspection.WithQuotaWindows(quotaDecision(account, used, len(rows) > 0, settings.UsedPercentThreshold), rows, settings.UsedPercentThreshold), status, nil
+	decision := proinspection.WithQuotaWindows(quotaDecision(account, used, len(rows) > 0, settings.UsedPercentThreshold), rows, settings.UsedPercentThreshold)
+	decision.QuotaModel = proinspection.QuotaModelScope("kimi", rows, settings.UsedPercentThreshold)
+	return decision, status, nil
 }
 
 func (s *accountInspectionScheduler) inspectXAI(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) (accountInspectionDecision, *int, error) {
