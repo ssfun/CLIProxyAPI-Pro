@@ -20,6 +20,7 @@ import (
 	proinspection "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/inspection"
 	proquota "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/quota"
 	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 )
 
 func TestAntigravityInspectionBindsPreparedTokenToAutomaticAction(t *testing.T) {
@@ -1112,8 +1113,16 @@ func TestInspectionQuotaProtectionSkipsWhenUpstreamAlreadyCovers(t *testing.T) {
 		"claude-opus-4-6": {Unavailable: true, NextRetryAfter: now.Add(time.Hour)},
 	}
 	result.QuotaModel = "claude-opus-*"
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(auth.ID, "claude", []*registry.ModelInfo{{ID: "claude-opus-4-6"}, {ID: "claude-opus-5"}})
+	defer reg.UnregisterClient(auth.ID)
+	if coveredByUpstreamQuota(auth, result) {
+		t.Fatal("one exact model cooldown must not cover the whole model family")
+	}
+	auth.ModelStates["claude-opus-4-6"].Quota = coreauth.QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: now.Add(time.Hour)}
+	auth.ModelStates["claude-opus-5"] = &coreauth.ModelState{Unavailable: true, NextRetryAfter: now.Add(time.Hour), Quota: coreauth.QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: now.Add(time.Hour)}}
 	if !coveredByUpstreamQuota(auth, result) {
-		t.Fatal("expected matching model cooldown to cover inspection hold")
+		t.Fatal("all concrete models in the family should reuse upstream quota cooldown")
 	}
 	result.QuotaModel = "claude-sonnet-*"
 	if coveredByUpstreamQuota(auth, result) {
@@ -1139,9 +1148,67 @@ func TestNewInspectionQuotaHoldFollowsResumeProtocol(t *testing.T) {
 		t.Fatalf("disabled recovery hold = %+v", hold)
 	}
 	probeAuth := &coreauth.Auth{ID: "xai-api", Provider: "xai", Attributes: map[string]string{"using_api": "true"}}
+	newProbe := newInspectionQuotaHold(probeAuth, result, accountInspectionSettings{})
+	if newProbe == nil || newProbe.Recheck || newProbe.RetryAt <= time.Now().UnixMilli() {
+		t.Fatalf("new xAI probe-request hold = %+v", newProbe)
+	}
 	probe := prorouting.QuotaProtection{Recheck: false, RetryAt: time.Now().Add(time.Hour).UnixMilli()}
 	syncInspectionHoldResume(&probe, probeAuth, false)
 	if probe.Recheck || probe.RetryAt == 0 {
 		t.Fatalf("xAI probe-request hold = %+v", probe)
+	}
+}
+
+func TestQuotaRecoveryRunsOneOfficialXAIProbeWhenAutoRecheckDisabled(t *testing.T) {
+	ctx := startProQuotaTestService(t)
+	for _, tc := range []struct {
+		name, body   string
+		status       int
+		requestError error
+		wantQuota    bool
+		wantRetained bool
+	}{
+		{name: "success", status: http.StatusOK, body: `{"id":"chatcmpl-test","choices":[]}`},
+		{name: "quota", status: http.StatusTooManyRequests, body: `{"error":{"message":"quota exceeded"}}`, wantQuota: true},
+		{name: "transport error", requestError: errors.New("probe unavailable"), wantRetained: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			executor := &xaiInspectionRoutingExecutor{officialStatus: tc.status, officialBody: tc.body, officialError: tc.requestError}
+			manager := coreauth.NewManager(nil, nil, nil)
+			manager.RegisterExecutor(executor)
+			auth, err := manager.Register(ctx, &coreauth.Auth{ID: "xai-probe-" + tc.name, Provider: "xai", FileName: tc.name + ".json", Attributes: map[string]string{
+				"api_key": "test-token", "base_url": "https://api.x.ai/v1", "using_api": "true",
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings := proinspection.DefaultSettings()
+			settings.AutoExecuteQuotaRecoveryEnable = false
+			settings.XAIDeepProbeModel = "grok-4.5"
+			raw, _ := json.Marshal(settings)
+			hold := prorouting.QuotaProtection{Recheck: false, RetryAt: time.Now().Add(-time.Minute).UnixMilli(), Settings: raw}
+			if err = manager.ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, 0, &hold); err != nil {
+				t.Fatal(err)
+			}
+			scheduler := newAccountInspectionScheduler(&Handler{authManager: manager}, nil)
+			scheduler.schedule.Settings = settings
+			scheduler.recoverQuotaProtections(ctx)
+			current, _ := manager.GetByID(auth.ID)
+			_, retained := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]
+			if retained != tc.wantRetained {
+				t.Fatalf("inspection protection retained = %v, want %v", retained, tc.wantRetained)
+			}
+			if len(executor.requests) != 1 || !strings.HasSuffix(executor.requests[0].URL.Path, "/chat/completions") {
+				t.Fatalf("probe requests = %#v", executor.requests)
+			}
+			state := current.ModelStates["grok-4.5"]
+			if tc.wantQuota && (state == nil || !state.Quota.Exceeded || !state.NextRetryAfter.After(time.Now())) {
+				t.Fatalf("upstream quota cooldown = %+v", state)
+			}
+			scheduler.recoverQuotaProtections(ctx)
+			if len(executor.requests) != 1 {
+				t.Fatal("completed probe ran more than once")
+			}
+		})
 	}
 }

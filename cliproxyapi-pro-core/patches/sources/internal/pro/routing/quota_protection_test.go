@@ -23,8 +23,8 @@ func TestProtectionBlocksDueRecheckUntilEvidence(t *testing.T) {
 		t.Fatal("due recheck must keep blocking until quota evidence recovers")
 	}
 	probe := QuotaProtection{RetryAt: now.Add(-time.Minute).UnixMilli()}
-	if ProtectionBlocks(probe, "gpt-test", now) {
-		t.Fatal("expired probe-request hold must return to the pool")
+	if !ProtectionBlocks(probe, "gpt-test", now) {
+		t.Fatal("due probe-request must remain blocked until its single probe completes")
 	}
 }
 

@@ -154,6 +154,19 @@ func TestSchedulingBoardKeepsDueInspectionRecheckTime(t *testing.T) {
 	}
 }
 
+func TestSchedulingBoardKeepsDueProbeBlockedUntilRecoveryRuns(t *testing.T) {
+	now := time.Now()
+	due := now.Add(-time.Minute).UnixMilli()
+	auth := &coreauth.Auth{ID: "probe-auth", Provider: "xai", FileName: "probe.json", Metadata: map[string]any{}}
+	setQuotaProtectionsForTest(auth, map[string]prorouting.QuotaProtection{
+		inspectionQuotaSource: {RetryAt: due, Reason: "inspection quota threshold"},
+	})
+	account := schedulingBoardAccount(auth, now)
+	if account.Resume != "probe-request" || account.RetryAt != due || account.Bucket != "quota" {
+		t.Fatalf("account = %+v", account)
+	}
+}
+
 func TestClearLegacyRoutingQuotaProtectionsRemovesRetiredHolds(t *testing.T) {
 	ctx := startProQuotaTestService(t)
 	now := time.Now()

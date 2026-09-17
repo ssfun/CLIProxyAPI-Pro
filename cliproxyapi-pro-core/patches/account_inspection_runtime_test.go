@@ -63,6 +63,10 @@ type accountInspectionAuthStore struct {
 
 type xaiInspectionRoutingExecutor struct {
 	requests        []*http.Request
+	officialStatus  int
+	officialBody    string
+	officialHeader  http.Header
+	officialError   error
 	responsesStatus int
 	responsesBody   string
 	responsesHeader http.Header
@@ -109,6 +113,19 @@ func (e *xaiInspectionRoutingExecutor) HttpRequest(_ context.Context, _ *coreaut
 		}
 		if e.responsesHeader != nil {
 			header = e.responsesHeader.Clone()
+		}
+	} else if strings.HasSuffix(req.URL.Path, "/chat/completions") {
+		if e.officialError != nil {
+			return nil, e.officialError
+		}
+		if e.officialStatus != 0 {
+			status = e.officialStatus
+		}
+		if e.officialBody != "" {
+			body = e.officialBody
+		}
+		if e.officialHeader != nil {
+			header = e.officialHeader.Clone()
 		}
 	}
 	if strings.HasSuffix(req.URL.Path, "/billing") && e.billingStatus != 0 {

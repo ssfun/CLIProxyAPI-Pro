@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
 
 	proinspection "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/inspection"
 	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
@@ -107,7 +109,7 @@ func (s *accountInspectionScheduler) recoverQuotaProtections(ctx context.Context
 				continue
 			}
 		}
-		if !autoRecover || !ok || hold.RetryAt <= 0 || hold.RetryAt > now {
+		if !ok || hold.RetryAt <= 0 || hold.RetryAt > now || hold.Recheck && !autoRecover {
 			continue
 		}
 		if len(due) == 4 {
@@ -139,6 +141,8 @@ func newInspectionQuotaHold(auth *coreauth.Auth, result *accountInspectionResult
 	}
 	if auth != nil && auth.Provider == "xai" && xaiInspectionUsingAPI(auth) {
 		hold.Recheck = false
+		hold.RetryAt = prorouting.ScheduleRecheckAt(result.QuotaResetAt, authIDForHold(auth), time.Now())
+		return hold
 	}
 	if !settings.AutoExecuteQuotaRecoveryEnable {
 		return hold
@@ -188,14 +192,14 @@ func recoveryTime(auth *coreauth.Auth) int64 {
 func (s *accountInspectionScheduler) recoverQuotaAccount(ctx context.Context, auth *coreauth.Auth) {
 	hold := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
 	var settings accountInspectionSettings
-	if json.Unmarshal(hold.Settings, &settings) != nil || !settings.AutoExecuteQuotaRecoveryEnable {
+	if json.Unmarshal(hold.Settings, &settings) != nil {
 		return
 	}
 	if !hold.Recheck {
-		if err := s.inspectionAuthManager().ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, hold.Revision, nil); err == nil {
-			s.appendLog("info", "额度冷却到期，允许真实请求重新验证")
-			s.publishQuotaProtectionState(auth.ID, "冷却到期，等待真实请求验证")
-		}
+		s.recoverQuotaWithProbeRequest(ctx, auth, hold, settings)
+		return
+	}
+	if !settings.AutoExecuteQuotaRecoveryEnable {
 		return
 	}
 	threshold := settings.UsedPercentThreshold
@@ -240,6 +244,77 @@ func (s *accountInspectionScheduler) recoverQuotaAccount(ctx context.Context, au
 	} else {
 		result.ActionReason = "额度保护中，等待下次定向复查"
 	}
+	s.saveQuotaRecoveryResult(result)
+	if recovered {
+		s.appendLog("success", fmt.Sprintf("%s 额度恢复，已解除调度保护", proinspection.ResultIdentity(result)))
+	}
+}
+
+func (s *accountInspectionScheduler) recoverQuotaWithProbeRequest(ctx context.Context, auth *coreauth.Auth, hold prorouting.QuotaProtection, settings accountInspectionSettings) {
+	settings.Retries = 0
+	settings.AntigravityDeepProbeEnabled = false
+	settings.XAIDeepProbeEnabled = false
+	probeCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	release, err := s.probeLimiter.Acquire(probeCtx, 1, 1, auth.Provider)
+	if err != nil {
+		return
+	}
+	defer release()
+	result := s.inspectAccount(probeCtx, accountFromAuth(auth), settings)
+	if ctx.Err() != nil {
+		return
+	}
+	current, err := s.actionAuthForResult(result)
+	if err != nil {
+		return
+	}
+	statusCode := 0
+	if result.StatusCode != nil {
+		statusCode = *result.StatusCode
+	}
+	succeeded := statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices && result.Error == "" && result.ErrorCode == "" && !result.IsQuota
+	failedWithResponse := statusCode >= http.StatusMultipleChoices
+	completed := succeeded || failedWithResponse
+	var next *prorouting.QuotaProtection
+	if completed {
+		model := strings.TrimSpace(settings.XAIDeepProbeModel)
+		if model == "" {
+			model = "grok-4.5"
+		}
+		probeResult := coreauth.Result{AuthID: current.ID, Provider: current.Provider, Model: model, Success: succeeded}
+		if !succeeded {
+			message := firstNonEmptyStringValue(result.ErrorCode, result.Error, result.ActionReason, http.StatusText(statusCode))
+			probeResult.Error = &coreauth.Error{HTTPStatus: statusCode, Message: message}
+		}
+		s.inspectionAuthManager().MarkResult(ctx, probeResult)
+		current, _ = s.inspectionAuthManager().GetByID(auth.ID)
+	} else {
+		hold.Failures++
+		hold.RetryAt = prorouting.NextRecheckAt(0, auth.ID, hold.Failures, time.Now())
+		next = &hold
+	}
+	if err := s.inspectionAuthManager().ChangeQuotaProtection(ctx, current, inspectionQuotaSource, hold.Revision, next); err != nil {
+		return
+	}
+	updated, _ := s.inspectionAuthManager().GetByID(auth.ID)
+	s.fillQuotaProtectionResult(updated, &result)
+	result.Action = accountInspectionActionKeep
+	result.Executed = true
+	switch {
+	case succeeded:
+		result.ActionReason = "真实请求验证成功，解除额度保护"
+		s.appendLog("success", fmt.Sprintf("%s 真实请求验证成功，已解除调度保护", proinspection.ResultIdentity(result)))
+	case completed:
+		result.ActionReason = "真实请求验证失败，已交由上游冷却"
+		s.appendLog("warning", fmt.Sprintf("%s 真实请求验证失败，已转入上游冷却", proinspection.ResultIdentity(result)))
+	default:
+		result.ActionReason = "真实请求验证未完成，等待下次重试"
+	}
+	s.saveQuotaRecoveryResult(result)
+}
+
+func (s *accountInspectionScheduler) saveQuotaRecoveryResult(result accountInspectionResult) {
 	s.mu.Lock()
 	s.updateInspectionResultLocked(result, true, func(accountInspectionResult) (accountInspectionResult, bool) { return result, true })
 	saveErr := s.saveResultSnapshotLocked()
@@ -248,9 +323,6 @@ func (s *accountInspectionScheduler) recoverQuotaAccount(ctx context.Context, au
 	broadcast.send()
 	if saveErr != nil {
 		s.appendLog("warning", fmt.Sprintf("额度恢复结果保存失败：%v", saveErr))
-	}
-	if recovered {
-		s.appendLog("success", fmt.Sprintf("%s 额度恢复，已解除调度保护", proinspection.ResultIdentity(result)))
 	}
 }
 
@@ -298,6 +370,10 @@ func coveredByUpstreamQuota(auth *coreauth.Auth, result *accountInspectionResult
 	if strings.TrimSpace(result.QuotaModel) == "" || len(auth.ModelStates) == 0 {
 		return false
 	}
+	models := registry.GetGlobalRegistry().GetModelsForClient(auth.ID)
+	if len(models) == 0 {
+		return false
+	}
 	coveredUntil := time.Time{}
 	for _, pattern := range strings.Split(result.QuotaModel, ",") {
 		pattern = strings.TrimSpace(pattern)
@@ -305,11 +381,13 @@ func coveredByUpstreamQuota(auth *coreauth.Auth, result *accountInspectionResult
 			continue
 		}
 		patternCovered := false
-		for key, state := range auth.ModelStates {
-			if state == nil || !prorouting.ModelMatchesProtection(pattern, key) {
+		for _, model := range models {
+			if model == nil || !prorouting.ModelMatchesProtection(pattern, model.ID) {
 				continue
 			}
-			if !state.Unavailable && !state.Quota.Exceeded {
+			patternCovered = true
+			state := auth.ModelStates[strings.TrimSpace(model.ID)]
+			if state == nil || !state.Quota.Exceeded || state.Quota.Reason != "quota" {
 				return false
 			}
 			next := state.NextRetryAfter
@@ -319,7 +397,6 @@ func coveredByUpstreamQuota(auth *coreauth.Auth, result *accountInspectionResult
 			if !next.After(now) {
 				return false
 			}
-			patternCovered = true
 			if coveredUntil.IsZero() || next.Before(coveredUntil) {
 				coveredUntil = next
 			}

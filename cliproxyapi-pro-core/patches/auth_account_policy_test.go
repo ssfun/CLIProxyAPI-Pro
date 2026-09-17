@@ -231,15 +231,19 @@ func TestQuotaProtectionSchedulingPersistenceAndCAS(t *testing.T) {
 	}
 }
 
-func TestTimedQuotaProtectionReturnsToSchedulerWithoutInspection(t *testing.T) {
+func TestTimedProbeQuotaProtectionRequiresExplicitProbeCompletion(t *testing.T) {
 	now := time.Now()
 	a := &Auth{ID: "timed-quota-test", Provider: "codex", Metadata: map[string]any{}}
 	setQuotaProtections(a, map[string]prorouting.QuotaProtection{"inspection": {Source: "inspection", Model: "gpt-test", RetryAt: now.Add(time.Minute).UnixMilli()}})
 	if blocked, _, _ := isAuthBlockedForModel(a, "gpt-test", now); !blocked {
 		t.Fatal("active cooldown allowed traffic")
 	}
+	if blocked, _, _ := isAuthBlockedForModel(a, "gpt-test", now.Add(2*time.Minute)); !blocked {
+		t.Fatal("due probe restriction allowed traffic without its recovery probe")
+	}
+	setQuotaProtections(a, nil)
 	if blocked, _, _ := isAuthBlockedForModel(a, "gpt-test", now.Add(2*time.Minute)); blocked {
-		t.Fatal("expired quota restriction requires full inspection")
+		t.Fatal("released probe restriction still blocked traffic")
 	}
 	a.Disabled = true
 	if blocked, reason, _ := isAuthBlockedForModel(a, "gpt-test", now.Add(2*time.Minute)); !blocked || reason != blockReasonDisabled {

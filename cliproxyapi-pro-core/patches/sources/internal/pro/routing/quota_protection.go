@@ -12,9 +12,9 @@ const QuotaProtectionNamespace = "quota-protection"
 const QuotaProtectionMetadataKey = "pro_quota_protection"
 const LegacyRoutingQuotaSourcePrefix = "routing:"
 
-// QuotaProtection is independent of Disabled and upstream error state. A zero
-// RetryAt requires explicit release. Recheck holds need fresh quota evidence
-// before they return to the pool, including after RetryAt.
+// QuotaProtection is independent of Disabled and upstream error state. All
+// holds require explicit release. RetryAt schedules either a quota recheck or
+// one real probe request; it never makes the selector release traffic itself.
 type QuotaProtection struct {
 	Source   string          `json:"source"`
 	Revision int64           `json:"revision"`
@@ -72,7 +72,7 @@ func ProtectionBlocks(p QuotaProtection, model string, now time.Time) bool {
 	if p.Model != "" && !ModelMatchesProtection(p.Model, model) {
 		return false
 	}
-	return p.Recheck || p.RetryAt == 0 || p.RetryAt > now.UnixMilli()
+	return true
 }
 
 func ModelMatchesProtection(patterns, model string) bool {
