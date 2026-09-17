@@ -16,6 +16,8 @@ type Result struct {
 	QuotaRevision         int64    `json:"-"`
 	AuthID                string   `json:"authId,omitempty"`
 	AccessTokenSHA256     string   `json:"-"`
+	CredentialObserved    string   `json:"-"`
+	CredentialFinal       string   `json:"-"`
 	Key                   string   `json:"key"`
 	Provider              string   `json:"provider"`
 	FileName              string   `json:"fileName"`

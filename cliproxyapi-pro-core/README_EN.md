@@ -164,7 +164,7 @@ Request monitoring also stores TTFT, HTTP status code, structured error, reasoni
 - `GET /v0/management/account-inspection/schedule`
 - `GET /v0/management/account-inspection/status`
 - `GET /v0/management/account-inspection/logs` (WebSocket/WSS log and status stream)
-- `PUT|PATCH /v0/management/account-inspection/schedule`
+- `PUT /v0/management/account-inspection/schedule`
 - `POST /v0/management/account-inspection/run`
 - `POST /v0/management/account-inspection/inspect-one`
 - `POST /v0/management/account-inspection/refresh-token`

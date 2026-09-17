@@ -167,7 +167,7 @@ Core 内建回环 SOCKS5 代理池以及 xAI、Codex、Claude、Gemini CLI、Ant
 - `GET /v0/management/account-inspection/schedule`
 - `GET /v0/management/account-inspection/status`
 - `GET /v0/management/account-inspection/logs`（WebSocket/WSS 日志和状态流）
-- `PUT|PATCH /v0/management/account-inspection/schedule`
+- `PUT /v0/management/account-inspection/schedule`
 - `POST /v0/management/account-inspection/run`
 - `POST /v0/management/account-inspection/inspect-one`
 - `POST /v0/management/account-inspection/refresh-token`

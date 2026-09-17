@@ -54,16 +54,21 @@ func (c *ConfirmationCounter) ConfirmWithFingerprint(key, observedFingerprint, f
 	if c.entries == nil {
 		c.entries = make(map[string]ConfirmationEntry)
 	}
-	entry := c.entries[key]
-	if entry.LastSequence == c.sequence {
-		count := entry.Count
-		c.mu.Unlock()
-		return count >= required, count, required
-	}
 	observedFingerprint = strings.TrimSpace(observedFingerprint)
 	finalFingerprint = strings.TrimSpace(finalFingerprint)
 	if finalFingerprint == "" {
 		finalFingerprint = observedFingerprint
+	}
+	entry := c.entries[key]
+	if entry.LastSequence == c.sequence {
+		if observedFingerprint != "" && entry.LastFingerprint != observedFingerprint {
+			c.entries[key] = ConfirmationEntry{Count: 1, LastSequence: c.sequence, LastFingerprint: finalFingerprint}
+			c.mu.Unlock()
+			return false, 1, required
+		}
+		count := entry.Count
+		c.mu.Unlock()
+		return count >= required, count, required
 	}
 
 	consecutive := entry.LastSequence == c.sequence-1

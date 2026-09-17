@@ -211,6 +211,61 @@ func TestInspectManyAccountsReturnsConflictWhenInspectionIsRunning(t *testing.T)
 	}
 }
 
+func TestAccountInspectionScheduleDoesNotRegisterPatchRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	handler := &Handler{}
+	handler.RegisterAccountInspectionRoutes(engine.Group("/v0/management"))
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/v0/management/account-inspection/schedule", strings.NewReader(`{"enabled":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("PATCH schedule status = %d body=%s, want not found", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestInspectOneAccountReturnsConflictWhenInspectionIsRunning(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := &Handler{}
+	scheduler := &accountInspectionScheduler{
+		status:      accountInspectionStatus{State: accountInspectionStateRunning},
+		subscribers: make(map[chan accountInspectionLogStreamMessage]struct{}),
+	}
+	accountInspectionSchedulers.Store(handler, scheduler)
+	t.Cleanup(func() { accountInspectionSchedulers.Delete(handler) })
+
+	recorder := httptest.NewRecorder()
+	requestContext, _ := gin.CreateTestContext(recorder)
+	requestContext.Request = httptest.NewRequest(http.MethodPost, "/account-inspection/inspect-one", strings.NewReader(`{"item":{"key":"account"}}`))
+	requestContext.Request.Header.Set("Content-Type", "application/json")
+	handler.InspectOneAccount(requestContext)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d body=%s, want conflict", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestRefreshAccountInspectionTokenReturnsConflictWhenInspectionIsRunning(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := &Handler{}
+	scheduler := &accountInspectionScheduler{
+		status:      accountInspectionStatus{State: accountInspectionStateRunning},
+		subscribers: make(map[chan accountInspectionLogStreamMessage]struct{}),
+	}
+	accountInspectionSchedulers.Store(handler, scheduler)
+	t.Cleanup(func() { accountInspectionSchedulers.Delete(handler) })
+
+	recorder := httptest.NewRecorder()
+	requestContext, _ := gin.CreateTestContext(recorder)
+	requestContext.Request = httptest.NewRequest(http.MethodPost, "/account-inspection/refresh-token", strings.NewReader(`{"item":{"key":"account"}}`))
+	requestContext.Request.Header.Set("Content-Type", "application/json")
+	handler.RefreshAccountInspectionToken(requestContext)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d body=%s, want conflict", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestStreamStatusLockedReturnsPagedDetailsWithFullHealthCounts(t *testing.T) {
 	scheduler := &accountInspectionScheduler{
 		status: accountInspectionStatus{

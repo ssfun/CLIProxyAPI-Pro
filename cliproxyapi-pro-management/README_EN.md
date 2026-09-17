@@ -119,7 +119,7 @@ Backend schedule/status/control routes expected by the page:
 - `GET /account-inspection/schedule`
 - `GET /account-inspection/status`
 - `GET /account-inspection/logs` (WebSocket/WSS log and status stream)
-- `PUT|PATCH /account-inspection/schedule`
+- `PUT /account-inspection/schedule`
 - `POST /account-inspection/run`
 - `POST /account-inspection/inspect-one`
 - `POST /account-inspection/pause`

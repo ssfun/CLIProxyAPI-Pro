@@ -151,17 +151,18 @@ type accountInspectionScheduler struct {
 }
 
 type accountInspectionAccount struct {
-	Auth              *coreauth.Auth
-	AuthID            string
-	Key               string
-	Provider          string
-	FileName          string
-	DisplayName       string
-	Email             string
-	Name              string
-	AuthIndex         string
-	AccessTokenSHA256 string
-	Disabled          bool
+	Auth                  *coreauth.Auth
+	AuthID                string
+	Key                   string
+	Provider              string
+	FileName              string
+	DisplayName           string
+	Email                 string
+	Name                  string
+	AuthIndex             string
+	AccessTokenSHA256     string
+	CredentialFingerprint string
+	Disabled              bool
 }
 
 type accountInspectionDecision = proinspection.Decision
@@ -976,9 +977,25 @@ func (s *accountInspectionScheduler) refreshTokenNow(ctx context.Context, item a
 	}
 	s.mu.Lock()
 	restoredSnapshot := s.status.RestoredSnapshot
+	running := s.isRunningLocked()
 	s.mu.Unlock()
 	if restoredSnapshot {
 		return accountInspectionResult{}, errAccountInspectionRestoredSnapshotReadOnly
+	}
+	if running {
+		return accountInspectionResult{}, errAccountInspectionAlreadyRunning
+	}
+	s.fullRunMu.RLock()
+	defer s.fullRunMu.RUnlock()
+	s.mu.Lock()
+	restoredSnapshot = s.status.RestoredSnapshot
+	running = s.isRunningLocked()
+	s.mu.Unlock()
+	if restoredSnapshot {
+		return accountInspectionResult{}, errAccountInspectionRestoredSnapshotReadOnly
+	}
+	if running {
+		return accountInspectionResult{}, errAccountInspectionAlreadyRunning
 	}
 	if s.h == nil || s.inspectionAuthManager() == nil {
 		return accountInspectionResult{}, fmt.Errorf("core auth manager unavailable")

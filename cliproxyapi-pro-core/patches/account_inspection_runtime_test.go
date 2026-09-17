@@ -277,6 +277,37 @@ func TestStartRunWaitsForExclusiveAdmissionBeforeClearingSnapshot(t *testing.T) 
 	scheduler.runWG.Wait()
 }
 
+func TestRefreshTokenWaitsForFullRunAdmissionAndRechecksRunning(t *testing.T) {
+	scheduler := &accountInspectionScheduler{status: accountInspectionStatus{State: accountInspectionStateIdle}}
+	scheduler.fullRunMu.Lock()
+	refreshed := make(chan error, 1)
+	go func() {
+		_, err := scheduler.refreshTokenNow(context.Background(), accountInspectionActionItem{})
+		refreshed <- err
+	}()
+
+	select {
+	case err := <-refreshed:
+		scheduler.fullRunMu.Unlock()
+		t.Fatalf("refreshTokenNow() returned before full-run admission released: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	scheduler.mu.Lock()
+	scheduler.status.State = accountInspectionStateRunning
+	scheduler.mu.Unlock()
+	scheduler.fullRunMu.Unlock()
+
+	select {
+	case err := <-refreshed:
+		if !errors.Is(err, errAccountInspectionAlreadyRunning) {
+			t.Fatalf("refreshTokenNow() error = %v, want already running", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("refreshTokenNow() did not finish after full-run admission released")
+	}
+}
+
 func TestAccountInspectionResultSnapshotPersistsAndRestoresReadOnly(t *testing.T) {
 	snapshotPath := filepath.Join(t.TempDir(), "account-inspection-snapshot.json")
 	settings := proinspection.DefaultSettings()

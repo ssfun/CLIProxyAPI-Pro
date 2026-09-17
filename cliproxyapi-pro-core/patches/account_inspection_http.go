@@ -271,7 +271,6 @@ func (h *Handler) RegisterAccountInspectionRoutes(group *gin.RouterGroup) {
 	group.GET("/account-inspection/logs", h.StreamAccountInspectionLogs)
 	group.GET("/account-inspection/schedule", h.GetAccountInspectionSchedule)
 	group.PUT("/account-inspection/schedule", h.PutAccountInspectionSchedule)
-	group.PATCH("/account-inspection/schedule", h.PutAccountInspectionSchedule)
 	group.GET("/account-inspection/status", h.GetAccountInspectionStatus)
 	group.POST("/account-inspection/run", h.RunAccountInspection)
 	group.POST("/account-inspection/inspect-one", h.InspectOneAccount)
@@ -359,11 +358,7 @@ func (h *Handler) InspectOneAccount(c *gin.Context) {
 	result, err := scheduler.inspectOne(c.Request.Context(), request.Item)
 	snapshot := scheduler.snapshotForRequest(c)
 	if err != nil {
-		statusCode := http.StatusOK
-		if errors.Is(err, errAccountInspectionRestoredSnapshotReadOnly) || errors.Is(err, errAccountInspectionResultStale) {
-			statusCode = http.StatusConflict
-		}
-		c.JSON(statusCode, gin.H{"error": err.Error(), "result": result, "schedule": snapshot["schedule"], "status": snapshot["status"]})
+		c.JSON(accountInspectionHTTPStatus(err), gin.H{"error": err.Error(), "result": result, "schedule": snapshot["schedule"], "status": snapshot["status"]})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"result": result, "schedule": snapshot["schedule"], "status": snapshot["status"]})
@@ -394,11 +389,7 @@ func (h *Handler) RefreshAccountInspectionToken(c *gin.Context) {
 	err = firstNonNilError(err, saveErr)
 	snapshot := scheduler.snapshotForRequest(c)
 	if err != nil {
-		statusCode := http.StatusOK
-		if errors.Is(err, errAccountInspectionRestoredSnapshotReadOnly) || errors.Is(err, errAccountInspectionResultStale) {
-			statusCode = http.StatusConflict
-		}
-		c.JSON(statusCode, gin.H{"error": err.Error(), "result": result, "schedule": snapshot["schedule"], "status": snapshot["status"]})
+		c.JSON(accountInspectionHTTPStatus(err), gin.H{"error": err.Error(), "result": result, "schedule": snapshot["schedule"], "status": snapshot["status"]})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"result": result, "schedule": snapshot["schedule"], "status": snapshot["status"]})
