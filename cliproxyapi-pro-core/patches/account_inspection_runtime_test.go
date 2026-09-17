@@ -204,6 +204,47 @@ func testInspectionQuotaResult(key string, provider string, action accountInspec
 	return testInspectionProviderResult(key, provider, action, false, nil, true, "")
 }
 
+func TestAccountInspectionPathsFollowNativeDataDirectory(t *testing.T) {
+	t.Setenv("ACCOUNT_INSPECTION_SCHEDULE_PATH", "")
+	t.Setenv("ACCOUNT_INSPECTION_SNAPSHOT_PATH", "")
+	t.Setenv("USAGE_DATA_DIR", "")
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	wantDir := filepath.Join(filepath.Dir(configPath), "usage")
+	schedulePath := accountInspectionSchedulePath(configPath)
+	if got, want := schedulePath, filepath.Join(wantDir, "account-inspection-schedule.json"); got != want {
+		t.Fatalf("schedule path = %q, want %q", got, want)
+	}
+	if got, want := accountInspectionResultSnapshotPath(schedulePath), filepath.Join(wantDir, "account-inspection-snapshot.json"); got != want {
+		t.Fatalf("snapshot path = %q, want %q", got, want)
+	}
+	scheduler := newAccountInspectionScheduler(&Handler{configFilePath: configPath}, nil)
+	if scheduler.path != schedulePath || scheduler.snapshotPath != accountInspectionResultSnapshotPath(schedulePath) {
+		t.Fatalf("scheduler paths = (%q, %q), want (%q, %q)", scheduler.path, scheduler.snapshotPath, schedulePath, accountInspectionResultSnapshotPath(schedulePath))
+	}
+}
+
+func TestAccountInspectionPathsHonorExplicitOverrides(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	t.Setenv("USAGE_DATA_DIR", dataDir)
+	t.Setenv("ACCOUNT_INSPECTION_SCHEDULE_PATH", "")
+	t.Setenv("ACCOUNT_INSPECTION_SNAPSHOT_PATH", "")
+	schedulePath := accountInspectionSchedulePath(filepath.Join(t.TempDir(), "config.yaml"))
+	if got, want := schedulePath, filepath.Join(dataDir, "account-inspection-schedule.json"); got != want {
+		t.Fatalf("data-dir schedule path = %q, want %q", got, want)
+	}
+
+	explicitSchedule := filepath.Join(t.TempDir(), "schedule.json")
+	explicitSnapshot := filepath.Join(t.TempDir(), "snapshot.json")
+	t.Setenv("ACCOUNT_INSPECTION_SCHEDULE_PATH", explicitSchedule)
+	t.Setenv("ACCOUNT_INSPECTION_SNAPSHOT_PATH", explicitSnapshot)
+	if got := accountInspectionSchedulePath("config.yaml"); got != explicitSchedule {
+		t.Fatalf("explicit schedule path = %q, want %q", got, explicitSchedule)
+	}
+	if got := accountInspectionResultSnapshotPath(explicitSchedule); got != explicitSnapshot {
+		t.Fatalf("explicit snapshot path = %q, want %q", got, explicitSnapshot)
+	}
+}
+
 func TestManagementHandlerShutdownReleasesBackgroundOwners(t *testing.T) {
 	t.Setenv("ACCOUNT_INSPECTION_SCHEDULE_PATH", filepath.Join(t.TempDir(), "schedule.json"))
 	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, nil)

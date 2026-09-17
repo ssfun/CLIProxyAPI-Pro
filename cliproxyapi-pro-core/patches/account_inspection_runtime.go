@@ -237,7 +237,11 @@ func schedulerForHandler(h *Handler) *accountInspectionScheduler {
 }
 
 func newAccountInspectionScheduler(h *Handler, quota proinspection.QuotaGateway) *accountInspectionScheduler {
-	schedulePath := accountInspectionSchedulePath()
+	configFilePath := ""
+	if h != nil {
+		configFilePath = h.configFilePath
+	}
+	schedulePath := accountInspectionSchedulePath(configFilePath)
 	scheduler := &accountInspectionScheduler{
 		h:                       h,
 		quota:                   quota,
@@ -260,14 +264,11 @@ func newAccountInspectionScheduler(h *Handler, quota proinspection.QuotaGateway)
 	return scheduler
 }
 
-func accountInspectionSchedulePath() string {
+func accountInspectionSchedulePath(configFilePath string) string {
 	if value := strings.TrimSpace(os.Getenv("ACCOUNT_INSPECTION_SCHEDULE_PATH")); value != "" {
 		return value
 	}
-	dataDir := strings.TrimSpace(os.Getenv("USAGE_DATA_DIR"))
-	if dataDir == "" {
-		dataDir = "/CLIProxyAPI/usage"
-	}
+	dataDir := embeddedusage.ResolveDataDirForPath(configFilePath)
 	return filepath.Join(dataDir, "account-inspection-schedule.json")
 }
 

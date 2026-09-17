@@ -26,3 +26,20 @@ func TestLoadConfigForPathResolvesSharedDatabasePrecedence(t *testing.T) {
 		t.Fatalf("explicit DB path = %q, want %q", got, want)
 	}
 }
+
+func TestResolveDataDirForPathPrecedence(t *testing.T) {
+	t.Setenv("USAGE_DATA_DIR", "")
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if got, want := ResolveDataDirForPath(configPath), filepath.Join(filepath.Dir(configPath), "usage"); got != want {
+		t.Fatalf("config-relative data dir = %q, want %q", got, want)
+	}
+	if got := ResolveDataDirForPath(""); got != "/CLIProxyAPI/usage" {
+		t.Fatalf("legacy data dir = %q", got)
+	}
+
+	explicit := filepath.Join(t.TempDir(), "data")
+	t.Setenv("USAGE_DATA_DIR", explicit)
+	if got := ResolveDataDirForPath(configPath); got != explicit {
+		t.Fatalf("explicit data dir = %q, want %q", got, explicit)
+	}
+}

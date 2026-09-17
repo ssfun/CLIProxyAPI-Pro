@@ -22,11 +22,13 @@ internal/embeddedusage
 /v0/management/usage
 ```
 
-默认 SQLite 数据位置：
+Docker 镜像中的默认 SQLite 数据位置：
 
 ```text
 /CLIProxyAPI/usage/usage.sqlite
 ```
+
+原生二进制未设置 `USAGE_DATA_DIR` 时，数据目录默认为 `config.yaml` 同目录下的 `usage/`。
 
 镜像声明 `/CLIProxyAPI/usage` 为 Docker volume，用于在容器替换后保留 usage 数据、quota cache、模型价格和账号巡检调度状态。
 
@@ -197,15 +199,15 @@ Core 内建回环 SOCKS5 代理池以及 xAI、Codex、Claude、Gemini CLI、Ant
 
 探测账号前，调度器会在认证记录本来已经进入 upstream 正常刷新窗口时尝试刷新 auth。巡检刷新路径复用 upstream provider 刷新逻辑和持久化逻辑，允许 disabled 账号，跳过 API key 账号、未到刷新窗口的账号，并遵守 `NextRefreshAfter`。刷新成功后使用刷新后的 auth 探测；刷新失败时保留账号，并跳过该账号本次探测。
 
-调度文件默认位置：
+Docker 镜像中的调度文件默认位置：
 
 ```text
 /CLIProxyAPI/usage/account-inspection-schedule.json
 ```
 
-如需自定义，可设置 `ACCOUNT_INSPECTION_SCHEDULE_PATH`。
+原生二进制未设置 `USAGE_DATA_DIR` 时，调度文件和结果快照默认写入 `config.yaml` 同目录下的 `usage/`。如需自定义，可设置 `ACCOUNT_INSPECTION_SCHEDULE_PATH`。
 
-最近一次已结束的巡检结果会单独持久化到 `/CLIProxyAPI/usage/account-inspection-snapshot.json`，文件权限为 `0600`。进程重启或 usage 导入恢复后，该快照会标记为只读；下一次完整巡检结束时覆盖。可通过 `ACCOUNT_INSPECTION_SNAPSHOT_PATH` 自定义路径。
+最近一次已结束的巡检结果会单独持久化到同一数据目录下的 `account-inspection-snapshot.json`，文件权限为 `0600`。进程重启或 usage 导入恢复后，该快照会标记为只读；下一次完整巡检结束时覆盖。可通过 `ACCOUNT_INSPECTION_SNAPSHOT_PATH` 自定义路径。
 
 ### 调度看板
 
@@ -325,8 +327,8 @@ Release workflow 会从 Core、models 和定制层三个不可变提交中取最
 ### Usage service
 
 - `USAGE_SERVICE_ENABLED` — 默认 `true`；设为 `false`/`0`/`no`/`off` 可禁用内嵌服务。
-- `USAGE_DATA_DIR` — 默认 `/CLIProxyAPI/usage`。
-- `USAGE_DB_PATH` — 默认 `/CLIProxyAPI/usage/usage.sqlite`。
+- `USAGE_DATA_DIR` — Docker 镜像默认 `/CLIProxyAPI/usage`；原生二进制未设置时默认 `config.yaml` 同目录下的 `usage/`。
+- `USAGE_DB_PATH` — 默认 `USAGE_DATA_DIR/usage.sqlite`；未设置 `USAGE_DATA_DIR` 的原生二进制使用 `config.yaml` 同目录下的 `usage/usage.sqlite`。
 - `USAGE_BATCH_SIZE` — 默认 `100`。
 - `USAGE_POLL_INTERVAL_MS` — 默认 `500`。
 - `USAGE_QUERY_LIMIT` — 默认 `50000`。

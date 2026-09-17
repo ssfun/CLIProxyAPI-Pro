@@ -23,19 +23,25 @@ func LoadConfig() Config {
 	return LoadConfigForPath("")
 }
 
+// ResolveDataDirForPath keeps the historical Docker default while giving SDK
+// and native deployments a writable default beside config.yaml. Explicit
+// USAGE_DATA_DIR always remains authoritative.
+func ResolveDataDirForPath(configFilePath string) string {
+	if dataDir := strings.TrimSpace(os.Getenv("USAGE_DATA_DIR")); dataDir != "" {
+		return dataDir
+	}
+	configFilePath = strings.TrimSpace(configFilePath)
+	if configFilePath != "" {
+		return filepath.Join(filepath.Dir(configFilePath), "usage")
+	}
+	return "/CLIProxyAPI/usage"
+}
+
 // LoadConfigForPath keeps the historical Docker default while giving SDK and
 // native deployments a writable default beside config.yaml. Explicit
 // USAGE_DB_PATH and USAGE_DATA_DIR always remain authoritative.
 func LoadConfigForPath(configFilePath string) Config {
-	dataDir := strings.TrimSpace(os.Getenv("USAGE_DATA_DIR"))
-	if dataDir == "" {
-		configFilePath = strings.TrimSpace(configFilePath)
-		if configFilePath == "" {
-			dataDir = "/CLIProxyAPI/usage"
-		} else {
-			dataDir = filepath.Join(filepath.Dir(configFilePath), "usage")
-		}
-	}
+	dataDir := ResolveDataDirForPath(configFilePath)
 	return Config{
 		Enabled:      envBool("USAGE_SERVICE_ENABLED", true),
 		DBPath:       env("USAGE_DB_PATH", filepath.Join(dataDir, "usage.sqlite")),

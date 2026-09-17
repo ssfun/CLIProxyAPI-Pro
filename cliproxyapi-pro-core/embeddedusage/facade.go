@@ -65,6 +65,7 @@ type (
 var (
 	LoadConfig                                = proobservability.LoadConfig
 	LoadConfigForPath                         = proobservability.LoadConfigForPath
+	ResolveDataDirForPath                     = proobservability.ResolveDataDirForPath
 	OpenStore                                 = proobservability.OpenStore
 	NewServer                                 = proobservability.NewServer
 	Start                                     = proobservability.Start

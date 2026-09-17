@@ -22,11 +22,13 @@ The patch layer starts the service with the main API process, enables upstream u
 /v0/management/usage
 ```
 
-By default it stores SQLite data at:
+In Docker images, it stores SQLite data by default at:
 
 ```text
 /CLIProxyAPI/usage/usage.sqlite
 ```
+
+For native binaries without `USAGE_DATA_DIR`, the data directory defaults to `usage/` beside `config.yaml`.
 
 The image declares `/CLIProxyAPI/usage` as a Docker volume so usage data, quota cache, model prices, and account-inspection schedule state can survive container replacement.
 
@@ -189,15 +191,15 @@ In the inspection settings, `workers` is the global probe concurrency across all
 
 Before probing an account, the scheduler can refresh its auth record when it is already in the normal upstream refresh window. This inspection refresh path reuses upstream provider refresh logic and persistence, allows disabled accounts, skips API-key accounts, skips accounts not yet due, and respects `NextRefreshAfter`. If refresh succeeds, probing uses the refreshed auth; if refresh fails, the scheduler keeps the account and skips probing it for that run.
 
-The schedule file defaults to:
+In Docker images, the schedule file defaults to:
 
 ```text
 /CLIProxyAPI/usage/account-inspection-schedule.json
 ```
 
-Override it with `ACCOUNT_INSPECTION_SCHEDULE_PATH` if needed.
+For native binaries without `USAGE_DATA_DIR`, the schedule and result snapshot default to `usage/` beside `config.yaml`. Override the schedule with `ACCOUNT_INSPECTION_SCHEDULE_PATH` if needed.
 
-The latest finished inspection result is persisted separately at `/CLIProxyAPI/usage/account-inspection-snapshot.json` with mode `0600`. A snapshot restored after process restart or usage import is read-only and is replaced when the next full inspection finishes. Override its path with `ACCOUNT_INSPECTION_SNAPSHOT_PATH` if needed.
+The latest finished inspection result is persisted separately as `account-inspection-snapshot.json` in the same data directory with mode `0600`. A snapshot restored after process restart or usage import is read-only and is replaced when the next full inspection finishes. Override its path with `ACCOUNT_INSPECTION_SNAPSHOT_PATH` if needed.
 
 ### Scheduling board
 
@@ -317,8 +319,8 @@ Release workflows derive `SOURCE_DATE_EPOCH` from the newest immutable Core, mod
 ### Usage service
 
 - `USAGE_SERVICE_ENABLED` — default `true`; set to `false`/`0`/`no`/`off` to disable the embedded service.
-- `USAGE_DATA_DIR` — default `/CLIProxyAPI/usage`.
-- `USAGE_DB_PATH` — default `/CLIProxyAPI/usage/usage.sqlite`.
+- `USAGE_DATA_DIR` — defaults to `/CLIProxyAPI/usage` in Docker images; native binaries default to `usage/` beside `config.yaml` when unset.
+- `USAGE_DB_PATH` — defaults to `USAGE_DATA_DIR/usage.sqlite`; native binaries without `USAGE_DATA_DIR` use `usage/usage.sqlite` beside `config.yaml`.
 - `USAGE_BATCH_SIZE` — default `100`.
 - `USAGE_POLL_INTERVAL_MS` — default `500`.
 - `USAGE_QUERY_LIMIT` — default `50000`.
