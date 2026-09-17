@@ -570,6 +570,10 @@ replace_go_function(
 	if errors.As(err, &modelCooldown) && modelCooldown != nil {
 		return modelCooldown.Headers()
 	}
+	var unavailable *authUnavailableError
+	if errors.As(err, &unavailable) && unavailable != nil {
+		return unavailable.Headers()
+	}
 	var statusRetryAfter interface {
 		StatusCode() int
 		RetryAfter() *time.Duration
@@ -3765,81 +3769,83 @@ stream_text = stream_text.replace(
     restore_failure_call,
     'terminal.emitResponseError(&usageBuffer, fmt.Errorf("restore Claude OAuth tool name from streaming response: %w", errRestore))',
 )
-cancellation_block = '''\t\t\t\tif len(bytes.TrimSpace(line)) == 0 && !flushEvent() {
-\t\t\t\t\temitCancellation(ctx.Err())
-\t\t\t\t\treturn
-\t\t\t\t}
+cancellation_block = '''				if len(bytes.TrimSpace(line)) == 0 {
+					if !flushEvent() {
+						emitCancellation(ctx.Err())
+						return
+					}
 '''
-cancellation_replacement = '''\t\t\t\tif len(bytes.TrimSpace(line)) == 0 && !flushEvent() {
-\t\t\t\t\tterminal.publishCancellation(&usageBuffer, ctx.Err())
-\t\t\t\t\treturn
-\t\t\t\t}
+cancellation_replacement = '''				if len(bytes.TrimSpace(line)) == 0 {
+					if !flushEvent() {
+						terminal.publishCancellation(&usageBuffer, ctx.Err())
+						return
+					}
 '''
 if stream_text.count(cancellation_block) != 1:
     raise SystemExit('expected native Claude event flush cancellation block')
 stream_text = stream_text.replace(cancellation_block, cancellation_replacement, 1)
-final_flush_block = '''\t\t\tif !flushEvent() {
-\t\t\t\temitCancellation(ctx.Err())
-\t\t\t\treturn
-\t\t\t}
+final_flush_block = '''			if !flushEvent() {
+				emitCancellation(ctx.Err())
+				return
+			}
 '''
-final_flush_replacement = '''\t\t\tif !flushEvent() {
-\t\t\t\tterminal.publishCancellation(&usageBuffer, ctx.Err())
-\t\t\t\treturn
-\t\t\t}
+final_flush_replacement = '''			if !flushEvent() {
+				terminal.publishCancellation(&usageBuffer, ctx.Err())
+				return
+			}
 '''
 if stream_text.count(final_flush_block) != 1:
     raise SystemExit('expected native Claude final flush cancellation block')
 stream_text = stream_text.replace(final_flush_block, final_flush_replacement, 1)
-translated_cancellation_block = '''\t\t\t\tcase <-ctx.Done():
-\t\t\t\t\temitCancellation(ctx.Err())
-\t\t\t\t\treturn
+translated_cancellation_block = '''				case <-ctx.Done():
+					emitCancellation(ctx.Err())
+					return
 '''
-translated_cancellation_replacement = '''\t\t\t\tcase <-ctx.Done():
-\t\t\t\t\tterminal.publishCancellation(&usageBuffer, ctx.Err())
-\t\t\t\t\treturn
+translated_cancellation_replacement = '''				case <-ctx.Done():
+					terminal.publishCancellation(&usageBuffer, ctx.Err())
+					return
 '''
 if stream_text.count(translated_cancellation_block) != 1:
     raise SystemExit('expected translated Claude output cancellation block')
 stream_text = stream_text.replace(translated_cancellation_block, translated_cancellation_replacement, 1)
-native_scanner_outcome = '''\t\t\tif emitCancellation(scanner.Err()) {
-\t\t\t\treturn
-\t\t\t}
-\t\t\tif errScan := scanner.Err(); errScan != nil {
-\t\t\t\terrScan = wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, errScan)
-\t\t\t\thelps.RecordAPIResponseError(ctx, e.cfg, errScan)
-\t\t\t\tstreamUsage.PublishFailure(ctx, reporter, errScan)
-\t\t\t\tselect {
-\t\t\t\tcase out <- cliproxyexecutor.StreamChunk{Err: errScan}:
-\t\t\t\tcase <-ctx.Done():
-\t\t\t\t}
-\t\t\t\treturn
-\t\t\t}
+native_scanner_outcome = '''				if emitCancellation(scanner.Err()) {
+					return
+				}
+				if errScan := scanner.Err(); errScan != nil {
+					errScan = wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, errScan)
+					helps.RecordAPIResponseError(ctx, e.cfg, errScan)
+					streamUsage.PublishFailure(ctx, reporter, errScan)
+					select {
+					case out <- cliproxyexecutor.StreamChunk{Err: errScan}:
+					case <-ctx.Done():
+					}
+					return
+				}
 '''
-native_scanner_replacement = '''\t\t\tif terminal.finishScanner(&usageBuffer, scanner.Err()) {
-\t\t\t\treturn
-\t\t\t}
+native_scanner_replacement = '''				if terminal.finishScanner(&usageBuffer, scanner.Err()) {
+					return
+				}
 '''
 if stream_text.count(native_scanner_outcome) != 1:
     raise SystemExit('expected native Claude scanner outcome block')
 stream_text = stream_text.replace(native_scanner_outcome, native_scanner_replacement, 1)
-translated_scanner_outcome = '''\t\tif emitCancellation(scanner.Err()) {
-\t\t\treturn
-\t\t}
-\t\tif errScan := scanner.Err(); errScan != nil {
-\t\t\terrScan = wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, errScan)
-\t\t\thelps.RecordAPIResponseError(ctx, e.cfg, errScan)
-\t\t\tstreamUsage.PublishFailure(ctx, reporter, errScan)
-\t\t\tselect {
-\t\t\tcase out <- cliproxyexecutor.StreamChunk{Err: errScan}:
-\t\t\tcase <-ctx.Done():
-\t\t\t}
-\t\t\treturn
-\t\t}
+translated_scanner_outcome = '''			if emitCancellation(scanner.Err()) {
+				return
+			}
+			if errScan := scanner.Err(); errScan != nil {
+				errScan = wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, errScan)
+				helps.RecordAPIResponseError(ctx, e.cfg, errScan)
+				streamUsage.PublishFailure(ctx, reporter, errScan)
+				select {
+				case out <- cliproxyexecutor.StreamChunk{Err: errScan}:
+				case <-ctx.Done():
+				}
+				return
+			}
 '''
-translated_scanner_replacement = '''\t\tif terminal.finishScanner(&usageBuffer, scanner.Err()) {
-\t\t\treturn
-\t\t}
+translated_scanner_replacement = '''			if terminal.finishScanner(&usageBuffer, scanner.Err()) {
+				return
+			}
 '''
 if stream_text.count(translated_scanner_outcome) != 1:
     raise SystemExit('expected translated Claude scanner outcome block')

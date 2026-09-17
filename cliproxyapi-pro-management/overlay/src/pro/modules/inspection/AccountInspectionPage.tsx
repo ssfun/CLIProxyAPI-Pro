@@ -1,4 +1,5 @@
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -30,6 +31,7 @@ import {
   type AccountInspectionLogLevel,
   type AccountInspectionResultItem,
 } from '@/pro/modules/inspection/features/accountInspection';
+import { readInspectionFocusLocationState } from '@/pro/shared/inspectionNavigation';
 import { ProDetailDialog, ProSettingsSheet } from '@/pro/shared/ProSurface';
 import { useProSurfaceState } from '@/pro/shared/useProSurfaceState';
 import {
@@ -132,6 +134,7 @@ type ResultBulkAction = 'suggested' | 'recheck' | ManualAccountInspectionAction;
 
 export function AccountInspectionPage() {
   const { t, i18n } = useTranslation();
+  const location = useLocation();
   const apiBase = useAuthStore((state) => state.apiBase);
   const managementKey = useAuthStore((state) => state.managementKey);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
@@ -231,6 +234,21 @@ export function AccountInspectionPage() {
     observer.observe(root, { attributes: true, attributeFilter: ['class', 'data-theme'] });
     return () => observer.disconnect();
   }, []);
+
+
+  useEffect(() => {
+    const focus = readInspectionFocusLocationState(location.state);
+    if (!focus) return;
+    const query = focus.fileName || focus.authIndex || focus.authId;
+    if (!query) return;
+    setResultStatusFilter('all');
+    setResultReasonFilter(null);
+    setResultPendingOnly(false);
+    setSelectedResultProvider(ACCOUNT_INSPECTION_ALL_PROVIDER_TYPE);
+    setResultSearchInput(query);
+    setResultSearch(query);
+    setResultPage(1);
+  }, [location.state]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setResultSearch(deferredResultSearchInput.trim()), 300);

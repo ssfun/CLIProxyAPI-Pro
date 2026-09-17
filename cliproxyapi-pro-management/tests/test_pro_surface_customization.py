@@ -302,7 +302,7 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
         self.assertIn('onAfterClose={onAfterClose}', surface)
         self.assertIn('onAfterClose={() => setSelectedRealtimeErrorRowState(null)}', monitoring)
         self.assertIn('onAfterClose={() => setSelectedDetailResultState(null)}', inspection)
-        self.assertIn('onAfterClose={() => setSelectedRuntimeDetailState(null)}', routing)
+        self.assertIn('onAfterClose={() => setSelectedAccountState(null)}', routing)
         self.assertIn('onAfterClose={() => setDisplayFile(null)}', auth_test)
         self.assertIn('onAfterClose={() => setDisplayFile(null)}', account_usage)
         self.assertIn('onAfterClose={clearClosedNodeSheet}', proxy_pool)

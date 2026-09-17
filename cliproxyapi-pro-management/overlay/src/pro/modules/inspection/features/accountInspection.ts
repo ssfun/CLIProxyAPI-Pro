@@ -268,7 +268,7 @@ export const DEFAULT_ACCOUNT_INSPECTION_SETTINGS: AccountInspectionConfigurableS
   xaiDeepProbeEnabled: false,
   xaiDeepProbeModel: 'grok-4.5',
   autoExecuteQuotaLimitDisable: false,
-  autoExecuteQuotaRecoveryEnable: false,
+  autoExecuteQuotaRecoveryEnable: true,
   autoExecuteAccountInvalidAction: 'none',
   autoExecuteRequestErrorAction: 'none',
   autoExecuteConfirmations: 1,
@@ -638,6 +638,5 @@ export const isSuggestedAction = (item: AccountInspectionResultItem) => item.act
 
 export const hasAccountInspectionAutoExecutePolicies = (settings: AccountInspectionConfigurableSettings) =>
   settings.autoExecuteQuotaLimitDisable ||
-  settings.autoExecuteQuotaRecoveryEnable ||
   settings.autoExecuteAccountInvalidAction !== 'none' ||
   settings.autoExecuteRequestErrorAction !== 'none';

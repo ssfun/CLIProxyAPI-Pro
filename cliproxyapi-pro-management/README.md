@@ -129,26 +129,19 @@ UI 会在主布局中启动 `QuotaPersistenceBootstrap`，把已保存的配额�
 
 在完整 management API 前缀下，后端暴露为 `/v0/management/account-inspection/...`。
 
-### 调度策略页面
+### 调度看板页面
 
-新增顶级调度策略页面：
+新增顶级调度看板页面：
 
 ```text
 /routing
 ```
 
-页面只管理 Pro 请求状态保护，不读取或修改 `config.yaml` 的全局路由配置，包含两个视图：
-
-- 提供商保护：只展示当前已有 API 配置或凭据的受支持提供商，并分别配置开关、HTTP 状态码、连续确认门槛、确认窗口、429 配额证据、自动解除和兜底禁用时长。
-- 运行状态：查看当前由请求保护策略禁用的账号和最近事件；HTTP 状态以可点击徽章展示，完整原因和上下文收纳在详情弹窗中，并支持手动解除单个账号。
+页面只读展示选择器当前不会选中的账号，不读取或修改 `config.yaml` 的全局路由配置。分桶包括额度、认证与瞬时、待复查和重叠。动作只有跳转到账号巡检；上游冷却不会从本页清除。
 
 页面使用：
 
 - `GET /routing-policy`
-- `PUT /routing-policy/request-protection`
-- `POST /routing-policy/release`
-
-状态码由用户配置，后端会过滤到 `100-599`、去重并排序。保护功能默认关闭；`observe` 只记录匹配事件，`enforce` 才会实际禁用账号。自动解除只处理带有 request-protection 归属元数据的账号。
 
 ### 支撑性 API 与类型补丁
 
@@ -172,7 +165,7 @@ UI 会在主布局中启动 `QuotaPersistenceBootstrap`，把已保存的配额�
 - `overlay/` — 直接复制到 upstream checkout 的新增/覆盖文件。
 - `overlay/src/pro/modules/monitoring/` — 请求监控、用量分析与备份 UI。
 - `overlay/src/pro/modules/inspection/` — 账号巡检页面、状态与操作逻辑。
-- `overlay/src/pro/modules/routing/` — 调度策略和请求状态保护 UI。
+- `overlay/src/pro/modules/routing/` — 调度看板 UI。
 - `overlay/src/pro/modules/proxyPool/` 与 `oauthPolicy/` — 独立业务模块页面及 API。
 - `overlay/src/pro/modules/quota/` — SQLite 配额持久化、排序与 provider 扩展。
 - `overlay/src/pro/modules/*/manifest.tsx` — 各业务模块声明自己的路由、导航和启动副作用；`registry.tsx` 只维护模块清单并派生宿主投影，`ProBootstrap.tsx` 负责认证后挂载。

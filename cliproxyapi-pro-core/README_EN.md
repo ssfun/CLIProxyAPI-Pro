@@ -84,7 +84,7 @@ The export contains usage events and may also include metadata records:
 - `model_prices` — legacy base prices plus complete global per-model pricing rules.
 - `quota_cache` — SQLite-backed quota snapshots used by quota cards and account-scoped refresh.
 - `monitoring_settings` — retention, WebDAV backup, and scheduled models.dev synchronization settings.
-- `pro_settings` — Pro-owned settings, currently including request-state protection, proxy-pool settings, and the `oauth-policy` account policy.
+- `pro_settings` — Pro-owned settings, currently including quota-protection recovery state, proxy-pool settings, and the `oauth-policy` account policy. The legacy request-protection namespace is ignored and no longer takes over scheduling.
 - `routing_cursor_state` — account-routing rotation cursors.
 - `auth_runtime_stats` — account selection, success/failure, and recent-request-bucket statistics.
 - `account_inspection_schedule` — persisted backend account-inspection schedule.
@@ -183,7 +183,7 @@ The scheduler can inspect accounts for:
 - Kimi
 - xAI
 
-It supports provider filtering, two-level probe concurrency, retry/timeout settings, sampling, usage-threshold decisions, progress/status/log/result snapshots, pause/resume/stop controls, manual actions, and optional automatic actions for quota exhaustion, quota recovery, and account errors. Antigravity and xAI also support optional deep probes.
+It supports provider filtering, two-level probe concurrency, retry/timeout settings, sampling, usage-threshold decisions, progress/status/log/result snapshots, pause/resume/stop controls, manual actions, and optional automatic actions for quota exhaustion, quota recovery, and account errors. Quota recovery rechecks are on by default. Inspection does not add another hold when upstream cooldown already covers the same quota window. Antigravity and xAI also support optional deep probes.
 
 In the inspection settings, `workers` is the global probe concurrency across all providers (`1–8`, default `4`), while `providerWorkers` is the per-provider probe concurrency (`1–4`, default `2`). Regular probes, deep probes, xAI probes, and pre-probe token refreshes share these two limits and have no separate serialization gate. `deleteWorkers` (`1–4`, default `4`) limits both automatic actions and manual bulk actions from the management UI. These settings are stored in the account-inspection schedule JSON; they neither read nor modify `config.yaml`.
 
@@ -199,20 +199,14 @@ Override it with `ACCOUNT_INSPECTION_SCHEDULE_PATH` if needed.
 
 The latest finished inspection result is persisted separately at `/CLIProxyAPI/usage/account-inspection-snapshot.json` with mode `0600`. A snapshot restored after process restart or usage import is read-only and is replaced when the next full inspection finishes. Override its path with `ACCOUNT_INSPECTION_SNAPSHOT_PATH` if needed.
 
-### Request-state protection
+### Scheduling board
 
-The patch layer exposes request-state protection under the management prefix:
+The patch layer exposes a read-only scheduling board under the management prefix:
 
-- `GET /v0/management/routing-policy`
-- `PUT /v0/management/routing-policy/request-protection`
-- `PUT|PATCH /v0/management/routing-policy` (legacy compatibility; only `requestProtection` is handled)
-- `POST /v0/management/routing-policy/release`
+- `GET /v0/management/routing-policy` returns a live composite snapshot of upstream cooldowns, inspection quota holds, the effective restriction, and bucket counts
+- `PUT|PATCH /v0/management/routing-policy`, `PUT /v0/management/routing-policy/request-protection`, and `POST /v0/management/routing-policy/release` return `410 Gone`
 
-The API manages only Pro request-state protection and never reads or edits global routing values in `config.yaml`. Protection is stored in the `pro_settings` table in `usage.sqlite`. When SQLite has no setting yet, a legacy `routing.request-protection` node can be used as a one-time migration source; SQLite takes precedence afterward and the original YAML remains unchanged. Built-in protection supports Antigravity, xAI, Codex, Gemini CLI, Gemini, Gemini Interactions, Vertex AI, AI Studio, Claude, and Kimi.
-
-Protection is disabled by default and starts in `observe` mode. Per-provider settings cover HTTP statuses, consecutive-confirmation thresholds, confirmation windows, 429 quota evidence, automatic release, and fallback disable duration. `enforce` can disable matching auth records and records `request_protection` ownership; automatic or manual release affects only records owned by this policy, never user-disabled or differently owned accounts.
-
-Release time prefers `Retry-After`, Codex reset headers, and response-body `resets_at` / `resets_in_seconds`, then falls back to the configured provider duration. Runtime status includes currently protected accounts and recent in-process events.
+The board does not take over accounts, expose per-provider rules, or write parallel `routing:` protections. Inspection holds are released from Account Inspection; upstream cooldowns return to the pool automatically when they expire. Legacy `pro_settings/routing.request-protection` values are ignored.
 
 ### Root redirect and health response
 
@@ -260,7 +254,7 @@ It then starts `CLIProxyAPI` and optionally restores the latest usage backup fro
 - `patches/sources/internal/pro/state/` — stable routing/runtime contracts and the coalescing state writer.
 - `patches/sources/internal/pro/observability/` — backup-coordination adapters for usage, retention, price sync, WebDAV jobs, and ordinary state writes.
 - `patches/sources/internal/pro/quota/` — quota snapshot normalization/max-use calculation, cache success state and response-shape fingerprints, plus Gemini CLI/xAI billing, plan, request-path parsing, and merge policy.
-- `patches/sources/internal/pro/routing/` — durable selection cursors and request-protection ownership policy.
+- `patches/sources/internal/pro/routing/` — durable selection cursors and inspection ownership policy.
 - `patches/sources/internal/pro/inspection/` — inspection configuration, candidate filtering/sampling/two-level worker policy, status/log/stream/manual-action DTOs, result classification/filtering/pagination/summaries and merge transitions, provider decisions/error codes, action deduplication/summaries, result-snapshot schema/codec, automatic-action decisions, Antigravity/Claude/Codex/Kimi response parsing, and Antigravity/xAI deep-probe request/response protocols; provider probe transport, Gin/WebSocket, snapshot/quota-cache/observation I/O, and Auth mutation remain Management host adapters.
 - `patches/sources/internal/pro/backup/` — JSONL export, the import-exclusive/ordinary-write shared barrier, and the cross-module pause, flush, import, live-state restore, inspection restore, legacy cleanup, and resume sequence.
 - `entrypoint.sh` — starts Komari, starts the main API, and restores WebDAV usage backups.
@@ -269,11 +263,11 @@ It then starts `CLIProxyAPI` and optionally restores the latest usage backup fro
 - `patches/account_inspection_{runtime,http,accounts,transport,quota}.go` — backend account-inspection adapters split by lifecycle/API, account host capabilities, auth-bound transport, and quota-state boundaries before injection into upstream management handlers; tests follow the same split.
 - `patches/account_inspection_host.go` and `patches/pro_auth_mutation.go` — host adapters for the inspection quota port and shared Auth mutation/file persistence.
 - `patches/pro_management_runtime.go` — composes inspection and routing background lifecycles owned by one Management Handler.
-- The generated API Server shuts down its management Handler from `Stop`; embedders that create a Handler directly through the SDK must also call `Shutdown()` to release inspection, routing-protection, login-cleanup, and global callback ownership.
-- `patches/routing_policy.go` — unified routing configuration, request-state-protection handlers, usage plugin, and automatic release task.
+- The generated API Server shuts down its management Handler from `Stop`; embedders that create a Handler directly through the SDK must also call `Shutdown()` to release inspection, scheduling-board, login-cleanup, and global callback ownership.
+- `patches/routing_policy.go` — read-only scheduling-board handlers; startup clears leftover `routing:` protections.
 
 Static modules follow their actual host lifecycles: `pro/app` owns the proxy-pool and oauth-policy services on the request path; `pro/observability` follows the process context; inspection and routing controllers follow the Management Handler. OAuth plan detection reuses auth-bound upstream execution and the newest usable SQLite plugin-quota or inspection snapshot. Quota updates trigger auth-generation-safe model re-registration, while `POST /v0/management/pro/oauth-policy/refresh` starts an explicit re-detection. Cross-lifecycle backup ports use owner-scoped registration and reverse-order unregistration, so stopping an older Handler or Service cannot clear callbacks owned by a newer instance. `internal/embeddedusage` is restricted to upstream/SDK compatibility boundaries; `internal/pro` business modules do not depend back on that façade.
-- Core invariants: account inspection takes precedence over request protection; imported `routing_cursor_state` and `auth_runtime_stats` are applied to the live manager immediately; existing DB tables, JSONL record types, and `/v0/management/usage*` APIs remain compatible.
+- Core invariants: the scheduling board is a live read of upstream cooldowns and inspection holds; imported `routing_cursor_state` and `auth_runtime_stats` are applied to the live manager immediately; existing DB tables, JSONL record types, and `/v0/management/usage*` APIs remain compatible.
 - `patches/config_existing_updates.go` — existing-scalar-only YAML updates that never create missing keys.
 - `.github/workflows/release-core.yml` — image publish, Pro binary assets, `management.html` publish, usage backup, Render deployment trigger, Telegram notification, and run cleanup.
 

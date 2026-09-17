@@ -1,13 +1,32 @@
 import { describe, expect, test } from 'bun:test';
-import { normalizeRoutingPolicyInteger } from '../src/pro/modules/routing/routingPolicy';
+import { normalizeSchedulingBoardResponse } from '../src/pro/modules/routing/routingPolicy';
 
-describe('routing policy service model', () => {
-  test('normalizes integer policy fields to backend bounds', () => {
-    expect(normalizeRoutingPolicyInteger('1.9', 1, 5)).toBe(1);
-    expect(normalizeRoutingPolicyInteger('-1', 0, 10080)).toBe(0);
-    expect(normalizeRoutingPolicyInteger('90000', 1, 86400)).toBe(86400);
-    expect(normalizeRoutingPolicyInteger('invalid', 1, 5)).toBe(1);
-    expect(normalizeRoutingPolicyInteger('', 1, 86400, 600)).toBe(600);
-    expect(normalizeRoutingPolicyInteger('invalid', 1, 86400, 600)).toBe(600);
+describe('scheduling board service model', () => {
+  test('normalizes missing board payloads into empty live state', () => {
+    expect(normalizeSchedulingBoardResponse(null)).toEqual({
+      generatedAt: 0,
+      summary: {
+        blocked: 0,
+        quota: 0,
+        authTransient: 0,
+        recheck: 0,
+        overlap: 0,
+        excluded: 0,
+        nextRetryAt: 0,
+      },
+      accounts: [],
+    });
+  });
+
+  test('keeps live accounts and numeric summary fields', () => {
+    const got = normalizeSchedulingBoardResponse({
+      generatedAt: 10,
+      summary: { blocked: 2, quota: 1, authTransient: 1, recheck: 1, overlap: 1, excluded: 3, nextRetryAt: 20 },
+      accounts: [{ authId: 'a', authIndex: 'idx', provider: 'claude' } as never],
+    });
+    expect(got.generatedAt).toBe(10);
+    expect(got.summary.blocked).toBe(2);
+    expect(got.summary.nextRetryAt).toBe(20);
+    expect(got.accounts).toHaveLength(1);
   });
 });

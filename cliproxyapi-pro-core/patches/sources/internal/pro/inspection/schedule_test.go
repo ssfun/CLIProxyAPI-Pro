@@ -43,3 +43,25 @@ func TestNormalizeScheduleDefaultsProviderWorkersForLegacySettings(t *testing.T)
 		t.Fatalf("normalized legacy workers = %+v", got.Settings)
 	}
 }
+
+func TestDefaultSettingsEnableQuotaRecovery(t *testing.T) {
+	if !DefaultSettings().AutoExecuteQuotaRecoveryEnable {
+		t.Fatal("quota recovery should be on by default")
+	}
+}
+
+func TestLegacyScheduleJSONEnablesQuotaRecoveryByDefault(t *testing.T) {
+	var schedule Schedule
+	if err := json.Unmarshal([]byte(`{"settings":{"usedPercentThreshold":95}}`), &schedule); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if !schedule.Settings.AutoExecuteQuotaRecoveryEnable {
+		t.Fatal("legacy schedule JSON should enable quota recovery")
+	}
+	if err := json.Unmarshal([]byte(`{"settings":{"autoExecuteQuotaRecoveryEnable":false}}`), &schedule); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if schedule.Settings.AutoExecuteQuotaRecoveryEnable {
+		t.Fatal("explicit false must remain disabled")
+	}
+}

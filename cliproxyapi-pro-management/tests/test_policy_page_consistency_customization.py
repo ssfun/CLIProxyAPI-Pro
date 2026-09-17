@@ -16,9 +16,10 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
         account = (PRO_ROOT / 'oauthPolicy/OAuthPolicyPage.tsx').read_text()
         proxy_header = (PRO_ROOT / 'proxyPool/features/ProxyPoolHeader.tsx').read_text()
 
-        self.assertIn('<ProFeatureHeader', routing)
-        self.assertIn('onToggle={handleEnabledChange}', routing)
-        self.assertNotIn("setProtection('enabled'", routing)
+        self.assertNotIn('<ProFeatureHeader', routing)
+        self.assertIn("navigate('/account-inspection'", routing)
+        self.assertNotIn('routingPolicyApi.updateRequestProtection', routing)
+        self.assertNotIn('routingPolicyApi.release', routing)
         self.assertIn('<ProFeatureHeader', account)
         self.assertIn('onToggle={toggleEnabled}', account)
         self.assertNotIn('className={styles.enabledField}', account)
@@ -78,7 +79,7 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
         account = (PRO_ROOT / 'oauthPolicy/OAuthPolicyPage.tsx').read_text()
         proxy_page = (PRO_ROOT / 'proxyPool/ProxyPoolPage.tsx').read_text()
 
-        self.assertIn('isCurrentLayer && dirty', routing)
+        self.assertNotIn('isCurrentLayer && dirty', routing)
         self.assertIn('{dirty &&', account)
         self.assertIn('visible={isCurrentLayer && dirty}', proxy_page)
 
@@ -102,7 +103,6 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
 
     def test_refresh_callbacks_preserve_modified_drafts_without_reload_loops(self) -> None:
         for relative in (
-            'routing/RoutingPolicyPage.tsx',
             'oauthPolicy/OAuthPolicyPage.tsx',
             'proxyPool/ProxyPoolPage.tsx',
         ):
@@ -119,37 +119,24 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
         self.assertIn('providerDefinitions.length === 0', account)
         self.assertIn('Object.values(provider.plans).some(({ configured }) => configured)', service)
 
-    def test_routing_disconnect_preserves_modified_draft(self) -> None:
+    def test_routing_board_is_read_only(self) -> None:
         routing = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()
-        disconnected = routing[routing.index("if (connectionStatus !== 'connected') {"):]
-        disconnected = disconnected[:disconnected.index("    try {")]
+        service = (PRO_ROOT / 'routing/routingPolicy.ts').read_text()
 
-        self.assertIn('if (!dirtyRef.current) {', disconnected)
-        self.assertIn('setRequestProtection(null);', disconnected)
-
-    def test_routing_save_preserves_edits_made_while_request_is_in_flight(self) -> None:
-        routing = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()
-
-        self.assertIn('const draftRevisionRef = useRef(0)', routing)
-        self.assertGreaterEqual(routing.count('draftRevisionRef.current += 1'), 3)
-        self.assertIn('const savedRevision = draftRevisionRef.current', routing)
-        self.assertIn('draftRevisionRef.current === savedRevision', routing)
-        self.assertIn('if (!replaceDraft) return;', routing)
-
-    def test_routing_validation_skips_disabled_providers(self) -> None:
-        routing = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()
-
-        self.assertIn(
-            'statusCodes.length === 0 && nextProtection.enabled && providers[provider]?.enabled',
-            routing,
-        )
+        self.assertIn("navigate('/account-inspection'", routing)
+        self.assertIn('buildInspectionFocusLocationState', routing)
+        self.assertNotIn('updateRequestProtection', service)
+        self.assertNotIn("post<SchedulingBoardRawResponse>('/routing-policy/release'", service)
+        self.assertIn("get<SchedulingBoardRawResponse>('/routing-policy')", service)
+        self.assertNotIn('<ProFeatureHeader', routing)
+        self.assertNotIn('dirtyRef', routing)
 
     def test_header_and_discard_actions_cover_all_locales(self) -> None:
         locales = json.loads(LOCALES.read_text())
         routing = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()
         account = (PRO_ROOT / 'oauthPolicy/OAuthPolicyPage.tsx').read_text()
         required = {
-            'routing_policy': {'discard_changes'},
+            'routing_policy': {'title', 'subtitle', 'load_failed'},
             'oauth_policy': {
                 'discard_changes',
                 'providers_with_rules',
@@ -171,23 +158,23 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
                 self.assertTrue(keys.issubset(locales[locale][section]), f'{locale}: {section}')
             discard_labels = {
                 locales[locale][section]['discard_changes']
-                for section in ('routing_policy', 'oauth_policy', 'proxy_pool')
+                for section in ('oauth_policy', 'proxy_pool')
             }
             self.assertEqual(len(discard_labels), 1, f'{locale}: discard_changes')
 
         self.assertNotIn("t('common.disable'", routing)
         self.assertNotIn('t("common.disable"', account)
         self.assertNotIn("title={t('config_management.reload')}", routing)
-        self.assertIn("routing_policy.discard_changes", routing)
+        self.assertNotIn("routing_policy.discard_changes", routing)
         self.assertIn("oauth_policy.discard_changes", account)
 
     def test_policy_titles_match_the_product_navigation_names(self) -> None:
         locales = json.loads(LOCALES.read_text())
         expected = {
-            'en.json': ('Scheduling Policy', 'Account Policy'),
-            'ru.json': ('Политика планирования', 'Политика аккаунтов'),
-            'zh-CN.json': ('调度策略', '账号策略'),
-            'zh-TW.json': ('調度策略', '帳號策略'),
+            'en.json': ('Scheduling Board', 'Account Policy'),
+            'ru.json': ('Панель планирования', 'Политика аккаунтов'),
+            'zh-CN.json': ('调度看板', '账号策略'),
+            'zh-TW.json': ('調度看板', '帳號策略'),
         }
 
         for locale, (scheduling_title, account_title) in expected.items():

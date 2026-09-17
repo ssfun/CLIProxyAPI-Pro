@@ -33,21 +33,13 @@ func (s *accountInspectionScheduler) executeQuotaProtection(ctx context.Context,
 	}
 	var hold *prorouting.QuotaProtection
 	if action == accountInspectionActionDisable {
-		raw, err := json.Marshal(settings)
-		if err != nil {
-			return err
+		if coveredByUpstreamQuota(auth, result) {
+			result.ActionReason = "上游冷却已覆盖该额度窗口，未叠加巡检保护"
+			return nil
 		}
-		hold = &prorouting.QuotaProtection{Recheck: true, Model: result.QuotaModel, Reason: "inspection quota threshold", Settings: raw}
-		if auth.Provider == "xai" && xaiInspectionUsingAPI(auth) {
-			hold.Recheck = false
-		}
-		if settings.AutoExecuteQuotaRecoveryEnable {
-			hold.RetryAt = result.QuotaResetAt
-			if hold.RetryAt <= time.Now().UnixMilli() {
-				hold.RetryAt = time.Now().Add(prorouting.RecoveryBackoff(auth.ID, 0)).UnixMilli()
-			} else {
-				hold.RetryAt += int64(prorouting.RecoveryBackoff(auth.ID, 0)-time.Minute)/int64(time.Millisecond) + 1000
-			}
+		hold = newInspectionQuotaHold(auth, result, settings)
+		if hold == nil {
+			return fmt.Errorf("marshal inspection quota protection settings")
 		}
 	}
 	if err := s.inspectionAuthManager().ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, result.QuotaRevision, hold); err != nil {
@@ -85,7 +77,7 @@ func (s *accountInspectionScheduler) recoverQuotaProtections(ctx context.Context
 	running := s.isRunningLocked()
 	autoRecover := s.schedule.Settings.AutoExecuteQuotaRecoveryEnable
 	s.mu.Unlock()
-	if stopped || running || !autoRecover {
+	if stopped || running {
 		return
 	}
 	auths := s.inspectionAuthManager().List()
@@ -103,10 +95,7 @@ func (s *accountInspectionScheduler) recoverQuotaProtections(ctx context.Context
 			if json.Unmarshal(hold.Settings, &settings) == nil && settings.AutoExecuteQuotaRecoveryEnable != autoRecover {
 				settings.AutoExecuteQuotaRecoveryEnable = autoRecover
 				hold.Settings, _ = json.Marshal(settings)
-				hold.RetryAt = 0
-				if autoRecover {
-					hold.RetryAt = time.Now().Add(prorouting.RecoveryBackoff(auth.ID, 0)).UnixMilli()
-				}
+				syncInspectionHoldResume(&hold, auth, autoRecover)
 				if err := s.inspectionAuthManager().ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, hold.Revision, &hold); err != nil {
 					s.appendLog("warning", "额度恢复开关同步失败："+err.Error())
 				} else {
@@ -115,7 +104,7 @@ func (s *accountInspectionScheduler) recoverQuotaProtections(ctx context.Context
 				continue
 			}
 		}
-		if !ok || hold.RetryAt <= 0 || hold.RetryAt > now {
+		if !autoRecover || !ok || hold.RetryAt <= 0 || hold.RetryAt > now {
 			continue
 		}
 		if len(due) == 4 {
@@ -132,6 +121,56 @@ func (s *accountInspectionScheduler) recoverQuotaProtections(ctx context.Context
 		default:
 		}
 	}
+}
+
+func newInspectionQuotaHold(auth *coreauth.Auth, result *accountInspectionResult, settings accountInspectionSettings) *prorouting.QuotaProtection {
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		return nil
+	}
+	hold := &prorouting.QuotaProtection{
+		Recheck:  settings.AutoExecuteQuotaRecoveryEnable,
+		Model:    result.QuotaModel,
+		Reason:   "inspection quota threshold",
+		Settings: raw,
+	}
+	if auth != nil && auth.Provider == "xai" && xaiInspectionUsingAPI(auth) {
+		hold.Recheck = false
+	}
+	if !settings.AutoExecuteQuotaRecoveryEnable {
+		return hold
+	}
+	hold.RetryAt = result.QuotaResetAt
+	now := time.Now()
+	if hold.RetryAt <= now.UnixMilli() {
+		hold.RetryAt = now.Add(prorouting.RecoveryBackoff(authIDForHold(auth), 0)).UnixMilli()
+	} else {
+		hold.RetryAt += int64(prorouting.RecoveryBackoff(authIDForHold(auth), 0)-time.Minute)/int64(time.Millisecond) + 1000
+	}
+	return hold
+}
+
+func syncInspectionHoldResume(hold *prorouting.QuotaProtection, auth *coreauth.Auth, autoRecover bool) {
+	if hold == nil {
+		return
+	}
+	if !autoRecover {
+		hold.Recheck = false
+		hold.RetryAt = 0
+		return
+	}
+	hold.Recheck = true
+	if auth != nil && auth.Provider == "xai" && xaiInspectionUsingAPI(auth) {
+		hold.Recheck = false
+	}
+	hold.RetryAt = time.Now().Add(prorouting.RecoveryBackoff(authIDForHold(auth), 0)).UnixMilli()
+}
+
+func authIDForHold(auth *coreauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	return auth.ID
 }
 
 func recoveryTime(auth *coreauth.Auth) int64 {
@@ -217,70 +256,6 @@ func (s *accountInspectionScheduler) recoverQuotaAccount(ctx context.Context, au
 	}
 }
 
-// Request quota failures use the same restriction store. Native cooldowns keep
-// ownership of their model/credential scope and retry time; their expiry is
-// reevaluated by the upstream scheduler without an inspection cycle.
-func (c *routingPolicyController) protectRequestQuota(ctx context.Context, auth *coreauth.Auth, model string, policy routingProtectionProviderPolicy, event *routingProtectionEvent) error {
-	now := time.Now()
-	retryAt := event.ReleaseAt
-	scope := model
-	if auth.Quota.Reason == "credential_quota" && auth.Quota.NextRecoverAt.After(now) {
-		scope = ""
-		retryAt = auth.Quota.NextRecoverAt.UnixMilli()
-	} else if state := auth.ModelStates[model]; state != nil && state.NextRetryAfter.After(now) {
-		retryAt = state.NextRetryAfter.UnixMilli()
-	}
-	if policy.AutoEnable {
-		if retryAt <= now.UnixMilli() {
-			retryAt = now.Add(prorouting.RecoveryBackoff(auth.ID, 0)).UnixMilli()
-		}
-	} else {
-		retryAt = 0
-	}
-	source := "routing:" + scope
-	protections := prorouting.QuotaProtections(auth.Metadata)
-	old := protections[source]
-	if old.RetryAt > retryAt && retryAt != 0 {
-		retryAt = old.RetryAt
-	}
-	hold := prorouting.QuotaProtection{RetryAt: retryAt, Model: scope, Reason: event.Reason}
-	if err := c.h.authManager.ChangeQuotaProtection(ctx, auth, source, old.Revision, &hold); err != nil {
-		return err
-	}
-	event.Action = "cooldown"
-	event.ReleaseAt = retryAt
-	return nil
-}
-
-func (c *routingPolicyController) releaseQuotaProtections(ctx context.Context, auth *coreauth.Auth, dueOnly bool) (bool, error) {
-	changed := false
-	for source, hold := range prorouting.QuotaProtections(auth.Metadata) {
-		if !strings.HasPrefix(source, "routing:") {
-			continue
-		}
-		if dueOnly && (hold.RetryAt == 0 || hold.RetryAt > time.Now().UnixMilli()) {
-			continue
-		}
-		if err := c.h.authManager.ChangeQuotaProtection(ctx, auth, source, hold.Revision, nil); err != nil {
-			return changed, err
-		}
-		changed = true
-	}
-	return changed, nil
-}
-
-func hasRoutingQuotaProtection(auth *coreauth.Auth) bool {
-	if auth == nil {
-		return false
-	}
-	for source := range prorouting.QuotaProtections(auth.Metadata) {
-		if strings.HasPrefix(source, "routing:") {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *accountInspectionScheduler) publishQuotaProtectionState(authID, reason string) {
 	auth, ok := s.inspectionAuthManager().GetByID(authID)
 	if !ok || auth == nil {
@@ -310,4 +285,32 @@ func (s *accountInspectionScheduler) publishQuotaProtectionState(authID, reason 
 	if err != nil {
 		s.appendLog("warning", "额度保护状态保存失败："+err.Error())
 	}
+}
+
+func coveredByUpstreamQuota(auth *coreauth.Auth, result *accountInspectionResult) bool {
+	if auth == nil || result == nil {
+		return false
+	}
+	now := time.Now()
+	if auth.Quota.Exceeded && auth.Quota.Reason == "credential_quota" && auth.Quota.NextRecoverAt.After(now) {
+		if result.QuotaResetAt <= 0 || auth.Quota.NextRecoverAt.UnixMilli() >= result.QuotaResetAt {
+			return true
+		}
+	}
+	model := strings.TrimSpace(result.QuotaModel)
+	if model == "" {
+		return false
+	}
+	state := auth.ModelStates[model]
+	if state == nil {
+		return false
+	}
+	if !state.Unavailable && !state.Quota.Exceeded {
+		return false
+	}
+	next := state.NextRetryAfter
+	if state.Quota.NextRecoverAt.After(next) {
+		next = state.Quota.NextRecoverAt
+	}
+	return next.After(now) && (result.QuotaResetAt <= 0 || next.UnixMilli() >= result.QuotaResetAt)
 }

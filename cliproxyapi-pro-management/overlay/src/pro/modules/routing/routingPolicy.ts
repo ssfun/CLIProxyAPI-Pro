@@ -1,124 +1,94 @@
 import { apiClient } from '@/services/api/client';
 
-export const ROUTING_POLICY_PROVIDERS = [
-  'antigravity',
-  'xai',
-  'codex',
-  'gemini-cli',
-  'gemini',
-  'gemini-interactions',
-  'vertex',
-  'aistudio',
-  'claude',
-  'kimi',
-] as const;
+export type SchedulingBoardBucket = 'quota' | 'authTransient' | 'recheck' | 'overlap';
+export type SchedulingBoardKind = 'quota' | 'auth' | 'transient' | 'model';
+export type SchedulingBoardResume = 'auto-expire' | 'recheck-quota' | 'probe-request' | 'manual';
+export type SchedulingBoardScope = 'credential' | 'model';
 
-export type RoutingPolicyProvider = (typeof ROUTING_POLICY_PROVIDERS)[number];
-export type RoutingProtectionMode = 'observe' | 'enforce';
-
-export const normalizeRoutingPolicyInteger = (
-  value: string | number,
-  min: number,
-  max: number,
-  fallback = min
-): number => {
-  const parsed = typeof value === 'string' && !value.trim() ? fallback : Number(value);
-  const integer = Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
-  return Math.min(max, Math.max(min, integer));
-};
-
-export interface RoutingProtectionProviderPolicy {
-  enabled: boolean;
-  statusCodes: number[];
-  confirmations: number;
-  confirmationWindowSeconds: number;
-  autoEnable: boolean;
-  fallbackDisableMinutes: number;
-  requireQuotaEvidence: boolean;
+export interface SchedulingBoardSummary {
+  blocked: number;
+  quota: number;
+  authTransient: number;
+  recheck: number;
+  overlap: number;
+  excluded: number;
+  nextRetryAt?: number;
 }
 
-export interface RoutingRequestProtectionConfig {
-  enabled: boolean;
-  mode: RoutingProtectionMode;
-  providers: Record<RoutingPolicyProvider, RoutingProtectionProviderPolicy>;
+export interface SchedulingBoardDetail {
+  source: 'upstream' | 'inspection' | string;
+  scope: SchedulingBoardScope | string;
+  model?: string;
+  kind: SchedulingBoardKind | string;
+  resume: SchedulingBoardResume | string;
+  retryAt?: number;
+  reason: string;
+  httpStatus?: number;
 }
 
-export interface RoutingProtectedAccount {
+export interface SchedulingBoardAccount {
   provider: string;
   authId: string;
   authIndex: string;
   fileName: string;
-  statusCode: number;
+  scope: SchedulingBoardScope | string;
+  models?: string[];
+  kind: SchedulingBoardKind | string;
+  bucket: SchedulingBoardBucket | string;
+  sources: string[];
+  resume: SchedulingBoardResume | string;
+  retryAt?: number;
+  remainingSeconds?: number;
   reason: string;
-  triggeredAt: number;
-  releaseAt: number;
-  action?: string;
+  httpStatus?: number;
+  inspection: boolean;
+  overlap: boolean;
+  details: SchedulingBoardDetail[];
 }
 
-export interface RoutingProtectionEvent {
-  id: string;
-  provider: string;
-  authId: string;
-  authIndex: string;
-  fileName: string;
-  statusCode: number;
-  mode: RoutingProtectionMode;
-  action: 'pending' | 'observe' | 'disabled' | 'released' | 'error' | string;
-  reason: string;
-  count: number;
-  required: number;
-  triggeredAt: number;
-  releaseAt: number;
+export interface SchedulingBoardResponse {
+  generatedAt: number;
+  summary: SchedulingBoardSummary;
+  accounts: SchedulingBoardAccount[];
 }
 
-export interface RoutingPolicyResponse {
-  requestProtection: RoutingRequestProtectionConfig;
-  availableProviders: RoutingPolicyProvider[];
-  active: RoutingProtectedAccount[];
-  recentEvents: RoutingProtectionEvent[];
-}
-
-type RoutingPolicyRawResponse = Omit<
-  RoutingPolicyResponse,
-  'availableProviders' | 'active' | 'recentEvents'
-> & {
-  availableProviders?: string[] | null;
-  active?: RoutingProtectedAccount[] | null;
-  recentEvents?: RoutingProtectionEvent[] | null;
+type SchedulingBoardRawResponse = {
+  generatedAt?: number;
+  summary?: Partial<SchedulingBoardSummary> | null;
+  accounts?: SchedulingBoardAccount[] | null;
 };
 
-const isRoutingPolicyProvider = (provider: string): provider is RoutingPolicyProvider =>
-  ROUTING_POLICY_PROVIDERS.some((candidate) => candidate === provider);
+const emptySummary = (): SchedulingBoardSummary => ({
+  blocked: 0,
+  quota: 0,
+  authTransient: 0,
+  recheck: 0,
+  overlap: 0,
+  excluded: 0,
+});
 
-const normalizeRoutingPolicyResponse = (
-  response: RoutingPolicyRawResponse
-): RoutingPolicyResponse => ({
-  ...response,
-  availableProviders: Array.isArray(response.availableProviders)
-    ? response.availableProviders.filter(isRoutingPolicyProvider)
-    : [...ROUTING_POLICY_PROVIDERS],
-  active: Array.isArray(response.active) ? response.active : [],
-  recentEvents: Array.isArray(response.recentEvents) ? response.recentEvents : [],
+export const normalizeSchedulingBoardResponse = (
+  response: SchedulingBoardRawResponse | null | undefined
+): SchedulingBoardResponse => ({
+  generatedAt: Number(response?.generatedAt) || 0,
+  summary: {
+    ...emptySummary(),
+    ...(response?.summary ?? {}),
+    blocked: Number(response?.summary?.blocked) || 0,
+    quota: Number(response?.summary?.quota) || 0,
+    authTransient: Number(response?.summary?.authTransient) || 0,
+    recheck: Number(response?.summary?.recheck) || 0,
+    overlap: Number(response?.summary?.overlap) || 0,
+    excluded: Number(response?.summary?.excluded) || 0,
+    nextRetryAt: Number(response?.summary?.nextRetryAt) || 0,
+  },
+  accounts: Array.isArray(response?.accounts) ? response.accounts : [],
 });
 
 export const routingPolicyApi = {
-  async get(): Promise<RoutingPolicyResponse> {
-    return normalizeRoutingPolicyResponse(
-      await apiClient.get<RoutingPolicyRawResponse>('/routing-policy')
-    );
-  },
-  async updateRequestProtection(
-    requestProtection: RoutingRequestProtectionConfig
-  ): Promise<RoutingPolicyResponse> {
-    return normalizeRoutingPolicyResponse(
-      await apiClient.put<RoutingPolicyRawResponse>('/routing-policy/request-protection', {
-        requestProtection,
-      })
-    );
-  },
-  async release(authIndex: string): Promise<RoutingPolicyResponse> {
-    return normalizeRoutingPolicyResponse(
-      await apiClient.post<RoutingPolicyRawResponse>('/routing-policy/release', { authIndex })
+  async get(): Promise<SchedulingBoardResponse> {
+    return normalizeSchedulingBoardResponse(
+      await apiClient.get<SchedulingBoardRawResponse>('/routing-policy')
     );
   },
 };

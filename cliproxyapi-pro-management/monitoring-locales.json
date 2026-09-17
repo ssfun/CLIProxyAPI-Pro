@@ -7,10 +7,11 @@
       "monitoring_center": "Request Monitoring",
       "data_management": "Data Management",
       "account_inspection": "Account Inspection",
-      "routing_policy": "Scheduling Policy"
+      "routing_policy": "Scheduling Board"
     },
     "nav_meta": {
-      "data_management": "Pro data storage, backup, restore, retention, and maintenance"
+      "data_management": "Pro data storage, backup, restore, retention, and maintenance",
+      "routing_policy": "Live view of accounts currently withheld from scheduling"
     },
     "pro_feature_header": {
       "active": "Taking over",
@@ -1449,9 +1450,9 @@
       "monitoring_settings_reset_success": "Statistics reset completed; {{count}} request events and {{accounts}} account counter records deleted"
     },
     "routing_policy": {
-      "title": "Scheduling Policy",
-      "subtitle": "Configure request-driven credential protection by provider.",
-      "load_failed": "Failed to load scheduling policy",
+      "title": "Scheduling Board",
+      "subtitle": "Read-only view of accounts the selector will not pick right now. Upstream cooldowns expire automatically; inspection holds are released from Account Inspection.",
+      "load_failed": "Failed to load scheduling board",
       "save_success": "Scheduling policy saved",
       "save_failed": "Failed to save scheduling policy",
       "status_codes_required": "{{provider}} requires at least one valid HTTP status code",
@@ -1471,7 +1472,41 @@
       "views": {
         "global": "Global Routing",
         "providers": "Provider Protection",
-        "runtime": "Runtime Status"
+        "runtime": "Runtime Status",
+        "all": "All blocked",
+        "quota": "Quota",
+        "authTransient": "Auth & transient",
+        "recheck": "Pending recheck",
+        "overlap": "Overlap"
+      },
+      "summary": {
+        "blocked": "Blocked",
+        "quota": "Quota",
+        "authTransient": "Auth & transient",
+        "recheck": "Pending recheck",
+        "overlap": "Overlap",
+        "next_retry": "Next account returns at {{time}}",
+        "no_retry": "No timed return is currently scheduled."
+      },
+      "buckets": {
+        "quota": "Quota",
+        "authTransient": "Auth & transient",
+        "recheck": "Pending recheck",
+        "overlap": "Overlap"
+      },
+      "scopes": {
+        "credential": "Whole account",
+        "model": "Selected models"
+      },
+      "resume": {
+        "auto-expire": "Retry when due",
+        "recheck-quota": "Recheck quota",
+        "probe-request": "Probe with a real request",
+        "manual": "Manual release"
+      },
+      "sources": {
+        "upstream": "Upstream cooldown",
+        "inspection": "Inspection hold"
       },
       "providers": {
         "antigravity": "Antigravity",
@@ -1545,7 +1580,7 @@
         "release_at": "Release at",
         "reason": "Reason",
         "reason_details": "Reason details",
-        "details_title": "Request protection details",
+        "details_title": "Scheduling restriction details",
         "details_click_hint": "Click to view request protection details",
         "auth_index": "Credential index",
         "auth_id": "Credential ID",
@@ -1555,7 +1590,17 @@
         "action": "Action",
         "confirmation": "Confirmation",
         "manual": "Manual",
-        "no_active": "No credentials are currently disabled by request protection.",
+        "no_active": "No accounts are currently withheld from scheduling.",
+        "scope": "Scope",
+        "models": "Models",
+        "all_models": "All models",
+        "resume": "Resume",
+        "retry_at": "Next check",
+        "restriction": "Restriction",
+        "open_inspection": "View in inspection",
+        "due_now": "Due now",
+        "remaining_seconds": "{{count}}s left",
+        "remaining_minutes": "{{count}} min left",
         "no_events": "No request protection events have been recorded in this process."
       },
       "actions": {
@@ -1577,10 +1622,11 @@
       "monitoring_center": "Мониторинг запросов",
       "data_management": "Управление данными",
       "account_inspection": "Проверка аккаунтов",
-      "routing_policy": "Политика планирования"
+      "routing_policy": "Панель планирования"
     },
     "nav_meta": {
-      "data_management": "Хранилище, резервные копии, восстановление и обслуживание данных Pro"
+      "data_management": "Хранилище, резервные копии, восстановление и обслуживание данных Pro",
+      "routing_policy": "Только просмотр аккаунтов, которые сейчас не выбираются планировщиком"
     },
     "pro_feature_header": {
       "active": "Перехват активен",
@@ -2686,9 +2732,9 @@
       "monitoring_settings_reset_success": "Статистика сброшена; удалено событий запросов: {{count}}, записей счётчиков аккаунтов: {{accounts}}"
     },
     "routing_policy": {
-      "title": "Политика планирования",
-      "subtitle": "Настройка защиты credential по результатам запросов для каждого провайдера.",
-      "load_failed": "Не удалось загрузить политику планирования",
+      "title": "Панель планирования",
+      "subtitle": "Только просмотр аккаунтов, которые селектор сейчас не выберет. Охлаждение upstream истекает само; удержания инспекции снимаются на странице инспекции аккаунтов.",
+      "load_failed": "Не удалось загрузить панель планирования",
       "save_success": "Политика планирования сохранена",
       "save_failed": "Не удалось сохранить политику планирования",
       "status_codes_required": "Для {{provider}} требуется хотя бы один корректный HTTP-код",
@@ -2708,7 +2754,41 @@
       "views": {
         "global": "Общая маршрутизация",
         "providers": "Защита провайдеров",
-        "runtime": "Состояние выполнения"
+        "runtime": "Состояние выполнения",
+        "all": "Все заблокированные",
+        "quota": "Квота",
+        "authTransient": "Авторизация и временные",
+        "recheck": "Ожидают проверки",
+        "overlap": "Перекрытие"
+      },
+      "summary": {
+        "blocked": "Заблокировано",
+        "quota": "Квота",
+        "authTransient": "Авторизация и временные",
+        "recheck": "Ожидают проверки",
+        "overlap": "Перекрытие",
+        "next_retry": "Следующий аккаунт вернётся в {{time}}",
+        "no_retry": "Сейчас нет запланированного возврата по времени."
+      },
+      "buckets": {
+        "quota": "Квота",
+        "authTransient": "Авторизация и временные",
+        "recheck": "Ожидают проверки",
+        "overlap": "Перекрытие"
+      },
+      "scopes": {
+        "credential": "Весь аккаунт",
+        "model": "Выбранные модели"
+      },
+      "resume": {
+        "auto-expire": "Повторить по сроку",
+        "recheck-quota": "Перепроверить квоту",
+        "probe-request": "Проверить реальным запросом",
+        "manual": "Ручное снятие"
+      },
+      "sources": {
+        "upstream": "Охлаждение upstream",
+        "inspection": "Удержание инспекции"
       },
       "providers": {
         "antigravity": "Antigravity",
@@ -2782,7 +2862,7 @@
         "release_at": "Освободить в",
         "reason": "Причина",
         "reason_details": "Подробности причины",
-        "details_title": "Детали защиты запросов",
+        "details_title": "Сведения об ограничении планирования",
         "details_click_hint": "Нажмите, чтобы посмотреть детали защиты запросов",
         "auth_index": "Индекс credential",
         "auth_id": "ID credential",
@@ -2792,7 +2872,17 @@
         "action": "Действие",
         "confirmation": "Подтверждение",
         "manual": "Вручную",
-        "no_active": "Нет credential, отключённых защитой запросов.",
+        "no_active": "Сейчас нет аккаунтов, исключённых из планирования.",
+        "scope": "Область",
+        "models": "Модели",
+        "all_models": "Все модели",
+        "resume": "Возобновление",
+        "retry_at": "Следующая проверка",
+        "restriction": "Ограничение",
+        "open_inspection": "Открыть в инспекции",
+        "due_now": "Срок наступил",
+        "remaining_seconds": "осталось {{count}} с",
+        "remaining_minutes": "осталось {{count}} мин",
         "no_events": "В этом процессе ещё нет событий защиты запросов."
       },
       "actions": {
@@ -2814,10 +2904,11 @@
       "monitoring_center": "请求监控",
       "data_management": "数据管理",
       "account_inspection": "账号巡检",
-      "routing_policy": "调度策略"
+      "routing_policy": "调度看板"
     },
     "nav_meta": {
-      "data_management": "管理 Pro 数据存储、备份恢复、保留策略与维护操作"
+      "data_management": "管理 Pro 数据存储、备份恢复、保留策略与维护操作",
+      "routing_policy": "只读查看当前不会被调度选中的账号"
     },
     "pro_feature_header": {
       "active": "正在接管",
@@ -4395,9 +4486,9 @@
       "monitoring_settings_reset_success": "统计数据已重置，共删除 {{count}} 条请求事件和 {{accounts}} 条账号计数记录"
     },
     "routing_policy": {
-      "title": "调度策略",
-      "subtitle": "按提供商配置基于请求结果的账号保护策略。",
-      "load_failed": "调度策略加载失败",
+      "title": "调度看板",
+      "subtitle": "只读展示选择器当前不会选中的账号。上游冷却到期后自动回到调度池，巡检保护请到账号巡检页解除。",
+      "load_failed": "调度看板加载失败",
       "save_success": "调度策略已保存",
       "save_failed": "调度策略保存失败",
       "status_codes_required": "{{provider}} 至少需要一个有效的 HTTP 状态码",
@@ -4417,7 +4508,41 @@
       "views": {
         "global": "全局路由",
         "providers": "提供商保护",
-        "runtime": "运行状态"
+        "runtime": "运行状态",
+        "all": "全部不可调度",
+        "quota": "额度",
+        "authTransient": "认证与瞬时",
+        "recheck": "待复查",
+        "overlap": "重叠"
+      },
+      "summary": {
+        "blocked": "当前不可调度",
+        "quota": "额度",
+        "authTransient": "认证与瞬时",
+        "recheck": "待复查",
+        "overlap": "重叠",
+        "next_retry": "最近一个账号将在 {{time}} 回到调度池",
+        "no_retry": "当前没有按时间自动回到调度池的账号。"
+      },
+      "buckets": {
+        "quota": "额度",
+        "authTransient": "认证与瞬时",
+        "recheck": "待复查",
+        "overlap": "重叠"
+      },
+      "scopes": {
+        "credential": "整号",
+        "model": "指定模型"
+      },
+      "resume": {
+        "auto-expire": "到期再试",
+        "recheck-quota": "复查额度",
+        "probe-request": "到期试一次请求",
+        "manual": "手动解除"
+      },
+      "sources": {
+        "upstream": "上游冷却",
+        "inspection": "巡检保护"
       },
       "providers": {
         "antigravity": "Antigravity",
@@ -4491,7 +4616,7 @@
         "release_at": "解除时间",
         "reason": "原因",
         "reason_details": "原因详情",
-        "details_title": "请求保护详情",
+        "details_title": "调度限制详情",
         "details_click_hint": "点击查看请求保护详情",
         "auth_index": "认证索引",
         "auth_id": "认证 ID",
@@ -4501,7 +4626,17 @@
         "action": "动作",
         "confirmation": "确认进度",
         "manual": "手动解除",
-        "no_active": "当前没有由请求保护策略禁用的账号。",
+        "no_active": "当前没有被调度挡住的账号。",
+        "scope": "范围",
+        "models": "模型",
+        "all_models": "全部模型",
+        "resume": "验证方式",
+        "retry_at": "下次验证",
+        "restriction": "限制",
+        "open_inspection": "在巡检中查看",
+        "due_now": "已到期",
+        "remaining_seconds": "剩余 {{count}} 秒",
+        "remaining_minutes": "剩余 {{count}} 分钟",
         "no_events": "当前进程尚未记录请求保护事件。"
       },
       "actions": {
@@ -4523,10 +4658,11 @@
       "monitoring_center": "請求監控",
       "data_management": "資料管理",
       "account_inspection": "帳號巡檢",
-      "routing_policy": "調度策略"
+      "routing_policy": "調度看板"
     },
     "nav_meta": {
-      "data_management": "管理 Pro 資料儲存、備份還原、保留策略與維護操作"
+      "data_management": "管理 Pro 資料儲存、備份還原、保留策略與維護操作",
+      "routing_policy": "唯讀查看目前不會被調度選中的帳號"
     },
     "pro_feature_header": {
       "active": "正在接管",
@@ -5965,9 +6101,9 @@
       "monitoring_settings_reset_success": "統計資料已重設，共刪除 {{count}} 筆請求事件和 {{accounts}} 筆帳號計數記錄"
     },
     "routing_policy": {
-      "title": "調度策略",
-      "subtitle": "按供應商設定依請求結果執行的帳號保護策略。",
-      "load_failed": "調度策略載入失敗",
+      "title": "調度看板",
+      "subtitle": "唯讀展示選擇器目前不會選中的帳號。上游冷卻到期後會自動回到調度池，巡檢保護請到帳號巡檢頁解除。",
+      "load_failed": "調度看板載入失敗",
       "save_success": "調度策略已儲存",
       "save_failed": "調度策略儲存失敗",
       "status_codes_required": "{{provider}} 至少需要一個有效的 HTTP 狀態碼",
@@ -5987,7 +6123,41 @@
       "views": {
         "global": "全域路由",
         "providers": "供應商保護",
-        "runtime": "執行狀態"
+        "runtime": "執行狀態",
+        "all": "全部不可調度",
+        "quota": "額度",
+        "authTransient": "認證與瞬時",
+        "recheck": "待複查",
+        "overlap": "重疊"
+      },
+      "summary": {
+        "blocked": "目前不可調度",
+        "quota": "額度",
+        "authTransient": "認證與瞬時",
+        "recheck": "待複查",
+        "overlap": "重疊",
+        "next_retry": "最近一個帳號將在 {{time}} 回到調度池",
+        "no_retry": "目前沒有依時間自動回到調度池的帳號。"
+      },
+      "buckets": {
+        "quota": "額度",
+        "authTransient": "認證與瞬時",
+        "recheck": "待複查",
+        "overlap": "重疊"
+      },
+      "scopes": {
+        "credential": "整號",
+        "model": "指定模型"
+      },
+      "resume": {
+        "auto-expire": "到期再試",
+        "recheck-quota": "複查額度",
+        "probe-request": "到期試一次請求",
+        "manual": "手動解除"
+      },
+      "sources": {
+        "upstream": "上游冷卻",
+        "inspection": "巡檢保護"
       },
       "providers": {
         "antigravity": "Antigravity",
@@ -6061,7 +6231,7 @@
         "release_at": "解除時間",
         "reason": "原因",
         "reason_details": "原因詳情",
-        "details_title": "請求保護詳情",
+        "details_title": "調度限制詳情",
         "details_click_hint": "點擊查看請求保護詳情",
         "auth_index": "認證索引",
         "auth_id": "認證 ID",
@@ -6071,7 +6241,17 @@
         "action": "動作",
         "confirmation": "確認進度",
         "manual": "手動解除",
-        "no_active": "目前沒有由請求保護策略停用的帳號。",
+        "no_active": "目前沒有被調度擋住的帳號。",
+        "scope": "範圍",
+        "models": "模型",
+        "all_models": "全部模型",
+        "resume": "驗證方式",
+        "retry_at": "下次驗證",
+        "restriction": "限制",
+        "open_inspection": "在巡檢中查看",
+        "due_now": "已到期",
+        "remaining_seconds": "剩餘 {{count}} 秒",
+        "remaining_minutes": "剩餘 {{count}} 分鐘",
         "no_events": "目前程序尚未記錄請求保護事件。"
       },
       "actions": {

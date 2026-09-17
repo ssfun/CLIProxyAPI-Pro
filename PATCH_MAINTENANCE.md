@@ -29,4 +29,4 @@
 
 ### 额度保护恢复
 
-巡检与请求保护的额度限制由 `pro/routing/quota_protection.go` 定义；`auth/pro_quota_protection.go` 负责 SQLite 状态和按来源版本校验，Management `quota_recovery.go` 负责定向复查。复用 upstream selector/scheduler 的阻塞评估、冷却到期重新选择以及现有账号策略刷新入口，不修改优先级、权重或轮询算法。退出条件是 upstream 提供带来源隔离、持久化、阈值复查及凭据版本保护的等价接口；届时迁移状态后删除对应接入点。旧的无归属禁用状态不得批量自动启用。
+巡检额度限制由 `pro/routing/quota_protection.go` 定义；`auth/pro_quota_protection.go` 负责 SQLite 状态和按来源版本校验，Management `quota_recovery.go` 负责定向复查。`routing_policy.go` 现在只读合成上游冷却和巡检保护，不再写入 `routing:` 平行保护或接管 `disabled`。复用 upstream selector/scheduler 的阻塞评估、冷却到期重新选择以及现有账号策略刷新入口，不修改优先级、权重或轮询算法。退出条件是 upstream 提供带来源隔离、持久化、阈值复查及凭据版本保护的等价接口；届时迁移状态后删除对应接入点。旧的无归属禁用状态不得批量自动启用。

@@ -1,6 +1,7 @@
 package inspection
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 )
@@ -75,8 +76,26 @@ func DefaultSettings() Settings {
 		XAIDeepProbeModel:               "grok-4.5",
 		AutoExecuteAccountInvalidAction: ActionNone,
 		AutoExecuteRequestErrorAction:   ActionNone,
+		AutoExecuteQuotaRecoveryEnable:  true,
 		AutoExecuteConfirmations:        1,
 	}
+}
+
+func (s *Settings) UnmarshalJSON(data []byte) error {
+	type settingsAlias Settings
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var decoded settingsAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*s = Settings(decoded)
+	if _, ok := raw["autoExecuteQuotaRecoveryEnable"]; !ok {
+		s.AutoExecuteQuotaRecoveryEnable = true
+	}
+	return nil
 }
 
 func NormalizeSchedule(input Schedule, now time.Time) Schedule {

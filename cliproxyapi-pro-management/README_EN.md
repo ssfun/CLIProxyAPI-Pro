@@ -129,26 +129,19 @@ Backend schedule/status/control routes expected by the page:
 
 Under the full management API prefix these are exposed by the backend as `/v0/management/account-inspection/...`.
 
-### Scheduling policy page
+### Scheduling board page
 
-Adds a top-level scheduling-policy route:
+Adds a top-level scheduling-board route:
 
 ```text
 /routing
 ```
 
-The page manages only Pro request-state protection, never global routing values in `config.yaml`, and has two views:
-
-- Provider protection: only supported providers with current API configuration or credentials, with per-provider enablement, HTTP statuses, confirmation thresholds and windows, 429 quota evidence, automatic release, and fallback disable duration.
-- Runtime status: accounts currently disabled by request protection plus recent events, detailed reason/context dialogs, and manual release for one account.
+The page is a read-only view of accounts the selector will not pick right now. It never reads or edits global routing values in `config.yaml`. Buckets cover quota, auth/transient failures, pending recheck, and overlap. The only action is jumping to Account Inspection; upstream cooldowns are not cleared from this page.
 
 The page uses:
 
 - `GET /routing-policy`
-- `PUT /routing-policy/request-protection`
-- `POST /routing-policy/release`
-
-Protection is disabled by default. `observe` records matches; only `enforce` disables accounts. Automatic and manual release affect only accounts carrying request-protection ownership metadata.
 
 ### Supporting API and type patches
 
@@ -172,7 +165,7 @@ Request Monitoring uses an initial snapshot plus SSE increments and cursor catch
 - `overlay/` — files copied directly into the upstream checkout.
 - `overlay/src/pro/modules/monitoring/` — request monitoring, usage analytics, and backup UI.
 - `overlay/src/pro/modules/inspection/` — account inspection page, state, and actions.
-- `overlay/src/pro/modules/routing/` — scheduling policy and request-state-protection UI.
+- `overlay/src/pro/modules/routing/` — scheduling board UI.
 - `overlay/src/pro/modules/proxyPool/` and `oauthPolicy/` — independent module pages and APIs.
 - `overlay/src/pro/modules/quota/` — SQLite quota persistence, sorting, and provider extensions.
 - `overlay/src/pro/modules/*/manifest.tsx` — each business module declares its route, navigation, and startup effects; `registry.tsx` keeps only the module list and derives host projections, while `ProBootstrap.tsx` mounts them after authentication.

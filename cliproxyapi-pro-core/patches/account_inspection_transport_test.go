@@ -1079,3 +1079,46 @@ func TestQuotaRecoveryRechecksWithoutFullInspection(t *testing.T) {
 		})
 	}
 }
+
+func TestInspectionQuotaProtectionSkipsWhenUpstreamAlreadyCovers(t *testing.T) {
+	now := time.Now()
+	auth := &coreauth.Auth{
+		ID:    "covered-auth",
+		Quota: coreauth.QuotaState{Exceeded: true, Reason: "credential_quota", NextRecoverAt: now.Add(time.Hour)},
+	}
+	result := &accountInspectionResult{QuotaResetAt: now.Add(10 * time.Minute).UnixMilli()}
+	if !coveredByUpstreamQuota(auth, result) {
+		t.Fatal("expected upstream credential quota to cover inspection hold")
+	}
+	auth.Quota = coreauth.QuotaState{}
+	auth.ModelStates = map[string]*coreauth.ModelState{
+		"claude-opus-*": {Unavailable: true, NextRetryAfter: now.Add(time.Hour)},
+	}
+	result.QuotaModel = "claude-opus-*"
+	if !coveredByUpstreamQuota(auth, result) {
+		t.Fatal("expected matching model cooldown to cover inspection hold")
+	}
+	result.QuotaModel = "claude-sonnet-*"
+	if coveredByUpstreamQuota(auth, result) {
+		t.Fatal("unrelated model should not cover inspection hold")
+	}
+}
+
+func TestNewInspectionQuotaHoldFollowsResumeProtocol(t *testing.T) {
+	auth := &coreauth.Auth{ID: "hold-auth", Provider: "claude"}
+	result := &accountInspectionResult{QuotaResetAt: time.Now().Add(time.Hour).UnixMilli()}
+	manual := newInspectionQuotaHold(auth, result, accountInspectionSettings{})
+	if manual == nil || manual.Recheck || manual.RetryAt != 0 {
+		t.Fatalf("manual hold = %+v", manual)
+	}
+	settings := accountInspectionSettings{AutoExecuteQuotaRecoveryEnable: true}
+	recheck := newInspectionQuotaHold(auth, result, settings)
+	if recheck == nil || !recheck.Recheck || recheck.RetryAt < result.QuotaResetAt {
+		t.Fatalf("recheck hold = %+v", recheck)
+	}
+	hold := prorouting.QuotaProtection{Recheck: true, RetryAt: time.Now().Add(time.Hour).UnixMilli()}
+	syncInspectionHoldResume(&hold, auth, false)
+	if hold.Recheck || hold.RetryAt != 0 {
+		t.Fatalf("disabled recovery hold = %+v", hold)
+	}
+}

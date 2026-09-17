@@ -84,7 +84,7 @@ detail 还会保留 upstream `ClientRequestMetadata` 提供的 `client_ip`、`x_
 - `model_prices` — 基础价格兼容数据和完整的全局 model 价格规则。
 - `quota_cache` — 配额卡片和账号级刷新使用的 SQLite-backed quota snapshots。
 - `monitoring_settings` — 监控日志保留时间、WebDAV 备份配置和 models.dev 定期同步配置。
-- `pro_settings` — Pro 私有设置；当前包含请求状态保护、额度保护恢复状态（`quota-protection`）、代理池和 OAuth 账号策略。账号策略 namespace 为 `oauth-policy`。
+- `pro_settings` — Pro 私有设置；当前包含额度保护恢复状态（`quota-protection`）、代理池和 OAuth 账号策略。旧的请求状态保护 namespace 会被忽略，不再接管调度。账号策略 namespace 为 `oauth-policy`。
 - `routing_cursor_state` — 账号路由轮转游标。
 - `auth_runtime_stats` — 账号选择、成功/失败和近期请求桶统计。
 - `account_inspection_schedule` — 后端账号巡检调度设置。
@@ -188,9 +188,9 @@ Core 内建回环 SOCKS5 代理池以及 xAI、Codex、Claude、Gemini CLI、Ant
 
 能力包括 provider 过滤、两级探测并发、重试/超时、抽样、按用量阈值判断、进度/状态/日志/结果快照、暂停/继续/停止控制、手动操作，以及对额度耗尽、额度恢复、账号错误的可选自动操作。Antigravity 和 xAI 还支持可选深度探测。
 
-额度自动操作使用临时调度保护，不再写入账号 `disabled`。开启“额度保护自动恢复”后，已知重置时间按实际阻塞窗口安排定向复查；没有可靠时间或复查失败时采用 1–30 分钟退避并加入时间抖动。恢复需低于原阈值至少 2 个百分点，避免临界抖动。到期任务每批最多 4 个并发，并继续遵守 provider 并发限制；积压任务连续处理，无需等待下一轮完整巡检。后台复查不执行删除、禁用或深度推理；xAI 官方 API 无独立额度查询时，到期交给真实请求验证。
+额度自动操作使用临时调度保护，不再写入账号 `disabled`。默认开启自动复查：已知重置时间按实际阻塞窗口安排定向复查；没有可靠时间或复查失败时采用 1–30 分钟退避并加入时间抖动。恢复需低于原阈值至少 2 个百分点，避免临界抖动。到期任务每批最多 4 个并发，并继续遵守 provider 并发限制；积压任务连续处理，无需等待下一轮完整巡检。后台复查不执行删除、禁用或深度推理；xAI 官方 API 无独立额度查询时，到期交给真实请求验证。上游冷却已经覆盖同一额度窗口时，巡检不再叠加一层保护。
 
-额度保护与人工禁用、认证错误、upstream 原生冷却相互独立。恢复只解除对应来源的保护，不清除其他限制。Claude 明确的 Opus/Sonnet 专属额度按模型限制；无法可靠确定模型范围的巡检额度沿用账号级保护。状态保存在 SQLite 的 `pro_settings/quota-protection`，支持重启、备份与插件虚拟账号。界面显示“额度冷却中”和预计复查时间，也可手动解除保护。恢复开关变更会由后台同步到已有任务；旧版没有可靠归属记录的已禁用账号保持原状态，需人工复核。
+额度保护与人工禁用、认证错误、upstream 原生冷却相互独立。恢复只解除对应来源的保护，不清除其他限制。Claude 明确的 Opus/Sonnet 专属额度按模型限制；无法可靠确定模型范围的巡检额度沿用账号级保护。状态保存在 SQLite 的 `pro_settings/quota-protection`，支持重启、备份与插件虚拟账号。界面显示“额度冷却中”和预计复查时间，也可手动解除保护。调度看板只读展示上游冷却和巡检保护的合成结果。恢复开关变更会由后台同步到已有任务；旧版没有可靠归属记录的已禁用账号保持原状态，需人工复核。
 
 
 巡检设置中的 `workers` 是所有 provider 合计的探测总并发，范围 `1–8`、默认 `4`；`providerWorkers` 是单个 provider 的探测并发，范围 `1–4`、默认 `2`。普通探测、深度探测、xAI 探测和探测前 token refresh 共用这两个限制，不再使用单独的串行闸门。`deleteWorkers` 范围 `1–4`、默认 `4`，同时约束自动操作和管理端手动批量操作。调度设置保存在账号巡检调度 JSON 中，不读取或修改 `config.yaml`。
@@ -207,20 +207,14 @@ Core 内建回环 SOCKS5 代理池以及 xAI、Codex、Claude、Gemini CLI、Ant
 
 最近一次已结束的巡检结果会单独持久化到 `/CLIProxyAPI/usage/account-inspection-snapshot.json`，文件权限为 `0600`。进程重启或 usage 导入恢复后，该快照会标记为只读；下一次完整巡检结束时覆盖。可通过 `ACCOUNT_INSPECTION_SNAPSHOT_PATH` 自定义路径。
 
-### 请求状态保护
+### 调度看板
 
-补丁层在 management API 下增加请求状态保护接口：
+补丁层把 `/v0/management/routing-policy` 收成只读调度看板：
 
-- `GET /v0/management/routing-policy`
-- `PUT /v0/management/routing-policy/request-protection`
-- `PUT|PATCH /v0/management/routing-policy`（旧管理端兼容入口，仅处理 `requestProtection`）
-- `POST /v0/management/routing-policy/release`
+- `GET /v0/management/routing-policy` 返回 live 合成快照：上游冷却、巡检额度保护、有效限制和分桶计数
+- `PUT|PATCH /v0/management/routing-policy`、`PUT /v0/management/routing-policy/request-protection`、`POST /v0/management/routing-policy/release` 返回 `410 Gone`
 
-接口只管理 Pro 请求状态保护，不读取或修改 `config.yaml` 的全局路由配置。请求保护保存在 `usage.sqlite` 的 `pro_settings`。如果 SQLite 尚无设置，旧版 `routing.request-protection` 可作为一次性迁移来源；迁移后 SQLite 优先，原 YAML 保持不变。内置 provider 支持 Antigravity、xAI、Codex、Gemini CLI、Gemini、Gemini Interactions、Vertex AI、AI Studio、Claude 和 Kimi。
-
-请求状态保护默认关闭，模式默认为 `observe`。接口通过 `availableProviders` 返回当前已有 API 配置或凭据的受支持 provider。启用后可按 provider 配置 HTTP 状态码、连续确认次数、确认窗口、429 配额证据、自动解除和兜底禁用时长。`enforce` 模式下，429、402 或明确额度证据进入临时额度冷却，优先沿用 upstream 的账号/模型范围和恢复时间；其他配置的错误状态仍禁用对应认证记录，并写入 `request_protection` 归属元数据；自动解除和管理端手动解除只处理由该策略禁用的账号，不会重新启用用户手动禁用或由其他模块禁用的账号。
-
-自动解除时间优先读取 `Retry-After`、Codex reset headers、响应体 `resets_at` / `resets_in_seconds`，无法解析时使用 provider 的兜底禁用时长。运行状态接口同时返回当前受保护账号和进程内最近事件。
+看板不接管账号，不按 provider 配置规则，也不再写 `routing:` 平行保护。解除巡检保护只在账号巡检页进行；上游冷却到期后由选择器自动回到调度池。旧的 `pro_settings/routing.request-protection` 会被忽略。
 
 ### 根路径跳转和 health 响应
 
@@ -268,7 +262,7 @@ https://github.com/ssfun/CLIProxyAPI-Pro
 - `patches/sources/internal/pro/state/` — 路由游标、账号运行统计的稳定契约及合并写入器。
 - `patches/sources/internal/pro/observability/` — usage、留存、价格同步、WebDAV 后台任务，以及普通状态写入的备份协调适配。
 - `patches/sources/internal/pro/quota/` — Quota snapshot 规范化/最大使用率、cache 成功态与响应 shape 指纹、Gemini CLI/xAI billing、plan、request-path 配额解析与合并策略。
-- `patches/sources/internal/pro/routing/` — 稳定选路游标和 request-protection 所有权规则。
+- `patches/sources/internal/pro/routing/` — 稳定选路游标和巡检状态所有权规则。
 - `patches/sources/internal/pro/inspection/` — 巡检配置、候选过滤/抽样/两级 worker 策略、状态/日志/流与手动操作 DTO、结果分类/过滤/分页/汇总与合并状态机、provider 决策与错误码、操作去重/汇总、结果快照 schema/codec、自动操作决策、Antigravity/Claude/Codex/Kimi 响应解析，以及 Antigravity/xAI deep-probe 请求与响应协议；provider 探测 transport、Gin/WebSocket、快照/quota cache/observation I/O 与 Auth 写回仍位于 Management host adapter。
 - `patches/sources/internal/pro/backup/` — JSONL 导出、导入独占/普通写共享屏障，以及“暂停、flush、导入、恢复运行态、恢复巡检、清理旧缓存、resume”的跨模块协调器。
 - `entrypoint.sh` — 启动 Komari、主 API 和 WebDAV usage 恢复逻辑。
@@ -277,9 +271,9 @@ https://github.com/ssfun/CLIProxyAPI-Pro
 - `patches/account_inspection_{runtime,http,accounts,transport,quota}.go` — 按生命周期/API、账号宿主能力、auth-bound transport 和 quota 状态边界拆分，并注入 upstream management handlers 的后端账号巡检 adapter；测试按相同边界拆分。
 - `patches/account_inspection_host.go`、`patches/pro_auth_mutation.go` — Inspection quota port 与共享 Auth mutation/file persistence host adapter。
 - `patches/pro_management_runtime.go` — 组合随 Management Handler 启停的 inspection、routing 后台生命周期。
-- 生成后的 API Server 会在 `Stop` 时关闭 management Handler；直接通过 SDK 创建 Handler 的嵌入方也必须调用其 `Shutdown()`，以释放巡检、路由保护、登录清理及全局回调。
-- `patches/routing_policy.go` — 注入统一路由配置和请求状态保护 handlers、usage plugin 与自动解除任务。
-- 核心不变量：账号巡检状态优先于 request protection；导入的 `routing_cursor_state` 和 `auth_runtime_stats` 必须立即应用到 live manager；原 DB 表、JSONL record type 和 `/v0/management/usage*` API 保持兼容。
+- 生成后的 API Server 会在 `Stop` 时关闭 management Handler；直接通过 SDK 创建 Handler 的嵌入方也必须调用其 `Shutdown()`，以释放巡检、调度看板、登录清理及全局回调。
+- `patches/routing_policy.go` — 注入只读调度看板 handlers；启动时清掉旧的 `routing:` 平行保护。
+- 核心不变量：调度看板只读 live 上游冷却和巡检保护；导入的 `routing_cursor_state` 和 `auth_runtime_stats` 必须立即应用到 live manager；原 DB 表、JSONL record type 和 `/v0/management/usage*` API 保持兼容。
 
 静态模块按实际宿主生命周期组合：`pro/app` 管理请求路径上的 proxy-pool 与 oauth-policy 服务；`pro/observability` 随进程 context 启停；inspection 与 routing 控制器随 Management Handler 启停。跨生命周期备份端口使用 owner-scoped 注册和逆序注销，旧 Handler 或旧 Service 关闭时不会清除新实例的回调。`internal/embeddedusage` 只允许出现在 upstream/SDK 兼容边界，`internal/pro` 业务模块不反向依赖该 façade。
 - `patches/config_existing_updates.go` — 只修改已存在 YAML 标量、禁止补键的配置写入辅助层。

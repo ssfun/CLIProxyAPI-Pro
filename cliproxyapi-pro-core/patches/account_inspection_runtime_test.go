@@ -194,8 +194,8 @@ func TestManagementHandlerShutdownReleasesBackgroundOwners(t *testing.T) {
 	if scheduler == nil {
 		t.Fatal("scheduler was not registered")
 	}
-	if routingPolicyControllerForHandler(h) == nil {
-		t.Fatal("routing policy controller was not registered")
+	if _, ok := routingPolicyControllers.Load(h); !ok {
+		t.Fatal("scheduling board controller was not registered")
 	}
 
 	h.Shutdown()
@@ -204,8 +204,8 @@ func TestManagementHandlerShutdownReleasesBackgroundOwners(t *testing.T) {
 	if schedulerForHandler(h) != nil {
 		t.Fatal("scheduler registration survived shutdown")
 	}
-	if routingPolicyControllerForHandler(h) != nil {
-		t.Fatal("routing policy controller registration survived shutdown")
+	if _, ok := routingPolicyControllers.Load(h); ok {
+		t.Fatal("scheduling board controller registration survived shutdown")
 	}
 	select {
 	case <-h.lifecycleContext.Done():
