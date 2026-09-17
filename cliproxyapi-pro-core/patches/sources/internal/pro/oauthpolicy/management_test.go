@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,4 +42,31 @@ func TestRefreshManagementRouteStartsPlanDetection(t *testing.T) {
 		t.Fatal("refreshing status is false while refresh handler is running")
 	}
 	close(release)
+}
+
+func TestConfigRouteUsesPutSemanticsOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, err := New(context.Background(), &memorySettingsStore{items: map[string]settings.Item{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	router := gin.New()
+	RegisterManagementRoutes(router.Group("/v0/management"), service)
+	body := `{"enabled":true,"providers":{"codex":{"plans":{"pro":{"priority":42}}}}}`
+	putRequest := httptest.NewRequest(http.MethodPut, "/v0/management/pro/oauth-policy/config", strings.NewReader(body))
+	putResponse := httptest.NewRecorder()
+	router.ServeHTTP(putResponse, putRequest)
+	if putResponse.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, body = %s", putResponse.Code, putResponse.Body.String())
+	}
+	patchRequest := httptest.NewRequest(http.MethodPatch, "/v0/management/pro/oauth-policy/config", strings.NewReader(`{"enabled":false}`))
+	patchResponse := httptest.NewRecorder()
+	router.ServeHTTP(patchResponse, patchRequest)
+	if patchResponse.Code != http.StatusNotFound {
+		t.Fatalf("PATCH status = %d, want %d", patchResponse.Code, http.StatusNotFound)
+	}
+	if !service.Config().Enabled {
+		t.Fatal("unsupported PATCH mutated the saved configuration")
+	}
 }

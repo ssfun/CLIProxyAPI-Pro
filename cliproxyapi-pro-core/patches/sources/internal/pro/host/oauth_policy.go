@@ -3,6 +3,7 @@ package host
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -39,10 +40,16 @@ func FilterModels(ctx context.Context, hostCfg *internalconfig.Config, auth *cor
 			inputModels = append(inputModels, oauthpolicy.ModelInfo{ID: model.ID})
 		}
 	}
+	storageJSON := storageJSONFromAuth(auth)
+	credentialFingerprint := strings.TrimSpace(coreauth.AccessTokenSHA256(auth))
+	if credentialFingerprint == "" && len(storageJSON) > 0 {
+		credentialFingerprint = fmt.Sprintf("%x", sha256.Sum256(storageJSON))
+	}
 	result := filter.Filter(ctx, oauthpolicy.Input{
-		AuthID: auth.ID, AuthProvider: auth.Provider, AuthKind: auth.AuthKind(),
+		AuthID: auth.ID, AuthGeneration: auth.Generation, AuthRegistrationEpoch: auth.RegistrationEpoch,
+		CredentialFingerprint: credentialFingerprint, AuthProvider: auth.Provider, AuthKind: auth.AuthKind(),
 		AuthIndex: auth.Index, FileName: auth.FileName,
-		StorageJSON: storageJSONFromAuth(auth), Metadata: auth.Metadata, Attributes: auth.Attributes, AuthPrefix: auth.Prefix, Models: inputModels,
+		StorageJSON: storageJSON, Metadata: auth.Metadata, Attributes: auth.Attributes, AuthPrefix: auth.Prefix, Models: inputModels,
 		HTTPDo: func(callCtx context.Context, req oauthpolicy.HTTPRequest) (oauthpolicy.HTTPResponse, error) {
 			return doPolicyHTTP(callCtx, hostCfg, auth, req, requester)
 		},

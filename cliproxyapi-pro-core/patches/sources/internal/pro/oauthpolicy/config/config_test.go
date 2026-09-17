@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestParseNormalizesXAIPlans(t *testing.T) {
 	cfg, errParse := Parse([]byte(`
@@ -22,6 +25,19 @@ providers:
 	}
 	if _, ok := cfg.Providers["xai"].Plans["_unknown"]; !ok {
 		t.Fatal("_unknown fallback plan was not preserved")
+	}
+}
+
+func TestParseDefaultsAndValidatesMaxStale(t *testing.T) {
+	cfg, err := Parse([]byte(`cache-ttl: 48h`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxStale != 48*time.Hour {
+		t.Fatalf("default max-stale = %s, want 48h", cfg.MaxStale)
+	}
+	if _, err = Parse([]byte("cache-ttl: 30m\nmax-stale: 10m\n")); err == nil {
+		t.Fatal("accepted max-stale shorter than cache-ttl")
 	}
 }
 
@@ -104,5 +120,26 @@ providers:
       supergrok: {excluded-models: [second-*]}
 `)); err == nil {
 		t.Fatal("accepted duplicate normalized plan keys")
+	}
+	if _, err := Parse([]byte(`
+providers:
+  codex:
+    plans:
+      "Pro Lite": {excluded-models: [first-*]}
+      pro__lite: {excluded-models: [second-*]}
+`)); err == nil {
+		t.Fatal("accepted duplicate whitespace/underscore-normalized plan keys")
+	}
+}
+
+func TestCanonicalPlanKeyCollapsesWhitespaceAndUnderscores(t *testing.T) {
+	for raw, want := range map[string]string{
+		" Pro  Lite ": "pro-lite",
+		"pro__lite":   "pro-lite",
+		" _unknown ":  "_unknown",
+	} {
+		if got := CanonicalPlanKey("codex", raw); got != want {
+			t.Fatalf("CanonicalPlanKey(%q) = %q, want %q", raw, got, want)
+		}
 	}
 }

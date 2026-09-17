@@ -455,9 +455,19 @@ export function OAuthPolicyPage() {
   };
 
   const validate = (config = draft): string => {
-    if (!isPositiveDuration(config.cacheTTL))
+    const cacheTTLSeconds = oauthPolicyDurationValue(config.cacheTTL, "s");
+    if (cacheTTLSeconds === null)
       return t("oauth_policy.invalid_cache_ttl", {
         defaultValue: "Cache TTL must be a positive Go duration, such as 30m.",
+      });
+    const maxStaleSeconds = oauthPolicyDurationValue(config.maxStale, "s");
+    if (maxStaleSeconds === null)
+      return t("oauth_policy.invalid_max_stale", {
+        defaultValue: "Maximum stale age must be a positive Go duration, such as 24h.",
+      });
+    if (maxStaleSeconds < cacheTTLSeconds)
+      return t("oauth_policy.max_stale_before_cache_ttl", {
+        defaultValue: "Maximum stale age must be greater than or equal to the cache TTL.",
       });
     if (!isPositiveDuration(config.resolveTimeout))
       return t("oauth_policy.invalid_resolve_timeout", {
@@ -734,6 +744,19 @@ export function OAuthPolicyPage() {
                   fallback={30}
                   disabled={saving}
                   onChange={(cacheTTL) => updateDraft({ ...draft, cacheTTL })}
+                />
+                <OAuthDurationInput
+                  label={t("oauth_policy.max_stale", {
+                    defaultValue: "Maximum stale age",
+                  })}
+                  value={draft.maxStale}
+                  unit="m"
+                  unitLabel={t("oauth_policy.unit_minutes", {
+                    defaultValue: "minutes",
+                  })}
+                  fallback={1440}
+                  disabled={saving}
+                  onChange={(maxStale) => updateDraft({ ...draft, maxStale })}
                 />
                 <OAuthDurationInput
                   label={t("oauth_policy.resolve_timeout", {

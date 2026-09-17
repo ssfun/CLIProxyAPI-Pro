@@ -17,12 +17,19 @@ type Status struct {
 	Enabled        bool   `json:"enabled"`
 	Refreshing     bool   `json:"refreshing"`
 	CacheTTL       string `json:"cacheTTL"`
+	MaxStale       string `json:"maxStale"`
 	ResolveTimeout string `json:"resolveTimeout"`
 	Providers      int    `json:"providers"`
 	LastError      string `json:"lastError,omitempty"`
 }
 
 type PlanSnapshot = settings.PlanSnapshot
+
+type authVersion struct {
+	RegistrationEpoch uint64
+	Generation        uint64
+	Fingerprint       string
+}
 
 // PlanSnapshotReader is the narrow persistence port used by account policy to
 // consume provider quota/inspection evidence without depending on SQLite.
@@ -34,24 +41,26 @@ type PlanSnapshotReader interface {
 
 // Service owns OAuth account-plan model filtering and its persisted policy.
 type Service struct {
-	mu         sync.RWMutex
-	store      settings.Store
-	planStore  PlanSnapshotReader
-	config     modelconfig.Config
-	engine     *modelengine.Engine
-	revision   uint64
-	authEpochs map[string]uint64
-	configErr  string
-	effective  map[string]modelengine.EffectivePolicy
-	decisions  map[string]modelengine.Result
-	onChange   func(context.Context)
-	unregister func()
-	changeCtx  context.Context
-	changeStop context.CancelFunc
-	changeRun  bool
-	changeNext bool
-	planReset  bool
-	closed     bool
+	mu                   sync.RWMutex
+	store                settings.Store
+	planStore            PlanSnapshotReader
+	config               modelconfig.Config
+	engine               *modelengine.Engine
+	revision             uint64
+	planEvidenceRevision uint64
+	authEpochs           map[string]uint64
+	authVersions         map[string]authVersion
+	configErr            string
+	effective            map[string]modelengine.EffectivePolicy
+	decisions            map[string]modelengine.Result
+	onChange             func(context.Context)
+	unregister           func()
+	changeCtx            context.Context
+	changeStop           context.CancelFunc
+	changeRun            bool
+	changeNext           bool
+	planReset            bool
+	closed               bool
 }
 
 func New(ctx context.Context, store settings.Store) (*Service, error) {
@@ -62,19 +71,20 @@ func New(ctx context.Context, store settings.Store) (*Service, error) {
 		return nil, fmt.Errorf("account policy settings store is required")
 	}
 	cfg, loadErr := loadConfig(ctx, store)
+	if loadErr != nil {
+		return nil, fmt.Errorf("load account policy config: %w", loadErr)
+	}
 	changeCtx, changeStop := context.WithCancel(context.Background())
 	engine := modelengine.New()
 	engine.ApplyConfig(cfg)
 	service := &Service{
 		store: store, config: cfg, engine: engine,
-		revision: 1, authEpochs: make(map[string]uint64),
+		revision: 1, planEvidenceRevision: 1,
+		authEpochs: make(map[string]uint64), authVersions: make(map[string]authVersion),
 		effective: make(map[string]modelengine.EffectivePolicy), decisions: make(map[string]modelengine.Result),
 		changeCtx: changeCtx, changeStop: changeStop,
 	}
 	service.planStore, _ = store.(PlanSnapshotReader)
-	if loadErr != nil {
-		service.configErr = loadErr.Error()
-	}
 	service.unregister = store.Subscribe(settings.NamespaceOAuthPolicy, service.applyImportedSetting)
 	return service, nil
 }
@@ -289,7 +299,8 @@ func (s *Service) Status() Status {
 	defer s.mu.RUnlock()
 	return Status{
 		Enabled: s.config.Enabled, Refreshing: s.changeRun || s.changeNext, CacheTTL: s.config.CacheTTL.String(),
-		ResolveTimeout: s.config.ResolveTimeout.String(), Providers: len(s.config.Providers), LastError: s.configErr,
+		MaxStale: s.config.MaxStale.String(), ResolveTimeout: s.config.ResolveTimeout.String(),
+		Providers: len(s.config.Providers), LastError: s.configErr,
 	}
 }
 
@@ -297,35 +308,62 @@ func (s *Service) Filter(ctx context.Context, input modelengine.Input) modelengi
 	if s == nil {
 		return modelengine.Result{}
 	}
-	if s.planStore != nil && len(input.QuotaSnapshotJSON) == 0 {
-		snapshot, found, err := s.planStore.GetPlanSnapshot(
-			ctx, input.AuthProvider, input.FileName, input.AuthIndex,
-		)
-		if found {
-			input.QuotaSnapshotJSON = append([]byte(nil), snapshot.Data...)
-			input.QuotaObservedAtMS = snapshot.ObservedAtMS
-		}
-		if err != nil {
-			input.QuotaSnapshotError = err.Error()
-		}
+	loadPlanSnapshot := s.planStore != nil && len(input.QuotaSnapshotJSON) == 0
+	incomingVersion := authVersion{
+		RegistrationEpoch: input.AuthRegistrationEpoch,
+		Generation:        input.AuthGeneration,
+		Fingerprint:       strings.TrimSpace(input.CredentialFingerprint),
 	}
 	for {
-		s.mu.RLock()
+		s.mu.Lock()
+		currentVersion, versionKnown := s.authVersions[input.AuthID]
+		if versionKnown && authVersionOlder(incomingVersion, currentVersion) {
+			s.mu.Unlock()
+			return modelengine.Result{}
+		}
+		if !versionKnown || currentVersion != incomingVersion {
+			if versionKnown {
+				s.authEpochs[input.AuthID]++
+				if s.engine != nil {
+					s.engine.ForgetAuth(input.AuthID)
+				}
+				delete(s.effective, input.AuthID)
+				delete(s.decisions, input.AuthID)
+			}
+			s.authVersions[input.AuthID] = incomingVersion
+		}
 		engine := s.engine
 		closed := s.closed
 		revision := s.revision
+		planEvidenceRevision := s.planEvidenceRevision
 		authEpoch := s.authEpochs[input.AuthID]
-		s.mu.RUnlock()
+		s.mu.Unlock()
 		if closed || engine == nil {
 			return modelengine.Result{}
 		}
-		result := engine.Filter(ctx, input)
+		attemptInput := input
+		if loadPlanSnapshot {
+			attemptInput.QuotaSnapshotJSON = nil
+			attemptInput.QuotaObservedAtMS = 0
+			attemptInput.QuotaSnapshotError = ""
+			snapshot, found, err := s.planStore.GetPlanSnapshot(
+				ctx, attemptInput.AuthProvider, attemptInput.FileName, attemptInput.AuthIndex,
+			)
+			if found {
+				attemptInput.QuotaSnapshotJSON = append([]byte(nil), snapshot.Data...)
+				attemptInput.QuotaObservedAtMS = snapshot.ObservedAtMS
+			}
+			if err != nil {
+				attemptInput.QuotaSnapshotError = err.Error()
+			}
+		}
+		result := engine.Filter(ctx, attemptInput)
 		s.mu.Lock()
 		if s.closed || s.authEpochs[input.AuthID] != authEpoch {
 			s.mu.Unlock()
 			return modelengine.Result{}
 		}
-		if s.revision != revision {
+		if s.revision != revision || s.planEvidenceRevision != planEvidenceRevision {
 			s.mu.Unlock()
 			if ctx != nil && ctx.Err() != nil {
 				return modelengine.Result{}
@@ -338,7 +376,7 @@ func (s *Service) Filter(ctx context.Context, input modelengine.Input) modelengi
 				AuthID: input.AuthID, Provider: input.AuthProvider,
 				PlanKey: result.Annotations["plan_key"], PlanSource: result.Annotations["plan_source"],
 				MatchedRule: result.Annotations["matched_rule"], PlanError: result.Annotations["plan_error"],
-				Prefix: effectivePrefix(input, result), Priority: effectivePriority(input, result), Weight: effectiveWeight(input, result),
+				Prefix: effectivePrefix(attemptInput, result), Priority: effectivePriority(attemptInput, result), Weight: effectiveWeight(attemptInput, result),
 				ExcludedCount: len(result.ExcludedModelIDs),
 			}
 		} else {
@@ -361,6 +399,7 @@ func (s *Service) RefreshPlanDetection() {
 		s.mu.Unlock()
 		return
 	}
+	s.planEvidenceRevision++
 	// A running refresh consumes one coalesced follow-up pass. Defer the engine
 	// reset to that pass so repeated quota writes do not restart every in-flight
 	// provider lookup, while a write that arrives during a pass still invalidates
@@ -402,8 +441,31 @@ func (s *Service) ForgetAuth(authID string) {
 		}
 		delete(s.effective, authID)
 		delete(s.decisions, authID)
+		delete(s.authVersions, authID)
 	}
 	s.mu.Unlock()
+}
+
+func authVersionOlder(incoming, current authVersion) bool {
+	if incoming.RegistrationEpoch != current.RegistrationEpoch {
+		if incoming.RegistrationEpoch == 0 {
+			return current.RegistrationEpoch > 0
+		}
+		if current.RegistrationEpoch == 0 {
+			return false
+		}
+		return incoming.RegistrationEpoch < current.RegistrationEpoch
+	}
+	if incoming.Generation != current.Generation {
+		if incoming.Generation == 0 {
+			return current.Generation > 0
+		}
+		if current.Generation == 0 {
+			return false
+		}
+		return incoming.Generation < current.Generation
+	}
+	return false
 }
 
 func effectivePrefix(input modelengine.Input, result modelengine.Result) string {

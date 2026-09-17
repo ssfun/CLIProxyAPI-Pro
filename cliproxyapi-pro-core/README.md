@@ -154,7 +154,7 @@ Pro 扩展了上游 `GET /v0/management/auth-files/models`：优先使用该认�
 
 ### 内建代理池与 OAuth 套餐账号策略
 
-Core 内建回环 SOCKS5 代理池以及 xAI、Codex、Claude、Gemini CLI、Antigravity、Kimi 的 OAuth 套餐账号策略。套餐识别复用认证绑定的上游请求，并按时间读取 SQLite 中的插件配额和账号巡检快照，选择最新一份包含有效套餐的证据；配额更新会触发受 auth generation 保护的模型重注册，也可通过 `POST /v0/management/pro/oauth-policy/refresh` 手动重新识别。账号规则可配置 `excluded-models`、`prefix`、`priority` 和 `weight`；策略仅生成运行时覆盖，不改写 `config.yaml` 或认证文件。模型处理顺序为 upstream `excluded_models`、内建套餐过滤、OAuth alias、套餐 prefix、模型注册，最终结果同时约束 `/v1/models` 聚合和请求调度候选账号。
+Core 内建回环 SOCKS5 代理池以及 xAI、Codex、Claude、Gemini CLI、Antigravity、Kimi 的 OAuth 套餐账号策略。套餐识别复用认证绑定的上游请求，并按时间读取 SQLite 中的插件配额和账号巡检快照，选择最新一份包含有效套餐的证据；配额更新会触发受 auth generation 和套餐证据 revision 共同保护的模型重注册，也可通过 `POST /v0/management/pro/oauth-policy/refresh` 手动重新识别。套餐缓存绑定认证 generation、registration epoch 和凭证指纹；`cache-ttl` 控制正常复用时间，`max-stale`（默认 `24h`）限制探测失败时 last-known-good 的最长保留时间。账号规则可配置 `excluded-models`、`prefix`、`priority` 和 `weight`；策略仅生成运行时覆盖，不改写 `config.yaml` 或认证文件。模型处理顺序为 upstream `excluded_models`、内建套餐过滤、OAuth alias、套餐 prefix、模型注册，最终结果同时约束 `/v1/models` 聚合和请求调度候选账号。
 
 首次启动会读取旧 `plugins.configs.proxy-pool` 和 `plugins.configs.oauth-model-policy`，校验并写入 SQLite，回读确认成功后再原子清除旧 YAML。旧代理接管若处于启用状态，会先把根 `proxy-url` 恢复为旧 `restore-proxy-url`；其他第三方插件配置保持不变。
 

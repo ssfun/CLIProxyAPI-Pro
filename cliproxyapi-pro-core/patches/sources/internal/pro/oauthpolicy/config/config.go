@@ -6,18 +6,21 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
 
 const (
 	DefaultCacheTTL       = 30 * time.Minute
+	DefaultMaxStale       = 24 * time.Hour
 	DefaultResolveTimeout = 15 * time.Second
 )
 
 type Config struct {
 	Enabled        bool
 	CacheTTL       time.Duration
+	MaxStale       time.Duration
 	ResolveTimeout time.Duration
 	Providers      map[string]Provider
 }
@@ -36,6 +39,7 @@ type Plan struct {
 type rawConfig struct {
 	Enabled        *bool               `yaml:"enabled" json:"enabled"`
 	CacheTTL       string              `yaml:"cache-ttl" json:"cache-ttl"`
+	MaxStale       string              `yaml:"max-stale" json:"max-stale"`
 	ResolveTimeout string              `yaml:"resolve-timeout" json:"resolve-timeout"`
 	Providers      map[string]Provider `yaml:"providers" json:"providers"`
 }
@@ -47,7 +51,7 @@ func Parse(raw []byte) (Config, error) {
 			return Config{}, fmt.Errorf("parse oauth account policy config: %w", errUnmarshal)
 		}
 	}
-	cfg := Config{Enabled: len(decoded.Providers) > 0, CacheTTL: DefaultCacheTTL, ResolveTimeout: DefaultResolveTimeout, Providers: map[string]Provider{}}
+	cfg := Config{Enabled: len(decoded.Providers) > 0, CacheTTL: DefaultCacheTTL, MaxStale: DefaultMaxStale, ResolveTimeout: DefaultResolveTimeout, Providers: map[string]Provider{}}
 	if decoded.Enabled != nil {
 		cfg.Enabled = *decoded.Enabled
 	}
@@ -58,6 +62,17 @@ func Parse(raw []byte) (Config, error) {
 			return Config{}, fmt.Errorf("cache-ttl must be a positive duration")
 		}
 	}
+	if strings.TrimSpace(decoded.MaxStale) != "" {
+		cfg.MaxStale, err = time.ParseDuration(strings.TrimSpace(decoded.MaxStale))
+		if err != nil || cfg.MaxStale <= 0 {
+			return Config{}, fmt.Errorf("max-stale must be a positive duration")
+		}
+		if cfg.MaxStale < cfg.CacheTTL {
+			return Config{}, fmt.Errorf("max-stale must be greater than or equal to cache-ttl")
+		}
+	} else if cfg.MaxStale < cfg.CacheTTL {
+		cfg.MaxStale = cfg.CacheTTL
+	}
 	if strings.TrimSpace(decoded.ResolveTimeout) != "" {
 		cfg.ResolveTimeout, err = time.ParseDuration(strings.TrimSpace(decoded.ResolveTimeout))
 		if err != nil || cfg.ResolveTimeout <= 0 {
@@ -66,7 +81,7 @@ func Parse(raw []byte) (Config, error) {
 	}
 	seenProviders := make(map[string]string, len(decoded.Providers))
 	for rawProvider, provider := range decoded.Providers {
-		providerKey := normalizeKey(rawProvider)
+		providerKey := CanonicalKey(rawProvider)
 		if providerKey == "" {
 			continue
 		}
@@ -77,7 +92,7 @@ func Parse(raw []byte) (Config, error) {
 		clean := Provider{Plans: map[string]Plan{}}
 		seenPlans := make(map[string]string, len(provider.Plans))
 		for rawPlan, plan := range provider.Plans {
-			planKey := normalizePlanKey(providerKey, rawPlan)
+			planKey := CanonicalPlanKey(providerKey, rawPlan)
 			if planKey == "" {
 				continue
 			}
@@ -135,6 +150,7 @@ func Marshal(cfg Config) ([]byte, error) {
 	return json.Marshal(rawConfig{
 		Enabled:        &enabled,
 		CacheTTL:       normalized.CacheTTL.String(),
+		MaxStale:       normalized.MaxStale.String(),
 		ResolveTimeout: normalized.ResolveTimeout.String(),
 		Providers:      normalized.Providers,
 	})
@@ -145,6 +161,7 @@ func normalizeConfig(cfg Config) (Config, error) {
 	raw, err := yaml.Marshal(rawConfig{
 		Enabled:        &enabled,
 		CacheTTL:       cfg.CacheTTL.String(),
+		MaxStale:       cfg.MaxStale.String(),
 		ResolveTimeout: cfg.ResolveTimeout.String(),
 		Providers:      cfg.Providers,
 	})
@@ -154,16 +171,27 @@ func normalizeConfig(cfg Config) (Config, error) {
 	return Parse(raw)
 }
 
-func normalizeKey(value string) string {
+// CanonicalKey normalizes provider, plan, and evidence keys consistently
+// across persisted configuration and runtime plan detection.
+func CanonicalKey(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	if strings.HasPrefix(value, "_") {
-		return "_" + strings.ReplaceAll(strings.TrimPrefix(value, "_"), "_", "-")
+	reserved := strings.HasPrefix(value, "_")
+	if reserved {
+		value = strings.TrimLeft(value, "_")
 	}
-	return strings.ReplaceAll(value, "_", "-")
+	value = strings.Join(strings.FieldsFunc(value, func(r rune) bool {
+		return r == '_' || unicode.IsSpace(r)
+	}), "-")
+	if reserved && value != "" {
+		return "_" + value
+	}
+	return value
 }
 
-func normalizePlanKey(provider, value string) string {
-	key := normalizeKey(value)
+// CanonicalPlanKey applies the shared key normalization and provider aliases.
+func CanonicalPlanKey(provider, value string) string {
+	provider = CanonicalKey(provider)
+	key := CanonicalKey(value)
 	if strings.HasPrefix(key, "plan-") {
 		key = strings.TrimPrefix(key, "plan-")
 	}

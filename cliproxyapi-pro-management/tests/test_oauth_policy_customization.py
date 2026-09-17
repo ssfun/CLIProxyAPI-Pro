@@ -31,6 +31,7 @@ class OAuthPolicyCustomizationTest(unittest.TestCase):
         self.assertIn('DurationInput', source)
         self.assertIn('unit="m"', source)
         self.assertIn('unit="s"', source)
+        self.assertIn('oauth_policy.max_stale', source)
         self.assertIn('min={1}', source)
         self.assertIn('step={1}', source)
         self.assertNotIn('step={0.1}', source)
@@ -64,6 +65,8 @@ class OAuthPolicyCustomizationTest(unittest.TestCase):
         self.assertIn('/pro/oauth-policy/effective', source)
         self.assertIn('/pro/oauth-policy/refresh', source)
         self.assertIn('serializeOAuthPolicyConfig(config)', source)
+        self.assertIn('apiClient.put(', source)
+        self.assertNotIn('apiClient.patch(', source)
         self.assertNotIn('pluginsApi', source)
         self.assertNotIn('PLUGIN_ID', source)
         for field in ('prefix', 'priority', 'weight'):

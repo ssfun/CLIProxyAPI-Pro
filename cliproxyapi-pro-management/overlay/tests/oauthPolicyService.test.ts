@@ -3,6 +3,7 @@ import {
   countOAuthPolicyProvidersWithRules,
   isPositiveDuration,
   isValidOAuthModelPattern,
+  normalizeOAuthModelPlanKey,
   normalizeOAuthPolicyPrefix,
   normalizeOAuthPolicyConfig,
   oauthModelProviderDefinitions,
@@ -34,6 +35,7 @@ describe("oauth account policy service", () => {
 
     expect(config.enabled).toBe(true);
     expect(config.cacheTTL).toBe("45m");
+    expect(config.maxStale).toBe("24h");
     expect(config.providers.xai.plans.free).toEqual({
       configured: true,
       excludedModels: ["grok-pro-*"],
@@ -75,6 +77,7 @@ describe("oauth account policy service", () => {
     expect(serialized).toMatchObject({
       enabled: true,
       "cache-ttl": "30m",
+      "max-stale": "24h",
       "resolve-timeout": "15s",
       providers: {
         xai: {
@@ -105,6 +108,22 @@ describe("oauth account policy service", () => {
     expect(isPositiveDuration("1h30m")).toBe(true);
     expect(isPositiveDuration("0s")).toBe(false);
     expect(isPositiveDuration("30")).toBe(false);
+  });
+
+  it("canonicalizes whitespace and underscore plan keys consistently", () => {
+    expect(normalizeOAuthModelPlanKey(" Pro  Lite ", "codex")).toBe("pro-lite");
+    expect(normalizeOAuthModelPlanKey("pro__lite", "codex")).toBe("pro-lite");
+    expect(normalizeOAuthModelPlanKey(" _unknown ", "codex")).toBe("_unknown");
+
+    const config = normalizeOAuthPolicyConfig({
+      providers: {
+        codex: { plans: { "Pro Lite": { "excluded-models": ["gpt-5-pro"] } } },
+      },
+    });
+    expect(config.providers.codex.plans["pro-lite"]).toMatchObject({
+      configured: true,
+      excludedModels: ["gpt-5-pro"],
+    });
   });
 
   it("matches backend Go glob syntax validation", () => {

@@ -28,6 +28,35 @@ type planSettingsStore struct {
 	authIndex    string
 }
 
+type blockingPlanSettingsStore struct {
+	*memorySettingsStore
+	mu           sync.Mutex
+	raw          []byte
+	observedAtMS int64
+	firstRead    chan struct{}
+	releaseFirst chan struct{}
+	reads        atomic.Int32
+}
+
+func (s *blockingPlanSettingsStore) GetPlanSnapshot(_ context.Context, _, _, _ string) (PlanSnapshot, bool, error) {
+	s.mu.Lock()
+	raw := append([]byte(nil), s.raw...)
+	observedAtMS := s.observedAtMS
+	s.mu.Unlock()
+	if s.reads.Add(1) == 1 {
+		close(s.firstRead)
+		<-s.releaseFirst
+	}
+	return PlanSnapshot{Data: raw, ObservedAtMS: observedAtMS}, len(raw) > 0, nil
+}
+
+func (s *blockingPlanSettingsStore) setSnapshot(raw string, observedAtMS int64) {
+	s.mu.Lock()
+	s.raw = []byte(raw)
+	s.observedAtMS = observedAtMS
+	s.mu.Unlock()
+}
+
 func (s *planSettingsStore) GetPlanSnapshot(_ context.Context, provider, fileName, authIndex string) (PlanSnapshot, bool, error) {
 	s.provider, s.fileName, s.authIndex = provider, fileName, authIndex
 	if len(s.raw) == 0 {
@@ -80,6 +109,18 @@ func TestNewMigratesLegacyNamespace(t *testing.T) {
 	}
 	if _, found := store.items[settings.NamespaceOAuthPolicy]; !found {
 		t.Fatal("new OAuth policy namespace was not written")
+	}
+}
+
+func TestNewRejectsCorruptPersistedConfig(t *testing.T) {
+	store := &memorySettingsStore{items: map[string]settings.Item{
+		settings.NamespaceOAuthPolicy: {
+			Namespace: settings.NamespaceOAuthPolicy, SchemaVersion: 1,
+			Settings: json.RawMessage(`{"enabled":true,"providers":`),
+		},
+	}}
+	if service, err := New(context.Background(), store); err == nil || service != nil {
+		t.Fatalf("New() = %#v, %v; want startup error", service, err)
 	}
 }
 
@@ -332,6 +373,95 @@ func TestFilterRetriesWithLatestConfigAfterConcurrentUpdate(t *testing.T) {
 	}
 	if result, found := service.EffectivePolicy("claude-1"); !found || result.Annotations["plan_key"] != "max" {
 		t.Fatalf("effective policy = %#v, found = %t", result, found)
+	}
+}
+
+func TestFilterReloadsPlanSnapshotAfterConcurrentRefresh(t *testing.T) {
+	now := time.Now().UnixMilli()
+	store := &blockingPlanSettingsStore{
+		memorySettingsStore: &memorySettingsStore{items: map[string]settings.Item{
+			settings.NamespaceOAuthPolicy: {
+				Namespace: settings.NamespaceOAuthPolicy, SchemaVersion: 1,
+				Settings: json.RawMessage(`{"enabled":true,"providers":{"antigravity":{"plans":{"ultra":{"priority":90},"pro":{"priority":50}}}}}`),
+			},
+		}},
+		firstRead: make(chan struct{}), releaseFirst: make(chan struct{}),
+	}
+	store.setSnapshot(`{"status":"success","subscription":{"plan":"ultra"}}`, now)
+	service, err := New(context.Background(), store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	finished := make(chan modelengine.Result, 1)
+	go func() {
+		finished <- service.Filter(context.Background(), modelengine.Input{
+			AuthID: "antigravity-race", AuthGeneration: 1, AuthRegistrationEpoch: 1,
+			CredentialFingerprint: "credential", AuthIndex: "idx", FileName: "account.json",
+			AuthProvider: "antigravity", AuthKind: "oauth",
+		})
+	}()
+	<-store.firstRead
+	store.setSnapshot(`{"status":"success","subscription":{"plan":"pro"}}`, time.Now().UnixMilli())
+	service.RefreshPlanDetection()
+	close(store.releaseFirst)
+	result := <-finished
+	if !result.Handled || result.Annotations["plan_key"] != "pro" || result.Priority == nil || *result.Priority != 50 {
+		t.Fatalf("Filter() retained stale snapshot: %#v", result)
+	}
+	if got, found := service.EffectivePolicy("antigravity-race"); !found || got.Annotations["plan_key"] != "pro" {
+		t.Fatalf("effective policy = %#v, found = %t", got, found)
+	}
+	if got := store.reads.Load(); got < 2 {
+		t.Fatalf("snapshot reads = %d, want at least 2", got)
+	}
+}
+
+func TestNewerAuthVersionRejectsOlderInFlightDecision(t *testing.T) {
+	store := &memorySettingsStore{items: map[string]settings.Item{
+		settings.NamespaceOAuthPolicy: {
+			Namespace: settings.NamespaceOAuthPolicy, SchemaVersion: 1,
+			Settings: json.RawMessage(`{"enabled":true,"providers":{"claude":{"plans":{"pro":{"priority":90},"max":{"priority":50}}}}}`),
+		},
+	}}
+	service, err := New(context.Background(), store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	oldFinished := make(chan modelengine.Result, 1)
+	go func() {
+		oldFinished <- service.Filter(context.Background(), modelengine.Input{
+			AuthID: "version-race", AuthGeneration: 1, AuthRegistrationEpoch: 1,
+			CredentialFingerprint: "old", AuthProvider: "claude", AuthKind: "oauth",
+			Metadata: map[string]any{"access_token": "old"},
+			HTTPDo: func(context.Context, modelengine.HTTPRequest) (modelengine.HTTPResponse, error) {
+				close(started)
+				<-release
+				return modelengine.HTTPResponse{StatusCode: 200, Body: []byte(`{"account":{"has_claude_pro":true}}`)}, nil
+			},
+		})
+	}()
+	<-started
+	newResult := service.Filter(context.Background(), modelengine.Input{
+		AuthID: "version-race", AuthGeneration: 2, AuthRegistrationEpoch: 1,
+		CredentialFingerprint: "new", AuthProvider: "claude", AuthKind: "oauth",
+		Metadata: map[string]any{"access_token": "new"},
+		HTTPDo: func(context.Context, modelengine.HTTPRequest) (modelengine.HTTPResponse, error) {
+			return modelengine.HTTPResponse{StatusCode: 200, Body: []byte(`{"account":{"has_claude_max":true}}`)}, nil
+		},
+	})
+	close(release)
+	if oldResult := <-oldFinished; oldResult.Handled {
+		t.Fatalf("older auth version committed: %#v", oldResult)
+	}
+	if !newResult.Handled || newResult.Annotations["plan_key"] != "max" {
+		t.Fatalf("new auth result = %#v", newResult)
+	}
+	if got, found := service.EffectivePolicy("version-race"); !found || got.Annotations["plan_key"] != "max" {
+		t.Fatalf("effective policy = %#v, found = %t", got, found)
 	}
 }
 

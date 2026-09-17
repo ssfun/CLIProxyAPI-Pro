@@ -47,20 +47,23 @@ type HTTPResponse struct {
 type HTTPDo func(context.Context, HTTPRequest) (HTTPResponse, error)
 
 type Input struct {
-	AuthID             string
-	AuthIndex          string
-	FileName           string
-	AuthProvider       string
-	AuthKind           string
-	StorageJSON        []byte
-	Metadata           map[string]any
-	Attributes         map[string]string
-	AuthPrefix         string
-	Models             []ModelInfo
-	HTTPDo             HTTPDo
-	QuotaSnapshotJSON  []byte
-	QuotaObservedAtMS  int64
-	QuotaSnapshotError string
+	AuthID                string
+	AuthGeneration        uint64
+	AuthRegistrationEpoch uint64
+	CredentialFingerprint string
+	AuthIndex             string
+	FileName              string
+	AuthProvider          string
+	AuthKind              string
+	StorageJSON           []byte
+	Metadata              map[string]any
+	Attributes            map[string]string
+	AuthPrefix            string
+	Models                []ModelInfo
+	HTTPDo                HTTPDo
+	QuotaSnapshotJSON     []byte
+	QuotaObservedAtMS     int64
+	QuotaSnapshotError    string
 }
 
 type Result struct {
@@ -88,6 +91,7 @@ type EffectivePolicy struct {
 type cacheEntry struct {
 	Plan       string
 	ObservedAt time.Time
+	Identity   string
 }
 
 type Engine struct {
@@ -141,7 +145,7 @@ func (e *Engine) Filter(ctx context.Context, input Input) Result {
 	}
 
 	plan, source, resolveErr := e.resolvePlan(ctx, provider, cfg, input)
-	rule, matchedPlan, matched := ruleForPlan(providerCfg, plan)
+	rule, matchedPlan, matched := ruleForPlan(provider, providerCfg, plan)
 	if !matched {
 		return Result{}
 	}
@@ -171,7 +175,12 @@ func (e *Engine) resolvePlan(ctx context.Context, provider string, cfg modelconf
 	if provider != "xai" {
 		quotaPlan, quotaSource, quotaErr = planFromQuotaSnapshot(provider, input)
 	}
-	quotaFresh := quotaErr == nil && quotaPlan != "" && quotaPlan != "unknown" && snapshotIsFresh(snapshotObservedAtMS(input), cfg.CacheTTL)
+	quotaObservedAtMS := snapshotObservedAtMS(input)
+	quotaFresh := quotaErr == nil && quotaPlan != "" && quotaPlan != "unknown" && snapshotIsFresh(quotaObservedAtMS, cfg.CacheTTL)
+	quotaWithinMaxStale := snapshotIsFresh(quotaObservedAtMS, cfg.MaxStale)
+	if quotaPlan != "" && quotaPlan != "unknown" && !quotaWithinMaxStale {
+		quotaErr = combinePlanErrors(quotaErr, fmt.Errorf("quota snapshot exceeds max-stale %s", cfg.MaxStale))
+	}
 	// A flattened Gemini snapshot cannot tell whether standard-tier came from
 	// currentTier or from a paidTier whose display name was dropped. The official
 	// client gives paidTier precedence, so re-resolve this ambiguous value before
@@ -203,10 +212,12 @@ func (e *Engine) resolvePlan(ctx context.Context, provider string, cfg modelconf
 	useCache := provider != "xai"
 	now := time.Now()
 	cacheKey := provider + "\x00" + input.AuthID
+	cacheIdentity := inputCacheIdentity(input)
 	e.mu.RLock()
 	cached, hasCache := e.cache[cacheKey]
 	authEpoch := e.authEpochs[input.AuthID]
 	e.mu.RUnlock()
+	hasCache = hasCache && cached.Identity == cacheIdentity
 	if useCache && hasCache && now.Sub(cached.ObservedAt) <= cfg.CacheTTL {
 		return cached.Plan, "cache", nil
 	}
@@ -215,7 +226,7 @@ func (e *Engine) resolvePlan(ctx context.Context, provider string, cfg modelconf
 		if useCache {
 			e.mu.Lock()
 			if e.authEpochs[input.AuthID] == authEpoch {
-				e.cache[cacheKey] = cacheEntry{Plan: plan, ObservedAt: now}
+				e.cache[cacheKey] = cacheEntry{Plan: plan, ObservedAt: now, Identity: cacheIdentity}
 			}
 			e.mu.Unlock()
 		}
@@ -228,16 +239,27 @@ func (e *Engine) resolvePlan(ctx context.Context, provider string, cfg modelconf
 	if deferredLocalPlan != "" {
 		return deferredLocalPlan, "auth", errResolve
 	}
-	if provider != "xai" && quotaPlan != "" && quotaPlan != "unknown" {
+	if provider != "xai" && quotaPlan != "" && quotaPlan != "unknown" && quotaWithinMaxStale {
 		return quotaPlan, "stale-" + quotaSource, combinePlanErrors(errResolve, quotaErr)
 	}
-	if useCache && hasCache && cached.Plan != "" {
+	if useCache && hasCache && cached.Plan != "" && now.Sub(cached.ObservedAt) <= cfg.MaxStale {
 		return cached.Plan, "stale-cache", errResolve
+	}
+	if useCache && hasCache && cached.Plan != "" {
+		if errResolve == nil {
+			errResolve = fmt.Errorf("cached plan exceeds max-stale %s", cfg.MaxStale)
+		} else {
+			errResolve = fmt.Errorf("%v; cached plan exceeds max-stale %s", errResolve, cfg.MaxStale)
+		}
 	}
 	if errResolve == nil {
 		errResolve = fmt.Errorf("%s plan is unavailable", provider)
 	}
 	return "unknown", "unknown", combinePlanErrors(errResolve, quotaErr)
+}
+
+func inputCacheIdentity(input Input) string {
+	return fmt.Sprintf("%d:%d:%s", input.AuthRegistrationEpoch, input.AuthGeneration, strings.TrimSpace(input.CredentialFingerprint))
 }
 
 func strongGoogleLocalPlan(provider string, input Input) string {
@@ -782,8 +804,8 @@ func xaiPolicyAuth(input Input) *coreauth.Auth {
 	}
 }
 
-func ruleForPlan(provider modelconfig.Provider, plan string) (modelconfig.Plan, string, bool) {
-	plan = normalizeKey(plan)
+func ruleForPlan(providerKey string, provider modelconfig.Provider, plan string) (modelconfig.Plan, string, bool) {
+	plan = modelconfig.CanonicalPlanKey(providerKey, plan)
 	keys := []string{plan}
 	if plan == "" || plan == "unknown" {
 		keys = append(keys, "_unknown")
@@ -791,7 +813,7 @@ func ruleForPlan(provider modelconfig.Provider, plan string) (modelconfig.Plan, 
 		keys = append(keys, "_default")
 	}
 	for _, key := range keys {
-		key = normalizeKey(key)
+		key = modelconfig.CanonicalPlanKey(providerKey, key)
 		if rule, ok := provider.Plans[key]; ok {
 			return rule, key, true
 		}
@@ -821,22 +843,9 @@ func matchExcludedModels(models []ModelInfo, patterns []string) []string {
 }
 
 func normalizeProviderPlan(provider, value string) string {
-	value = normalizeKey(value)
-	if strings.HasPrefix(value, "plan-") {
-		value = strings.TrimPrefix(value, "plan-")
-	}
+	provider = modelconfig.CanonicalKey(provider)
+	value = modelconfig.CanonicalKey(value)
 	switch provider {
-	case "xai":
-		switch value {
-		case "super-grok":
-			return "supergrok"
-		case "super-grok-heavy":
-			return "supergrok-heavy"
-		}
-	case "codex":
-		if value == "prolite" {
-			return "pro-lite"
-		}
 	case "gemini-cli":
 		switch {
 		case strings.Contains(value, "google-ai-ultra") || strings.Contains(value, "gemini-ultra"):
@@ -885,16 +894,11 @@ func normalizeProviderPlan(provider, value string) string {
 			return value
 		}
 	}
-	return value
+	return modelconfig.CanonicalPlanKey(provider, value)
 }
 
 func normalizeKey(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.Join(strings.Fields(value), "-")
-	if strings.HasPrefix(value, "_") {
-		return "_" + strings.ReplaceAll(strings.TrimPrefix(value, "_"), "_", "-")
-	}
-	return strings.ReplaceAll(value, "_", "-")
+	return modelconfig.CanonicalKey(value)
 }
 
 func stringValue(value any) string {

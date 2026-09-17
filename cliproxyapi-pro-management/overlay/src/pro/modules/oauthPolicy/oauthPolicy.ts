@@ -50,6 +50,7 @@ export interface OAuthPolicyEffectiveItem {
 export interface OAuthPolicyConfig {
   enabled: boolean;
   cacheTTL: string;
+  maxStale: string;
   resolveTimeout: string;
   providers: Record<
     string,
@@ -63,6 +64,7 @@ export interface OAuthPolicySnapshot {
     enabled: boolean;
     refreshing: boolean;
     cacheTTL: string;
+    maxStale: string;
     resolveTimeout: string;
     providers: number;
     lastError?: string;
@@ -209,10 +211,13 @@ export const normalizeOAuthModelPlanKey = (
   provider?: string,
 ): string => {
   const normalized = value.trim().toLowerCase();
-  if (normalized.startsWith("_")) {
-    return `_${normalized.slice(1).replace(/_/g, "-")}`;
-  }
-  let key = normalized.replace(/_/g, "-");
+  const reserved = normalized.startsWith("_");
+  let key = normalized
+    .replace(/^_+/, "")
+    .split(/[\s_]+/u)
+    .filter(Boolean)
+    .join("-");
+  if (reserved) return key ? `_${key}` : "";
   if (key.startsWith("plan-")) key = key.slice(5);
   if (provider === "codex" && key === "prolite") return "pro-lite";
   const aliases: Record<string, Record<string, string>> = {
@@ -339,6 +344,7 @@ export const isValidOAuthModelPattern = (value: string): boolean => {
 export const defaultOAuthPolicyConfig = (): OAuthPolicyConfig => ({
   enabled: false,
   cacheTTL: "30m",
+  maxStale: "24h",
   resolveTimeout: "15s",
   providers: Object.fromEntries(
     OAUTH_MODEL_PROVIDER_DEFINITIONS.map((provider) => [
@@ -418,6 +424,9 @@ export const normalizeOAuthPolicyConfig = (
     cacheTTL:
       asString(source["cache-ttl"], defaults.cacheTTL).trim() ||
       defaults.cacheTTL,
+    maxStale:
+      asString(source["max-stale"], defaults.maxStale).trim() ||
+      defaults.maxStale,
     resolveTimeout:
       asString(source["resolve-timeout"], defaults.resolveTimeout).trim() ||
       defaults.resolveTimeout,
@@ -449,6 +458,7 @@ export const serializeOAuthPolicyConfig = (
   return {
     enabled: config.enabled,
     "cache-ttl": config.cacheTTL.trim(),
+    "max-stale": config.maxStale.trim(),
     "resolve-timeout": config.resolveTimeout.trim(),
     providers,
   };
@@ -486,7 +496,7 @@ export const oauthPolicyApi = {
   async save(
     config: OAuthPolicyConfig,
   ): Promise<OAuthPolicySnapshot> {
-    await apiClient.patch(
+    await apiClient.put(
       '/pro/oauth-policy/config',
       serializeOAuthPolicyConfig(config),
     );

@@ -17,14 +17,12 @@ func RegisterManagementRoutes(group *gin.RouterGroup, service *Service) {
 	management := &managementHandler{service: service}
 	group.GET("/pro/oauth-policy/config", management.getConfig)
 	group.PUT("/pro/oauth-policy/config", management.putConfig)
-	group.PATCH("/pro/oauth-policy/config", management.putConfig)
 	group.GET("/pro/oauth-policy/status", management.getStatus)
 	group.GET("/pro/oauth-policy/effective", management.getEffective)
 	group.POST("/pro/oauth-policy/refresh", management.refresh)
 	// Deprecated compatibility aliases. New clients must use /pro/oauth-policy.
 	group.GET("/pro/oauth-model-policy/config", management.deprecated, management.getConfig)
 	group.PUT("/pro/oauth-model-policy/config", management.deprecated, management.putConfig)
-	group.PATCH("/pro/oauth-model-policy/config", management.deprecated, management.putConfig)
 	group.GET("/pro/oauth-model-policy/status", management.deprecated, management.getStatus)
 }
 

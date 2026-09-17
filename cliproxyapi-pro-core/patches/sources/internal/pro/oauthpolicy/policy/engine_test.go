@@ -175,18 +175,18 @@ func TestRuleForPlanSeparatesUnknownAndDefaultFallbacks(t *testing.T) {
 		"_unknown": {ExcludedModels: []string{"unknown-*"}},
 		"_default": {ExcludedModels: []string{"default-*"}},
 	}}
-	unknownRule, unknownKey, unknownMatched := ruleForPlan(provider, "unknown")
+	unknownRule, unknownKey, unknownMatched := ruleForPlan("xai", provider, "unknown")
 	if !unknownMatched || unknownKey != "_unknown" || unknownRule.ExcludedModels[0] != "unknown-*" {
 		t.Fatalf("unknown fallback = %#v, %q, %t", unknownRule, unknownKey, unknownMatched)
 	}
-	knownRule, knownKey, knownMatched := ruleForPlan(provider, "supergrok")
+	knownRule, knownKey, knownMatched := ruleForPlan("xai", provider, "supergrok")
 	if !knownMatched || knownKey != "_default" || knownRule.ExcludedModels[0] != "default-*" {
 		t.Fatalf("known fallback = %#v, %q, %t", knownRule, knownKey, knownMatched)
 	}
 	defaultOnly := modelconfig.Provider{Plans: map[string]modelconfig.Plan{
 		"_default": {ExcludedModels: []string{"default-*"}},
 	}}
-	if _, key, matched := ruleForPlan(defaultOnly, "unknown"); matched || key != "" {
+	if _, key, matched := ruleForPlan("xai", defaultOnly, "unknown"); matched || key != "" {
 		t.Fatalf("unknown plan matched _default: key=%q matched=%t", key, matched)
 	}
 }
@@ -362,6 +362,106 @@ providers:
 	}
 	if got := calls.Load(); got != 2 {
 		t.Fatalf("provider lookup calls = %d, want 2", got)
+	}
+}
+
+func TestPlanCacheIsBoundToAuthVersion(t *testing.T) {
+	cfg, _ := modelconfig.Parse([]byte(`
+cache-ttl: 1h
+max-stale: 24h
+providers:
+  claude:
+    plans:
+      pro: {priority: 99}
+      max: {priority: 55}
+`))
+	engine := New()
+	engine.ApplyConfig(cfg)
+	var calls atomic.Int32
+	filter := func(generation uint64, fingerprint, response string) Result {
+		return engine.Filter(context.Background(), Input{
+			AuthID: "versioned", AuthGeneration: generation, AuthRegistrationEpoch: 1,
+			CredentialFingerprint: fingerprint, AuthProvider: "claude", AuthKind: "oauth",
+			Metadata: map[string]any{"access_token": fingerprint},
+			HTTPDo: func(context.Context, HTTPRequest) (HTTPResponse, error) {
+				calls.Add(1)
+				return HTTPResponse{StatusCode: 200, Body: []byte(response)}, nil
+			},
+		})
+	}
+	first := filter(1, "token-a", `{"account":{"has_claude_pro":true}}`)
+	second := filter(2, "token-b", `{"account":{"has_claude_max":true}}`)
+	if first.Annotations["plan_key"] != "pro" || second.Annotations["plan_key"] != "max" {
+		t.Fatalf("versioned cache results = %#v / %#v", first, second)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("provider lookup calls = %d, want 2", got)
+	}
+}
+
+func TestExpiredLastKnownGoodFallsBackToUnknown(t *testing.T) {
+	cfg, _ := modelconfig.Parse([]byte(`
+cache-ttl: 1m
+max-stale: 2m
+providers:
+  claude:
+    plans:
+      pro: {priority: 99}
+      max: {priority: 55}
+      _unknown: {priority: 1}
+`))
+	engine := New()
+	engine.ApplyConfig(cfg)
+	identity := inputCacheIdentity(Input{AuthGeneration: 1, AuthRegistrationEpoch: 1, CredentialFingerprint: "token"})
+	engine.cache["claude\x00expired-cache"] = cacheEntry{Plan: "pro", ObservedAt: time.Now().Add(-3 * time.Minute), Identity: identity}
+	result := engine.Filter(context.Background(), Input{
+		AuthID: "expired-cache", AuthGeneration: 1, AuthRegistrationEpoch: 1,
+		CredentialFingerprint: "token", AuthProvider: "claude", AuthKind: "oauth",
+		Metadata: map[string]any{"access_token": "token"},
+		HTTPDo: func(context.Context, HTTPRequest) (HTTPResponse, error) {
+			return HTTPResponse{}, fmt.Errorf("provider unavailable")
+		},
+	})
+	if !result.Handled || result.Annotations["plan_key"] != "unknown" || result.Annotations["matched_rule"] != "_unknown" {
+		t.Fatalf("expired cache result = %#v", result)
+	}
+	if !strings.Contains(result.Annotations["plan_error"], "exceeds max-stale") {
+		t.Fatalf("expired cache error = %q", result.Annotations["plan_error"])
+	}
+
+	quotaResult := engine.Filter(context.Background(), Input{
+		AuthID: "expired-quota", AuthGeneration: 1, AuthRegistrationEpoch: 1,
+		CredentialFingerprint: "token-2", AuthProvider: "claude", AuthKind: "oauth",
+		Metadata:          map[string]any{"access_token": "token-2"},
+		QuotaSnapshotJSON: []byte(`{"status":"success","planType":"max"}`),
+		QuotaObservedAtMS: time.Now().Add(-3 * time.Minute).UnixMilli(),
+		HTTPDo: func(context.Context, HTTPRequest) (HTTPResponse, error) {
+			return HTTPResponse{}, fmt.Errorf("provider unavailable")
+		},
+	})
+	if !quotaResult.Handled || quotaResult.Annotations["plan_key"] != "unknown" || quotaResult.Annotations["matched_rule"] != "_unknown" {
+		t.Fatalf("expired quota result = %#v", quotaResult)
+	}
+}
+
+func TestFilterMatchesWhitespaceCanonicalizedCustomPlan(t *testing.T) {
+	cfg, err := modelconfig.Parse([]byte(`
+providers:
+  kimi:
+    plans:
+      "Pro Lite": {priority: 42}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := New()
+	engine.ApplyConfig(cfg)
+	result := engine.Filter(context.Background(), Input{
+		AuthID: "kimi-custom", AuthProvider: "kimi", AuthKind: "oauth",
+		Attributes: map[string]string{"plan": "Pro  Lite"},
+	})
+	if !result.Handled || result.Annotations["plan_key"] != "pro-lite" || result.Priority == nil || *result.Priority != 42 {
+		t.Fatalf("custom plan result = %#v", result)
 	}
 }
 
