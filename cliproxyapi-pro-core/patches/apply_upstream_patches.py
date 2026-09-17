@@ -4719,15 +4719,9 @@ replace_once(
 )
 replace_once(
     auth_files,
-    '''				typeValue := gjson.GetBytes(data, "type").String()
-				emailValue := gjson.GetBytes(data, "email").String()
-				fileData["type"] = typeValue
-				fileData["email"] = emailValue
+    '''			fileData["email"] = emailValue
 ''',
-    '''				typeValue := gjson.GetBytes(data, "type").String()
-				emailValue := gjson.GetBytes(data, "email").String()
-				fileData["type"] = typeValue
-				fileData["email"] = emailValue
+    '''			fileData["email"] = emailValue
 				if lastErrorRaw := gjson.GetBytes(data, "last_error"); lastErrorRaw.IsObject() {
 					var lastError map[string]any
 					if errUnmarshal := json.Unmarshal([]byte(lastErrorRaw.Raw), &lastError); errUnmarshal == nil && len(lastError) > 0 {
@@ -4745,6 +4739,7 @@ replace_once(
 					}
 				}
 ''',
+    'if lastErrorRaw := gjson.GetBytes(data, "last_error"); lastErrorRaw.IsObject()',
 )
 replace_go_function(
     auth_files,
