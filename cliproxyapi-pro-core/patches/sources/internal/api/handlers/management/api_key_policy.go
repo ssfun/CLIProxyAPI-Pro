@@ -819,6 +819,7 @@ func writeAPIKeyPolicyOrphaned(c *gin.Context, policy apikeypolicy.Policy) {
 
 func writeAPIKeyPolicyError(c *gin.Context, err error) {
 	status, code, message := http.StatusBadRequest, "invalid_api_key_profile", err.Error()
+	var missingPrice *apikeypolicy.MissingQuotaPriceRulesError
 	switch {
 	case errors.Is(err, apikeypolicy.ErrUnavailable):
 		status, code, message = 503, "api_key_policy_unavailable", "API key policy is unavailable"
@@ -848,6 +849,10 @@ func writeAPIKeyPolicyError(c *gin.Context, err error) {
 		status, code = 409, "api_key_quota_not_configured"
 	case errors.Is(err, apikeypolicy.ErrQuotaResetConfirmation):
 		status, code = 409, "api_key_quota_reset_confirmation_required"
+	case errors.Is(err, apikeypolicy.ErrQuotaPricingUnavailable):
+		status, code, message = 503, "api_key_quota_pricing_unavailable", "model pricing is unavailable; cost quota was not saved"
+	case errors.As(err, &missingPrice):
+		status, code = 400, "api_key_quota_price_missing"
 	}
 	writeAPIKeyPolicyHTTPError(c, status, code, message)
 }

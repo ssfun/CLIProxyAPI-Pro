@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/embeddedusage"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pro/apikeypolicy"
@@ -160,5 +161,48 @@ func TestAPIKeyPolicyLifecycleIsIndependentOfUsageService(t *testing.T) {
 	decision, err := second.APIKeyPolicy().Decide(identity)
 	if err != nil || decision.Mode != apikeypolicy.ModeProfile || decision.Snapshot == nil || decision.Snapshot.ProfileName != "Restricted" {
 		t.Fatalf("decision=%#v error=%v", decision, err)
+	}
+}
+
+func TestCostQuotaSaveReadsActivePricesDuringSharedSQLiteWrite(t *testing.T) {
+	ctx := startMigrationStore(t)
+	model := "cost-quota-shared-sqlite-model"
+	registry.GetGlobalRegistry().RegisterClient("cost-quota-shared-sqlite-client", "codex", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient("cost-quota-shared-sqlite-client") })
+
+	priceStore, err := embeddedusage.OpenStore(os.Getenv("USAGE_DB_PATH"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = priceStore.UpsertModelPriceRule(ctx, embeddedusage.ModelPriceRule{
+		Model: model, Base: embeddedusage.ModelPriceRate{Input: 1}, Source: "manual", Locked: true,
+	}, true); err != nil {
+		_ = priceStore.Close()
+		t.Fatal(err)
+	}
+	if err = priceStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	proApp, err := New(ctx, filepath.Join(t.TempDir(), "config.yaml"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(proApp.Close)
+	identity, err := apikeypolicy.NewAuthenticatedAPIKeyIdentity("cost-quota-shared-sqlite-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	costLimit := 1.0
+	writeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	created, err := proApp.APIKeyPolicy().CreateWorkspace(writeCtx, identity, "Priced", &apikeypolicy.ProfileInput{
+		Name: "Priced", Providers: []string{"codex"}, Models: []string{model},
+	}, &apikeypolicy.QuotaInput{Enabled: true, Cost: &costLimit}, nil)
+	if err != nil {
+		t.Fatalf("cost quota save across shared SQLite connections: %v", err)
+	}
+	if created.Quota == nil || created.Quota.Cost == nil || *created.Quota.Cost != costLimit {
+		t.Fatalf("saved cost quota = %#v", created.Quota)
 	}
 }

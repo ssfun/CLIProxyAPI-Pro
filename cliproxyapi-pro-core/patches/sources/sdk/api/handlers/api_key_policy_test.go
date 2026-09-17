@@ -260,10 +260,56 @@ func TestAPIKeyPolicyReturnsStableForbiddenAndUnavailableErrors(t *testing.T) {
 	if errMsg = requireAPIKeyExecutionProvider(ctx, "gemini"); errMsg == nil || errMsg.StatusCode != http.StatusForbidden || gjson.Get(errMsg.Error.Error(), "error.code").String() != "profile_provider_forbidden" {
 		t.Fatalf("provider error=%#v", errMsg)
 	}
+	quotaErr := &apikeypolicy.QuotaExceededError{Metric: "requests", Used: 1, Limit: 1}
+	if errMsg = apiKeyPolicyExecutionError(quotaErr); errMsg == nil || errMsg.StatusCode != http.StatusTooManyRequests || gjson.Get(errMsg.Error.Error(), "error.code").String() != "api_key_quota_exceeded" {
+		t.Fatalf("quota error=%#v", errMsg)
+	}
 	badCtx := apikeypolicy.WithDecision(context.Background(), apikeypolicy.RequestPolicyDecision{})
 	_, _, _, errMsg = applyAPIKeyModelPolicy(nil, badCtx, "gpt-5", nil)
 	if errMsg == nil || errMsg.StatusCode != http.StatusServiceUnavailable || gjson.Get(errMsg.Error.Error(), "error.code").String() != "api_key_policy_unavailable" {
 		t.Fatalf("unavailable error=%#v", errMsg)
+	}
+}
+
+func TestAPIKeyQuotaAdmissionRunsAfterPolicyValidationAndOnlyOnce(t *testing.T) {
+	requestLimit := int64(1)
+	decision := profileDecisionForTest([]string{"codex"}, []string{"gpt-5"}, nil)
+	decision.Snapshot.Quota = &apikeypolicy.Quota{Enabled: true, Requests: &requestLimit, Epoch: 1}
+	ctx := apikeypolicy.WithDecision(context.Background(), decision)
+	var admissions int
+	ctx = apikeypolicy.WithQuotaAdmission(ctx, func(_ context.Context, current apikeypolicy.RequestPolicyDecision) (apikeypolicy.RequestPolicyDecision, error) {
+		admissions++
+		admitted := current.Clone()
+		admitted.Snapshot.QuotaAdmissionID = "quota_request_once"
+		return admitted, nil
+	})
+	if _, _, _, errMsg := applyAPIKeyModelPolicy(nil, ctx, "forbidden", []byte(`{"model":"forbidden"}`)); errMsg == nil {
+		t.Fatal("forbidden model unexpectedly passed validation")
+	}
+	if admissions != 0 {
+		t.Fatalf("policy validation consumed request quota: %d", admissions)
+	}
+	policyCtx, _, _, errMsg := applyAPIKeyModelPolicy(nil, ctx, "gpt-5", []byte(`{"model":"gpt-5"}`))
+	if errMsg != nil {
+		t.Fatal(errMsg.Error)
+	}
+	policyCtx, errMsg = admitAPIKeyQuota(policyCtx)
+	if errMsg != nil {
+		t.Fatal(errMsg.Error)
+	}
+	policyCtx, errMsg = admitAPIKeyQuota(policyCtx)
+	if errMsg != nil {
+		t.Fatal(errMsg.Error)
+	}
+	if admissions != 1 {
+		t.Fatalf("execution admissions = %d, want one", admissions)
+	}
+	admitted, ok := apikeypolicy.DecisionFromContext(policyCtx)
+	if !ok {
+		t.Fatal("admitted decision missing")
+	}
+	if attribution, ok := admitted.QuotaAttribution(); !ok || attribution.AdmissionID != "quota_request_once" {
+		t.Fatalf("quota attribution = %#v, %t", attribution, ok)
 	}
 }
 

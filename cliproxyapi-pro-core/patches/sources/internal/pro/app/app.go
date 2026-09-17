@@ -81,6 +81,24 @@ func New(ctx context.Context, configFilePath, baseProxyURL string) (*App, error)
 		}
 		return cost, err
 	})
+	apiKeyPolicy.SetCostQuotaValidator(func(ctx context.Context, policy apikeypolicy.Policy) error {
+		catalog, err := apiKeyPolicy.Catalog()
+		if err != nil {
+			return fmt.Errorf("%w: load model catalog: %v", apikeypolicy.ErrQuotaPricingUnavailable, err)
+		}
+		required := apikeypolicy.RequiredCostQuotaModels(policy, catalog)
+		if len(required) == 0 {
+			return fmt.Errorf("%w: model catalog is empty", apikeypolicy.ErrQuotaPricingUnavailable)
+		}
+		missing, err := observability.MissingModelPriceRules(ctx, required)
+		if err != nil {
+			return fmt.Errorf("%w: %v", apikeypolicy.ErrQuotaPricingUnavailable, err)
+		}
+		if len(missing) > 0 {
+			return &apikeypolicy.MissingQuotaPriceRulesError{Models: missing}
+		}
+		return nil
+	})
 	policyBackupUnregister := probackup.Default.RegisterAPIKeyPolicies(
 		func() ([]byte, bool, error) {
 			payload, err := apiKeyPolicy.ExportBackup(context.Background())

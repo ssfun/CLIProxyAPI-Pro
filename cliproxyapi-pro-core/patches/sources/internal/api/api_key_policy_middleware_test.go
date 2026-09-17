@@ -138,7 +138,7 @@ func TestAuthMiddlewareFailsClosedWhenPolicyIndexUnavailable(t *testing.T) {
 	}
 }
 
-func TestAPIKeyQuotaMiddlewareExemptsDiscoveryAndChargesConsumerRoutesKeyWide(t *testing.T) {
+func TestAPIKeyQuotaMiddlewareExemptsDiscoveryAndInstallsConsumerAdmission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	manager := sdkaccess.NewManager()
 	manager.SetProviders([]sdkaccess.Provider{apiKeyPolicyAccessProvider{provider: sdkaccess.DefaultAccessProviderName, principal: "quota-route-key"}})
@@ -162,13 +162,28 @@ func TestAPIKeyQuotaMiddlewareExemptsDiscoveryAndChargesConsumerRoutesKeyWide(t 
 		if !ok {
 			t.Fatal("consumer route has no quota decision")
 		}
-		if _, ok = decision.QuotaAttribution(); !ok {
-			t.Fatal("consumer route has no quota admission")
+		if _, charged := decision.QuotaAttribution(); charged {
+			t.Fatal("middleware charged consumer route before execution")
+		}
+		admittedCtx, errAdmission := apikeypolicy.AdmitQuotaTurn(c.Request.Context())
+		if errAdmission != nil {
+			t.Fatal(errAdmission)
+		}
+		admitted, ok := apikeypolicy.DecisionFromContext(admittedCtx)
+		if !ok {
+			t.Fatal("consumer execution has no admitted decision")
+		}
+		if _, ok = admitted.QuotaAttribution(); !ok {
+			t.Fatal("consumer execution has no quota admission")
 		}
 		c.Status(http.StatusNoContent)
 	})
 	router.POST("/backend-api/codex/responses", func(c *gin.Context) {
-		t.Fatal("second consumer route executed after request quota exhaustion")
+		if _, errAdmission := apikeypolicy.AdmitQuotaTurn(c.Request.Context()); errAdmission != nil {
+			writeAPIKeyPolicyMiddlewareError(c, false, errAdmission)
+			return
+		}
+		t.Fatal("second consumer execution bypassed request quota exhaustion")
 	})
 
 	request := func(method, path string) *httptest.ResponseRecorder {
@@ -186,6 +201,34 @@ func TestAPIKeyQuotaMiddlewareExemptsDiscoveryAndChargesConsumerRoutesKeyWide(t 
 	}
 	if recorder := request(http.MethodPost, "/backend-api/codex/responses"); recorder.Code != http.StatusTooManyRequests || !strings.Contains(recorder.Body.String(), `"code":"api_key_quota_exceeded"`) {
 		t.Fatalf("second consumer status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestAPIKeyQuotaMiddlewareDoesNotChargeRejectedConsumerRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	manager := sdkaccess.NewManager()
+	manager.SetProviders([]sdkaccess.Provider{apiKeyPolicyAccessProvider{provider: sdkaccess.DefaultAccessProviderName, principal: "invalid-consumer-key"}})
+	service := newAPIKeyPolicyMiddlewareService(t)
+	identity, _ := apikeypolicy.NewAuthenticatedAPIKeyIdentity("invalid-consumer-key")
+	requestLimit := int64(1)
+	if _, err := service.Create(context.Background(), identity, "Invalid consumer", apikeypolicy.ProfileInput{Name: "default"}, &apikeypolicy.QuotaInput{Enabled: true, Requests: &requestLimit}); err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	router.Use(AuthMiddleware(manager, service), apiKeyQuotaMiddleware(service))
+	router.POST("/invalid", func(c *gin.Context) { c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"}) })
+	router.POST("/valid", func(c *gin.Context) {
+		if _, err := apikeypolicy.AdmitQuotaTurn(c.Request.Context()); err != nil {
+			t.Fatalf("valid request admission after rejected request: %v", err)
+		}
+		c.Status(http.StatusNoContent)
+	})
+	for path, want := range map[string]int{"/invalid": http.StatusBadRequest, "/valid": http.StatusNoContent} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, path, nil))
+		if recorder.Code != want {
+			t.Fatalf("%s status=%d body=%s", path, recorder.Code, recorder.Body.String())
+		}
 	}
 }
 
@@ -496,7 +539,13 @@ func TestAPIKeyConcurrencyRejectsBeforeQuotaAndReleasesQuotaFailures(t *testing.
 	manager.SetProviders([]sdkaccess.Provider{apiKeyPolicyAccessProvider{provider: sdkaccess.DefaultAccessProviderName, principal: "concurrency-quota-key"}})
 	router := gin.New()
 	router.Use(AuthMiddleware(manager, s), apiKeyQuotaMiddleware(s))
-	router.POST("/v1/responses", func(c *gin.Context) { c.Status(200) })
+	router.POST("/v1/responses", func(c *gin.Context) {
+		if _, errAdmission := apikeypolicy.AdmitQuotaTurn(c.Request.Context()); errAdmission != nil {
+			writeAPIKeyPolicyMiddlewareError(c, false, errAdmission)
+			return
+		}
+		c.Status(200)
+	})
 	call := func() *httptest.ResponseRecorder {
 		r := httptest.NewRecorder()
 		router.ServeHTTP(r, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))

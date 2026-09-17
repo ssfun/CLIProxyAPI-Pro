@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -44,6 +45,43 @@ func EstimateUsageCostMicros(ctx context.Context, input UsageCostInput) (int64, 
 		return 0, fmt.Errorf("model price service is unavailable")
 	}
 	return service.store.EstimateUsageCostMicros(ctx, input)
+}
+
+// MissingModelPriceRules returns the normalized requested models that do not
+// have an active server-side price rule.
+func MissingModelPriceRules(ctx context.Context, models []string) ([]string, error) {
+	globalStateMu.RLock()
+	service := globalService
+	globalStateMu.RUnlock()
+	if service == nil || service.store == nil {
+		return nil, fmt.Errorf("model price service is unavailable")
+	}
+	rules, err := service.store.ActiveModelPriceRules(ctx)
+	if err != nil {
+		return nil, err
+	}
+	priced := make(map[string]struct{}, len(rules))
+	for _, rule := range rules {
+		if model := strings.TrimSpace(rule.Model); model != "" {
+			priced[model] = struct{}{}
+		}
+	}
+	missingSet := make(map[string]struct{})
+	for _, raw := range models {
+		model := strings.TrimSpace(raw)
+		if model == "" {
+			continue
+		}
+		if _, ok := priced[model]; !ok {
+			missingSet[model] = struct{}{}
+		}
+	}
+	missing := make([]string, 0, len(missingSet))
+	for model := range missingSet {
+		missing = append(missing, model)
+	}
+	sort.Strings(missing)
+	return missing, nil
 }
 
 func stopRuntimeStateWriter(service *Service) {

@@ -1052,3 +1052,43 @@ func TestCreateWorkspaceConcurrencyConflictReissuesReferenceForRetry(t *testing.
 		})
 	}
 }
+
+func TestWriteAPIKeyPolicyErrorMapsCostQuotaPricingFailures(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{
+			name: "missing rule", err: &apikeypolicy.MissingQuotaPriceRulesError{Models: []string{"gpt-5"}},
+			status: http.StatusBadRequest, code: "api_key_quota_price_missing",
+		},
+		{
+			name: "pricing unavailable", err: apikeypolicy.ErrQuotaPricingUnavailable,
+			status: http.StatusServiceUnavailable, code: "api_key_quota_pricing_unavailable",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			writeAPIKeyPolicyError(ctx, test.err)
+			if recorder.Code != test.status {
+				t.Fatalf("status = %d, want %d: %s", recorder.Code, test.status, recorder.Body.String())
+			}
+			var body struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Error.Code != test.code {
+				t.Fatalf("error code = %q, want %q", body.Error.Code, test.code)
+			}
+		})
+	}
+}
