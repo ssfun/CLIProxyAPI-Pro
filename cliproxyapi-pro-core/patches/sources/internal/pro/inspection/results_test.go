@@ -66,3 +66,13 @@ func TestHealthSummaryAndAutomaticActions(t *testing.T) {
 		t.Fatalf("quota action = %q", got)
 	}
 }
+
+func TestResultMatchesSearchIncludesAuthID(t *testing.T) {
+	result := Result{Key: "file.json::-", FileName: "", AuthIndex: "-", AuthID: "plugin-auth-id"}
+	if !ResultMatchesSearch(result, "plugin-auth-id") {
+		t.Fatal("auth id should match inspection search")
+	}
+	if ResultMatchesSearch(result, "missing") {
+		t.Fatal("unrelated query matched")
+	}
+}

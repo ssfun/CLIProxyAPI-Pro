@@ -37,6 +37,7 @@ export interface AccountInspectionAccount {
   displayAccount: string;
   email?: string;
   name?: string;
+  authId?: string;
   authIndex: string | null;
   accountId: string | null;
   provider: string;
@@ -486,6 +487,7 @@ export const accountInspectionBackendResultToItem = (
   displayAccount: item.displayName,
   email: item.email,
   name: item.name,
+  authId: item.authId,
   authIndex: item.authIndex || null,
   accountId: null,
   provider: item.provider,

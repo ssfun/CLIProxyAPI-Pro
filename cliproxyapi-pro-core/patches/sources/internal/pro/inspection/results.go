@@ -14,7 +14,7 @@ type Result struct {
 	QuotaCooling          bool     `json:"quotaCooling,omitempty"`
 	QuotaRetryAt          int64    `json:"quotaRetryAt,omitempty"`
 	QuotaRevision         int64    `json:"-"`
-	AuthID                string   `json:"-"`
+	AuthID                string   `json:"authId,omitempty"`
 	AccessTokenSHA256     string   `json:"-"`
 	Key                   string   `json:"key"`
 	Provider              string   `json:"provider"`
@@ -211,7 +211,7 @@ func ResultMatchesSearch(result Result, search string) bool {
 	if search == "" {
 		return true
 	}
-	for _, value := range []string{result.Key, result.FileName, result.DisplayName, result.Email, result.Name, result.AuthIndex} {
+	for _, value := range []string{result.Key, result.FileName, result.DisplayName, result.Email, result.Name, result.AuthIndex, result.AuthID} {
 		if strings.Contains(strings.ToLower(value), search) {
 			return true
 		}

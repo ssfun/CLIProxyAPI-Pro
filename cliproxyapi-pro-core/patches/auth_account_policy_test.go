@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/embeddedusage"
 	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
@@ -232,7 +233,7 @@ func TestQuotaProtectionSchedulingPersistenceAndCAS(t *testing.T) {
 func TestTimedQuotaProtectionReturnsToSchedulerWithoutInspection(t *testing.T) {
 	now := time.Now()
 	a := &Auth{ID: "timed-quota-test", Provider: "codex", Metadata: map[string]any{}}
-	setQuotaProtections(a, map[string]prorouting.QuotaProtection{"routing:gpt-test": {Source: "routing:gpt-test", Model: "gpt-test", RetryAt: now.Add(time.Minute).UnixMilli()}})
+	setQuotaProtections(a, map[string]prorouting.QuotaProtection{"inspection": {Source: "inspection", Model: "gpt-test", RetryAt: now.Add(time.Minute).UnixMilli()}})
 	if blocked, _, _ := isAuthBlockedForModel(a, "gpt-test", now); !blocked {
 		t.Fatal("active cooldown allowed traffic")
 	}
@@ -242,5 +243,60 @@ func TestTimedQuotaProtectionReturnsToSchedulerWithoutInspection(t *testing.T) {
 	a.Disabled = true
 	if blocked, reason, _ := isAuthBlockedForModel(a, "gpt-test", now.Add(2*time.Minute)); !blocked || reason != blockReasonDisabled {
 		t.Fatal("expiry overrode manual disable")
+	}
+}
+
+func TestImportedLegacyRoutingQuotaProtectionIsIgnored(t *testing.T) {
+	t.Setenv("USAGE_DB_PATH", filepath.Join(t.TempDir(), "quota.sqlite"))
+	t.Setenv("USAGE_SERVICE_ENABLED", "false")
+	ctx, cancel := context.WithCancel(context.Background())
+	service, err := embeddedusage.Start(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	embeddedusage.SetDefaultService(service)
+	t.Cleanup(func() { embeddedusage.SetDefaultService(nil); cancel() })
+	now := time.Now()
+	m := NewManager(nil, nil, nil)
+	a, err := m.Register(ctx, &Auth{ID: "legacy-routing-import", Provider: "codex", FileName: "legacy.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(map[string]quotaProtectionRecord{
+		a.ID: {
+			Identity: authRuntimeIdentityFingerprint(a),
+			Protections: map[string]prorouting.QuotaProtection{
+				"inspection":       {Source: "inspection", Recheck: true, RetryAt: now.Add(time.Hour).UnixMilli()},
+				"routing:gpt-test": {Source: "routing:gpt-test", Model: "gpt-test", RetryAt: now.Add(time.Hour).UnixMilli()},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = m.ApplyImportedQuotaProtection(ctx, embeddedusage.ProSetting{Namespace: prorouting.QuotaProtectionNamespace, SchemaVersion: 1, Settings: raw}); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := m.GetByID(a.ID)
+	got := prorouting.QuotaProtections(current.Metadata)
+	if len(got) != 1 || got["inspection"].Source != "inspection" {
+		t.Fatalf("imported protections = %#v", got)
+	}
+	if _, ok := got["routing:gpt-test"]; ok {
+		t.Fatal("legacy routing hold survived backup restore")
+	}
+	item, _, err := embeddedusage.GetProSetting(ctx, prorouting.QuotaProtectionNamespace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := decodeQuotaProtectionRecords(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := stored[a.ID].Protections["routing:gpt-test"]; ok {
+		t.Fatal("legacy routing hold remained in SQLite")
+	}
+	if err = m.SweepLegacyRoutingQuotaProtections(ctx); err != nil {
+		t.Fatal(err)
 	}
 }

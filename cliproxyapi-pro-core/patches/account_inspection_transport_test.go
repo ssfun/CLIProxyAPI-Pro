@@ -1121,4 +1121,10 @@ func TestNewInspectionQuotaHoldFollowsResumeProtocol(t *testing.T) {
 	if hold.Recheck || hold.RetryAt != 0 {
 		t.Fatalf("disabled recovery hold = %+v", hold)
 	}
+	probeAuth := &coreauth.Auth{ID: "xai-api", Provider: "xai", Attributes: map[string]string{"using_api": "true"}}
+	probe := prorouting.QuotaProtection{Recheck: false, RetryAt: time.Now().Add(time.Hour).UnixMilli()}
+	syncInspectionHoldResume(&probe, probeAuth, false)
+	if probe.Recheck || probe.RetryAt == 0 {
+		t.Fatalf("xAI probe-request hold = %+v", probe)
+	}
 }

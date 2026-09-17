@@ -152,6 +152,60 @@ func TestSchedulingBoardKeepsDueInspectionRecheckTime(t *testing.T) {
 		t.Fatalf("account = %+v", account)
 	}
 }
+
+func TestClearLegacyRoutingQuotaProtectionsRemovesRetiredHolds(t *testing.T) {
+	ctx := startProQuotaTestService(t)
+	now := time.Now()
+	manager := coreauth.NewManager(nil, nil, nil)
+	auth, err := manager.Register(context.Background(), &coreauth.Auth{ID: "legacy-routing", Provider: "codex", FileName: "legacy.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = manager.ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, 0, &prorouting.QuotaProtection{Recheck: true, RetryAt: now.Add(time.Hour).UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := manager.GetByID(auth.ID)
+	setQuotaProtectionsForTest(current, map[string]prorouting.QuotaProtection{
+		inspectionQuotaSource: prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource],
+		"routing:gpt-test":    {Source: "routing:gpt-test", Model: "gpt-test", RetryAt: now.Add(time.Hour).UnixMilli(), Reason: "request protection"},
+	})
+	h := &Handler{authManager: manager}
+	clearLegacyRoutingQuotaProtections(h)
+	current, _ = manager.GetByID(auth.ID)
+	got := prorouting.QuotaProtections(current.Metadata)
+	if _, ok := got["routing:gpt-test"]; ok {
+		t.Fatalf("legacy routing hold remained: %#v", got)
+	}
+	if _, ok := got[inspectionQuotaSource]; !ok {
+		t.Fatal("inspection hold was cleared")
+	}
+}
+
+func TestSchedulingBoardCountsExcludedAndAuthTransient(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	now := time.Now()
+	manager := coreauth.NewManager(nil, nil, nil)
+	if _, err := manager.Register(context.Background(), &coreauth.Auth{
+		ID: "disabled-auth", Provider: "xai", FileName: "disabled.json", Disabled: true, Status: coreauth.StatusDisabled,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Register(context.Background(), &coreauth.Auth{
+		ID: "transient-auth", Provider: "codex", FileName: "transient.json",
+		Unavailable: true, NextRetryAfter: now.Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{authManager: manager}
+	response := h.routingPolicyResponse()
+	if response.Summary.Excluded != 1 || response.Summary.AuthTransient != 1 || response.Summary.Blocked != 1 {
+		t.Fatalf("summary = %+v", response.Summary)
+	}
+	if len(response.Accounts) != 1 || response.Accounts[0].Bucket != "authTransient" {
+		t.Fatalf("accounts = %#v", response.Accounts)
+	}
+}
+
 func setQuotaProtectionsForTest(auth *coreauth.Auth, protections map[string]prorouting.QuotaProtection) {
 	raw, _ := json.Marshal(protections)
 	if auth.Metadata == nil {

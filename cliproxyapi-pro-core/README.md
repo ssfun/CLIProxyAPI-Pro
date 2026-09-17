@@ -272,7 +272,7 @@ https://github.com/ssfun/CLIProxyAPI-Pro
 - `patches/account_inspection_host.go`、`patches/pro_auth_mutation.go` — Inspection quota port 与共享 Auth mutation/file persistence host adapter。
 - `patches/pro_management_runtime.go` — 组合随 Management Handler 启停的 inspection、routing 后台生命周期。
 - 生成后的 API Server 会在 `Stop` 时关闭 management Handler；直接通过 SDK 创建 Handler 的嵌入方也必须调用其 `Shutdown()`，以释放巡检、调度看板、登录清理及全局回调。
-- `patches/routing_policy.go` — 注入只读调度看板 handlers；启动时清掉旧的 `routing:` 平行保护。
+- `patches/routing_policy.go` — 注入只读调度看板 handlers；启动、恢复与备份导入都会清掉旧的 `routing:` 平行保护。
 - 核心不变量：调度看板只读 live 上游冷却和巡检保护；导入的 `routing_cursor_state` 和 `auth_runtime_stats` 必须立即应用到 live manager；原 DB 表、JSONL record type 和 `/v0/management/usage*` API 保持兼容。
 
 静态模块按实际宿主生命周期组合：`pro/app` 管理请求路径上的 proxy-pool 与 oauth-policy 服务；`pro/observability` 随进程 context 启停；inspection 与 routing 控制器随 Management Handler 启停。跨生命周期备份端口使用 owner-scoped 注册和逆序注销，旧 Handler 或旧 Service 关闭时不会清除新实例的回调。`internal/embeddedusage` 只允许出现在 upstream/SDK 兼容边界，`internal/pro` 业务模块不反向依赖该 façade。

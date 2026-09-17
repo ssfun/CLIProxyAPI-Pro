@@ -26,6 +26,7 @@ describe('scheduling board service model', () => {
     });
     expect(got.generatedAt).toBe(10);
     expect(got.summary.blocked).toBe(2);
+    expect(got.summary.excluded).toBe(3);
     expect(got.summary.nextRetryAt).toBe(20);
     expect(got.accounts).toHaveLength(1);
   });

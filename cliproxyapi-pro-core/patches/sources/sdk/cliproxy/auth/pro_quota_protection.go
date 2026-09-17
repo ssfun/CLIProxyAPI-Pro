@@ -58,6 +58,7 @@ func restoreQuotaProtection(auth *Auth) {
 	if err != nil {
 		return
 	}
+	dropLegacyRoutingQuotaRecords(records)
 	applyQuotaProtectionRecord(auth, records[auth.ID])
 }
 
@@ -66,7 +67,8 @@ func applyQuotaProtectionRecord(auth *Auth, record quotaProtectionRecord) {
 		setQuotaProtections(auth, nil)
 		return
 	}
-	setQuotaProtections(auth, record.Protections)
+	cleaned, _ := prorouting.WithoutLegacyRoutingQuotaProtections(record.Protections)
+	setQuotaProtections(auth, cleaned)
 }
 
 // CAS on source revision prevents late probes from releasing newer restrictions.
@@ -82,7 +84,10 @@ func (m *Manager) ChangeQuotaProtection(ctx context.Context, base *Auth, source 
 		if !inspectionRefreshIdentityMatches(base, current) || current.Disabled != base.Disabled {
 			return ErrQuotaProtectionChanged
 		}
-		protections := prorouting.QuotaProtections(current.Metadata)
+		if prorouting.IsLegacyRoutingQuotaSource(source) {
+			next = nil
+		}
+		protections := prorouting.ParseQuotaProtections(current.Metadata)
 		if protections[source].Revision != expected {
 			return ErrQuotaProtectionChanged
 		}
@@ -97,6 +102,7 @@ func (m *Manager) ChangeQuotaProtection(ctx context.Context, base *Auth, source 
 		} else {
 			delete(protections, source)
 		}
+		protections, _ = prorouting.WithoutLegacyRoutingQuotaProtections(protections)
 		item, _, err := embeddedusage.GetProSetting(ctx, prorouting.QuotaProtectionNamespace)
 		if err != nil {
 			return err
@@ -110,6 +116,7 @@ func (m *Manager) ChangeQuotaProtection(ctx context.Context, base *Auth, source 
 		} else {
 			records[current.ID] = quotaProtectionRecord{Identity: authRuntimeIdentityFingerprint(current), Protections: protections}
 		}
+		dropLegacyRoutingQuotaRecords(records)
 		raw, err := json.Marshal(records)
 		if err != nil {
 			return err
@@ -128,7 +135,18 @@ func (m *Manager) ChangeQuotaProtection(ctx context.Context, base *Auth, source 
 	return err
 }
 
-func (m *Manager) ApplyImportedQuotaProtection(_ context.Context, item embeddedusage.ProSetting) error {
+func (m *Manager) SweepLegacyRoutingQuotaProtections(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	item, _, err := embeddedusage.GetProSetting(ctx, prorouting.QuotaProtectionNamespace)
+	if err != nil {
+		return err
+	}
+	return m.ApplyImportedQuotaProtection(ctx, item)
+}
+
+func (m *Manager) ApplyImportedQuotaProtection(ctx context.Context, item embeddedusage.ProSetting) error {
 	if m == nil {
 		return nil
 	}
@@ -136,6 +154,7 @@ func (m *Manager) ApplyImportedQuotaProtection(_ context.Context, item embeddedu
 	if err != nil {
 		return err
 	}
+	dropped := dropLegacyRoutingQuotaRecords(records)
 	m.mu.Lock()
 	for _, auth := range m.auths {
 		applyQuotaProtectionRecord(auth, records[auth.ID])
@@ -144,7 +163,10 @@ func (m *Manager) ApplyImportedQuotaProtection(_ context.Context, item embeddedu
 	}
 	m.mu.Unlock()
 	m.RefreshSchedulerAll()
-	return nil
+	if !dropped {
+		return nil
+	}
+	return persistQuotaProtectionRecords(ctx, records)
 }
 
 func proQuotaProtectionBlocked(auth *Auth, model string, now time.Time) (bool, time.Time) {
@@ -167,6 +189,34 @@ func proQuotaProtectionBlocked(auth *Auth, model string, now time.Time) (bool, t
 		}
 	}
 	return blocked, next
+}
+
+func persistQuotaProtectionRecords(ctx context.Context, records map[string]quotaProtectionRecord) error {
+	raw, err := json.Marshal(records)
+	if err != nil {
+		return err
+	}
+	return embeddedusage.WithProSettingWriter(ctx, func(ctx context.Context, persist func(embeddedusage.ProSetting) error) error {
+		return persist(embeddedusage.ProSetting{Namespace: prorouting.QuotaProtectionNamespace, SchemaVersion: 1, Settings: raw})
+	})
+}
+
+func dropLegacyRoutingQuotaRecords(records map[string]quotaProtectionRecord) bool {
+	droppedAny := false
+	for id, record := range records {
+		cleaned, dropped := prorouting.WithoutLegacyRoutingQuotaProtections(record.Protections)
+		if !dropped {
+			continue
+		}
+		droppedAny = true
+		if len(cleaned) == 0 {
+			delete(records, id)
+			continue
+		}
+		record.Protections = cleaned
+		records[id] = record
+	}
+	return droppedAny
 }
 
 func proroutingQuotaProtections(auth *Auth) map[string]prorouting.QuotaProtection {

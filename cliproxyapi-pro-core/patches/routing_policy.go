@@ -90,19 +90,8 @@ func clearLegacyRoutingQuotaProtections(h *Handler) {
 	if h == nil || h.authManager == nil {
 		return
 	}
-	ctx := context.Background()
-	for _, auth := range h.authManager.List() {
-		if auth == nil {
-			continue
-		}
-		for source, hold := range prorouting.QuotaProtections(auth.Metadata) {
-			if !strings.HasPrefix(source, "routing:") {
-				continue
-			}
-			if err := h.authManager.ChangeQuotaProtection(ctx, auth, source, hold.Revision, nil); err != nil {
-				log.WithError(err).WithField("auth_id", auth.ID).Warn("failed to clear legacy routing quota protection")
-			}
-		}
+	if err := h.authManager.SweepLegacyRoutingQuotaProtections(context.Background()); err != nil {
+		log.WithError(err).Warn("failed to clear legacy routing quota protection")
 	}
 }
 

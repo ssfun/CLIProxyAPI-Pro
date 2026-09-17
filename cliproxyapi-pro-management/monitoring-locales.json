@@ -1485,6 +1485,7 @@
         "authTransient": "Auth & transient",
         "recheck": "Pending recheck",
         "overlap": "Overlap",
+        "excluded": "Not in pool",
         "next_retry": "Next account returns at {{time}}",
         "no_retry": "No timed return is currently scheduled."
       },
@@ -1599,6 +1600,8 @@
         "restriction": "Restriction",
         "open_inspection": "View in inspection",
         "due_now": "Due now",
+        "due_recheck": "Due for quota recheck; still withheld until evidence recovers",
+        "due_probe": "Due to probe with a real request",
         "remaining_seconds": "{{count}}s left",
         "remaining_minutes": "{{count}} min left",
         "no_events": "No request protection events have been recorded in this process."
@@ -2767,6 +2770,7 @@
         "authTransient": "Авторизация и временные",
         "recheck": "Ожидают проверки",
         "overlap": "Перекрытие",
+        "excluded": "Вне пула",
         "next_retry": "Следующий аккаунт вернётся в {{time}}",
         "no_retry": "Сейчас нет запланированного возврата по времени."
       },
@@ -2881,6 +2885,8 @@
         "restriction": "Ограничение",
         "open_inspection": "Открыть в инспекции",
         "due_now": "Срок наступил",
+        "due_recheck": "Пора перепроверить квоту; аккаунт всё ещё не выбирается",
+        "due_probe": "Пора проверить реальным запросом",
         "remaining_seconds": "осталось {{count}} с",
         "remaining_minutes": "осталось {{count}} мин",
         "no_events": "В этом процессе ещё нет событий защиты запросов."
@@ -4521,6 +4527,7 @@
         "authTransient": "认证与瞬时",
         "recheck": "待复查",
         "overlap": "重叠",
+        "excluded": "未进入调度池",
         "next_retry": "最近一个账号将在 {{time}} 回到调度池",
         "no_retry": "当前没有按时间自动回到调度池的账号。"
       },
@@ -4635,6 +4642,8 @@
         "restriction": "限制",
         "open_inspection": "在巡检中查看",
         "due_now": "已到期",
+        "due_recheck": "已到复查时间，通过额度证据前仍不会被选中",
+        "due_probe": "已到期，等待一次真实请求验证",
         "remaining_seconds": "剩余 {{count}} 秒",
         "remaining_minutes": "剩余 {{count}} 分钟",
         "no_events": "当前进程尚未记录请求保护事件。"
@@ -6136,6 +6145,7 @@
         "authTransient": "認證與瞬時",
         "recheck": "待複查",
         "overlap": "重疊",
+        "excluded": "未進入調度池",
         "next_retry": "最近一個帳號將在 {{time}} 回到調度池",
         "no_retry": "目前沒有依時間自動回到調度池的帳號。"
       },
@@ -6250,6 +6260,8 @@
         "restriction": "限制",
         "open_inspection": "在巡檢中查看",
         "due_now": "已到期",
+        "due_recheck": "已到複查時間，通過額度證據前仍不會被選中",
+        "due_probe": "已到期，等待一次真實請求驗證",
         "remaining_seconds": "剩餘 {{count}} 秒",
         "remaining_minutes": "剩餘 {{count}} 分鐘",
         "no_events": "目前程序尚未記錄請求保護事件。"

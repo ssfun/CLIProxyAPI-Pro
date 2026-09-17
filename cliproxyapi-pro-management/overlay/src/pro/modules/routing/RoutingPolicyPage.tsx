@@ -31,10 +31,19 @@ const formatTimestamp = (value: number | undefined, locale: string, emptyText: s
   }).format(date);
 };
 
-const remainingLabel = (seconds: number | undefined, t: ReturnType<typeof useTranslation>['t']): string => {
-  if (!seconds || seconds <= 0) return t('routing_policy.runtime.due_now');
-  if (seconds < 60) return t('routing_policy.runtime.remaining_seconds', { count: seconds });
-  const minutes = Math.ceil(seconds / 60);
+const remainingLabel = (
+  account: SchedulingBoardAccount,
+  t: ReturnType<typeof useTranslation>['t']
+): string => {
+  if (!account.retryAt || (account.remainingSeconds ?? 0) <= 0) {
+    if (account.resume === 'recheck-quota') return t('routing_policy.runtime.due_recheck');
+    if (account.resume === 'probe-request') return t('routing_policy.runtime.due_probe');
+    if (!account.retryAt) return t('routing_policy.runtime.manual');
+    return t('routing_policy.runtime.due_now');
+  }
+  const remaining = account.remainingSeconds ?? 0;
+  if (remaining < 60) return t('routing_policy.runtime.remaining_seconds', { count: remaining });
+  const minutes = Math.ceil(remaining / 60);
   return t('routing_policy.runtime.remaining_minutes', { count: minutes });
 };
 
@@ -175,10 +184,10 @@ export function RoutingPolicyPage() {
           </Button>
         </div>
         <div className={styles.summaryGrid}>
-          {(['blocked', 'quota', 'authTransient', 'recheck', 'overlap'] as const).map((key) => (
+          {(['blocked', 'quota', 'authTransient', 'recheck', 'overlap', 'excluded'] as const).map((key) => (
             <div key={key} className={styles.summaryCard}>
               <small>{t(`routing_policy.summary.${key}`)}</small>
-              <strong>{data?.summary?.[key === 'blocked' ? 'blocked' : key] ?? 0}</strong>
+              <strong>{data?.summary?.[key] ?? 0}</strong>
             </div>
           ))}
         </div>
@@ -233,7 +242,7 @@ export function RoutingPolicyPage() {
                     </td>
                     <td>{account.models?.join(', ') || t('routing_policy.runtime.all_models')}</td>
                     <td>{t(`routing_policy.resume.${account.resume}`, { defaultValue: account.resume })}</td>
-                    <td>{account.retryAt ? remainingLabel(account.remainingSeconds, t) : t('routing_policy.runtime.manual')}</td>
+                    <td>{remainingLabel(account, t)}</td>
                     <td>
                       <Button variant="secondary" size="sm" onClick={() => openInspection(account)}>
                         {t('routing_policy.runtime.open_inspection')}

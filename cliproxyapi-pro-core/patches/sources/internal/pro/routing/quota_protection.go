@@ -10,9 +10,11 @@ import (
 
 const QuotaProtectionNamespace = "quota-protection"
 const QuotaProtectionMetadataKey = "pro_quota_protection"
+const LegacyRoutingQuotaSourcePrefix = "routing:"
 
 // QuotaProtection is independent of Disabled and upstream error state. A zero
-// RetryAt requires explicit release. Recheck holds need fresh quota evidence.
+// RetryAt requires explicit release. Recheck holds need fresh quota evidence
+// before they return to the pool, including after RetryAt.
 type QuotaProtection struct {
 	Source   string          `json:"source"`
 	Revision int64           `json:"revision"`
@@ -24,7 +26,7 @@ type QuotaProtection struct {
 	Settings json.RawMessage `json:"settings,omitempty"`
 }
 
-func QuotaProtections(metadata map[string]any) map[string]QuotaProtection {
+func ParseQuotaProtections(metadata map[string]any) map[string]QuotaProtection {
 	result := make(map[string]QuotaProtection)
 	if raw, ok := metadata[QuotaProtectionMetadataKey].(string); ok {
 		_ = json.Unmarshal([]byte(raw), &result)
@@ -33,6 +35,37 @@ func QuotaProtections(metadata map[string]any) map[string]QuotaProtection {
 		result = make(map[string]QuotaProtection)
 	}
 	return result
+}
+
+func QuotaProtections(metadata map[string]any) map[string]QuotaProtection {
+	result, _ := WithoutLegacyRoutingQuotaProtections(ParseQuotaProtections(metadata))
+	if result == nil {
+		result = make(map[string]QuotaProtection)
+	}
+	return result
+}
+
+func IsLegacyRoutingQuotaSource(source string) bool {
+	return strings.HasPrefix(strings.TrimSpace(source), LegacyRoutingQuotaSourcePrefix)
+}
+
+func WithoutLegacyRoutingQuotaProtections(protections map[string]QuotaProtection) (map[string]QuotaProtection, bool) {
+	if len(protections) == 0 {
+		return protections, false
+	}
+	dropped := false
+	out := make(map[string]QuotaProtection, len(protections))
+	for source, hold := range protections {
+		if IsLegacyRoutingQuotaSource(source) || IsLegacyRoutingQuotaSource(hold.Source) {
+			dropped = true
+			continue
+		}
+		out[source] = hold
+	}
+	if !dropped {
+		return protections, false
+	}
+	return out, true
 }
 
 func ProtectionBlocks(p QuotaProtection, model string, now time.Time) bool {

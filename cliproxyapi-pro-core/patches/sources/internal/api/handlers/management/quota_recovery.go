@@ -154,15 +154,19 @@ func syncInspectionHoldResume(hold *prorouting.QuotaProtection, auth *coreauth.A
 	if hold == nil {
 		return
 	}
+	probeRequest := auth != nil && auth.Provider == "xai" && xaiInspectionUsingAPI(auth)
 	if !autoRecover {
 		hold.Recheck = false
+		if probeRequest {
+			if hold.RetryAt <= 0 {
+				hold.RetryAt = time.Now().Add(prorouting.RecoveryBackoff(authIDForHold(auth), 0)).UnixMilli()
+			}
+			return
+		}
 		hold.RetryAt = 0
 		return
 	}
-	hold.Recheck = true
-	if auth != nil && auth.Provider == "xai" && xaiInspectionUsingAPI(auth) {
-		hold.Recheck = false
-	}
+	hold.Recheck = !probeRequest
 	hold.RetryAt = time.Now().Add(prorouting.RecoveryBackoff(authIDForHold(auth), 0)).UnixMilli()
 }
 
