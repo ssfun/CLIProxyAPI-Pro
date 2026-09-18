@@ -133,6 +133,50 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
         self.assertNotIn('<ProFeatureHeader', routing)
         self.assertNotIn('dirtyRef', routing)
 
+    def test_routing_board_ui_ux_enhancements(self) -> None:
+        routing = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()
+        service = (PRO_ROOT / 'routing/routingPolicy.ts').read_text()
+        locales = json.loads(LOCALES.read_text())
+
+        self.assertIn('setKeyword', routing)
+        self.assertIn('setProviderFilter', routing)
+        self.assertIn('setScopeFilter', routing)
+        self.assertIn('handleCopyAuthId', routing)
+        self.assertIn('resolveProPaginationCopy', routing)
+        self.assertIn('PRO_PAGE_SIZE_OPTIONS', routing)
+        self.assertIn('formatRemainingTime', routing)
+
+        self.assertIn('export const schedulingBoardResumeTone', service)
+        self.assertIn('export const formatRemainingTime', service)
+        self.assertIn('export const formatTimestamp', service)
+        self.assertIn('export const formatTimeOnly', service)
+
+        required_runtime_keys = {
+            'healthy_title',
+            'healthy_desc',
+            'search_placeholder',
+            'search_aria_label',
+            'all_providers',
+            'all_scopes',
+            'filter_reset',
+            'filter_empty',
+            'filter_empty_hint',
+            'copied',
+            'copy_auth_id',
+            'source',
+            'expected_recovery',
+            'view_details',
+            'pagination_info',
+        }
+        for locale in ('en.json', 'ru.json', 'zh-CN.json', 'zh-TW.json'):
+            runtime_keys = set(locales[locale]['routing_policy']['runtime'].keys())
+            self.assertTrue(
+                required_runtime_keys.issubset(runtime_keys),
+                f'{locale} missing keys: {required_runtime_keys - runtime_keys}',
+            )
+            self.assertIn('overlap', locales[locale]['routing_policy']['sources'])
+            self.assertIn('next_auto_recovery', locales[locale]['routing_policy']['summary'])
+
     def test_header_and_discard_actions_cover_all_locales(self) -> None:
         locales = json.loads(LOCALES.read_text())
         routing = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()
