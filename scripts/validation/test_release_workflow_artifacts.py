@@ -14,7 +14,7 @@ class ReleaseWorkflowArtifactTests(unittest.TestCase):
         validate_job_start = workflow.index("  validate-core:\n")
         validate_job_end = workflow.index("  validate-management:\n")
         validate_job = workflow[validate_job_start:validate_job_end]
-        build_job_start = workflow.index("  build-core-binaries:\n")
+        build_job_start = workflow.index("  build-core-other:\n")
         build_job_end = workflow.index("  assemble-core-assets:\n")
         build_job = workflow[build_job_start:build_job_end]
 
@@ -48,6 +48,74 @@ class ReleaseWorkflowArtifactTests(unittest.TestCase):
             "apply_upstream_patches.py"
         )
         self.assertLess(models_install, customization_apply)
+
+    def test_core_release_parallelizes_validation_builds_and_gates_publication(self) -> None:
+        workflow = (WORKFLOWS / "release-core.yml").read_text()
+
+        other_start = workflow.index("  build-core-other:\n")
+        linux_start = workflow.index("  build-core-linux:\n")
+        assemble_start = workflow.index("  assemble-core-assets:\n")
+        gate_start = workflow.index("  release-gate:\n")
+        publish_start = workflow.index("  publish-release:\n")
+
+        other_job = workflow[other_start:linux_start]
+        linux_job = workflow[linux_start:assemble_start]
+        assemble_job = workflow[assemble_start:gate_start]
+        gate_job = workflow[gate_start:publish_start]
+        publish_job = workflow[publish_start:]
+
+        for job in (other_job, linux_job):
+            self.assertIn("- validate-repository", job)
+            self.assertNotIn("- validate-core", job)
+        self.assertIn("runner: ubuntu-latest\n            goos: windows\n            goarch: arm64", other_job)
+        self.assertIn("Cache manylinux Go toolchain archive", linux_job)
+        self.assertIn("GOMODCACHE=/go/pkg/mod", linux_job)
+        self.assertIn("GOCACHE=/root/.cache/go-build", linux_job)
+
+        self.assertIn("- build-core-linux", assemble_job)
+        self.assertIn("- build-core-other", assemble_job)
+        self.assertIn('Expected %s core archives, found %s', assemble_job)
+        self.assertIn('"CLIProxyAPI_${version}_freebsd_aarch64_no-plugin.tar.gz"', assemble_job)
+
+        self.assertIn("- validate-core", gate_job)
+        self.assertIn("- build-image-candidate", gate_job)
+        self.assertIn("IMAGE_DIGEST:", gate_job)
+        self.assertIn("needs.release-gate.result == 'success'", publish_job)
+        self.assertIn("docker buildx imagetools create", publish_job)
+        self.assertIn("@${IMAGE_DIGEST}", publish_job)
+
+    def test_runtime_image_is_built_early_without_publishing_official_tags(self) -> None:
+        workflow = (WORKFLOWS / "release-core.yml").read_text()
+        candidate_start = workflow.index("  build-image-candidate:\n")
+        other_start = workflow.index("  build-core-other:\n")
+        candidate_job = workflow[candidate_start:other_start]
+
+        self.assertIn("- build-core-linux", candidate_job)
+        self.assertNotIn("- build-core-other", candidate_job)
+        self.assertIn("candidate-${{ github.run_id }}-${{ github.run_attempt }}", candidate_job)
+        self.assertIn("cache-from: type=gha,scope=release-runtime", candidate_job)
+        self.assertIn("cache-to: type=gha,scope=release-runtime,mode=min", candidate_job)
+        self.assertNotIn("cliproxyapi-pro:latest", candidate_job)
+        self.assertNotIn("needs.check-version.outputs.release_tag }}", candidate_job.split("tags:", 1)[1])
+
+    def test_release_tail_runs_optional_work_in_parallel_and_moves_cleanup_out(self) -> None:
+        core_workflow = (WORKFLOWS / "release-core.yml").read_text()
+        management_workflow = (WORKFLOWS / "release-management.yml").read_text()
+        cleanup_workflow = (WORKFLOWS / "cleanup-runs.yml").read_text()
+
+        deploy_start = core_workflow.index("  trigger-render-deployment:\n")
+        deploy_job = core_workflow[deploy_start:]
+
+        self.assertIn("- backup-pro-data", deploy_job.split("    steps:\n", 1)[0])
+        self.assertIn("- name: Trigger Render Deployment", deploy_job)
+        self.assertIn("- name: Send Telegram notification", deploy_job)
+        self.assertNotIn("  send-telegram-notification:\n", core_workflow)
+        self.assertNotIn("  cleanup-runs:\n", core_workflow)
+        self.assertNotIn("  cleanup-runs:\n", management_workflow)
+        self.assertIn("  workflow_dispatch:\n", cleanup_workflow)
+        self.assertIn("  schedule:\n", cleanup_workflow)
+        self.assertIn("  cleanup-runs:\n", cleanup_workflow)
+        self.assertIn("Mattraks/delete-workflow-runs@", cleanup_workflow)
 
     def test_core_release_reuses_validated_management_asset(self) -> None:
         workflow = (WORKFLOWS / "release-core.yml").read_text()

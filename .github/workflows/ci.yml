@@ -391,7 +391,7 @@ jobs:
         with:
           context: .
           file: cliproxyapi-pro-core/Dockerfile
-          load: true
+          load: false
           push: false
           tags: cli-proxy-api-pro:review
           build-args: |
@@ -402,7 +402,7 @@ jobs:
             PRO_MANAGEMENT_DIGEST=${{ needs.resolve-upstream.outputs.pro_management_asset_digest }}
             SOURCE_DATE_EPOCH=${{ steps.source-date.outputs.value }}
           cache-from: type=gha,scope=validate-source-image
-          cache-to: type=gha,scope=validate-source-image,mode=max
+          cache-to: type=gha,scope=validate-source-image,mode=max,timeout=60s,ignore-error=true
 
   management-baseline:
     needs:

@@ -4,12 +4,12 @@ ARG TARGETARCH
 
 RUN mkdir -p /CLIProxyAPI/usage /CLIProxyAPI/static
 
-COPY --from=ghcr.io/komari-monitor/komari-agent:latest /app/komari-agent /CLIProxyAPI/komari-agent
-
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl tzdata; \
     rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/komari-monitor/komari-agent:latest /app/komari-agent /CLIProxyAPI/komari-agent
 
 WORKDIR /CLIProxyAPI
 

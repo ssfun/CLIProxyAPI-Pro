@@ -1,35 +1,13 @@
-FROM golang:1.27-bookworm@sha256:648f440f42a0958804efb24df176f806f9d353b41f1c0627f666428e40310f6b AS builder
+ARG GITHUB_TOKEN=""
+
+FROM debian:bookworm@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443 AS management
 
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl jq python3 build-essential git; \
+    apt-get install -y --no-install-recommends ca-certificates curl jq; \
     rm -rf /var/lib/apt/lists/*
 
-WORKDIR /src/CLIProxyAPI
-
-ARG CLIPROXY_REPO=router-for-me/CLIProxyAPI
-ARG CLIPROXY_VERSION=""
-ARG CLIPROXY_COMMIT=""
-ARG GITHUB_TOKEN=""
-
-RUN set -eux; \
-    auth_header=""; \
-    if [ -n "$GITHUB_TOKEN" ]; then auth_header="Authorization: Bearer $GITHUB_TOKEN"; fi; \
-    if [ -z "$CLIPROXY_VERSION" ]; then \
-      if [ -n "$auth_header" ]; then \
-        CLIPROXY_VERSION="$(curl -fsSL -H "$auth_header" "https://api.github.com/repos/${CLIPROXY_REPO}/releases/latest" | jq -r '.tag_name')"; \
-      else \
-        CLIPROXY_VERSION="$(curl -fsSL "https://api.github.com/repos/${CLIPROXY_REPO}/releases/latest" | jq -r '.tag_name')"; \
-      fi; \
-    fi; \
-    test -n "$CLIPROXY_VERSION"; \
-    test "$CLIPROXY_VERSION" != "null"; \
-    source_ref="${CLIPROXY_COMMIT:-refs/tags/${CLIPROXY_VERSION}}"; \
-    curl -fsSL "https://github.com/${CLIPROXY_REPO}/archive/${source_ref}.tar.gz" -o /tmp/cliproxy.tar.gz; \
-    tar -xzf /tmp/cliproxy.tar.gz --strip-components=1 -C /src/CLIProxyAPI; \
-    rm /tmp/cliproxy.tar.gz; \
-    echo "$CLIPROXY_VERSION" > /tmp/cliproxy-version
-
+ARG GITHUB_TOKEN
 ARG PRO_MANAGEMENT_REPO=ssfun/CLIProxyAPI-Pro
 ARG PRO_MANAGEMENT_VERSION=""
 ARG PRO_MANAGEMENT_DIGEST=""
@@ -53,6 +31,38 @@ RUN set -eux; \
       test "${PRO_MANAGEMENT_DIGEST#sha256:}" != "$PRO_MANAGEMENT_DIGEST"; \
       echo "${PRO_MANAGEMENT_DIGEST#sha256:}  /tmp/pro-management.html" | sha256sum -c -; \
     fi
+
+FROM golang:1.27-bookworm@sha256:648f440f42a0958804efb24df176f806f9d353b41f1c0627f666428e40310f6b AS builder
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl jq python3 build-essential git; \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src/CLIProxyAPI
+
+ARG CLIPROXY_REPO=router-for-me/CLIProxyAPI
+ARG CLIPROXY_VERSION=""
+ARG CLIPROXY_COMMIT=""
+ARG GITHUB_TOKEN
+
+RUN set -eux; \
+    auth_header=""; \
+    if [ -n "$GITHUB_TOKEN" ]; then auth_header="Authorization: Bearer $GITHUB_TOKEN"; fi; \
+    if [ -z "$CLIPROXY_VERSION" ]; then \
+      if [ -n "$auth_header" ]; then \
+        CLIPROXY_VERSION="$(curl -fsSL -H "$auth_header" "https://api.github.com/repos/${CLIPROXY_REPO}/releases/latest" | jq -r '.tag_name')"; \
+      else \
+        CLIPROXY_VERSION="$(curl -fsSL "https://api.github.com/repos/${CLIPROXY_REPO}/releases/latest" | jq -r '.tag_name')"; \
+      fi; \
+    fi; \
+    test -n "$CLIPROXY_VERSION"; \
+    test "$CLIPROXY_VERSION" != "null"; \
+    source_ref="${CLIPROXY_COMMIT:-refs/tags/${CLIPROXY_VERSION}}"; \
+    curl -fsSL "https://github.com/${CLIPROXY_REPO}/archive/${source_ref}.tar.gz" -o /tmp/cliproxy.tar.gz; \
+    tar -xzf /tmp/cliproxy.tar.gz --strip-components=1 -C /src/CLIProxyAPI; \
+    rm /tmp/cliproxy.tar.gz; \
+    echo "$CLIPROXY_VERSION" > /tmp/cliproxy-version
 
 COPY cliproxyapi-pro-core/embeddedusage /tmp/embeddedusage
 COPY cliproxyapi-pro-core/patches /tmp/patches
@@ -84,18 +94,18 @@ ARG TARGETARCH
 
 RUN mkdir -p /CLIProxyAPI/usage /CLIProxyAPI/static
 
-COPY --from=ghcr.io/komari-monitor/komari-agent:latest /app/komari-agent /CLIProxyAPI/komari-agent
-
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl tzdata; \
     rm -rf /var/lib/apt/lists/*
 
+COPY --from=ghcr.io/komari-monitor/komari-agent:latest /app/komari-agent /CLIProxyAPI/komari-agent
+
 WORKDIR /CLIProxyAPI
 
 COPY --from=builder /out/CLIProxyAPI /CLIProxyAPI/CLIProxyAPI
 COPY --from=builder /src/CLIProxyAPI/config.example.yaml /CLIProxyAPI/config.example.yaml
-COPY --from=builder /tmp/pro-management.html /CLIProxyAPI/static/management.html
+COPY --from=management /tmp/pro-management.html /CLIProxyAPI/static/management.html
 COPY cliproxyapi-pro-core/entrypoint.sh /CLIProxyAPI/entrypoint.sh
 
 ENV TZ=Asia/Shanghai

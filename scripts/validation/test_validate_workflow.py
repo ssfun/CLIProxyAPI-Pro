@@ -85,11 +85,18 @@ class ValidateWorkflowTests(unittest.TestCase):
         self.assertIn("docker/setup-buildx-action@", workflow)
         self.assertIn("docker/build-push-action@", workflow)
         self.assertIn("cache-from: type=gha,scope=validate-source-image", workflow)
-        self.assertIn("cache-to: type=gha,scope=validate-source-image,mode=max", workflow)
+        self.assertIn("load: false", workflow)
+        self.assertIn(
+            "cache-to: type=gha,scope=validate-source-image,mode=max,timeout=60s,ignore-error=true",
+            workflow,
+        )
         self.assertIn("PRO_MANAGEMENT_VERSION=", workflow)
         self.assertIn("PRO_MANAGEMENT_DIGEST=", workflow)
         self.assertIn("releases/${management_release_endpoint}", dockerfile)
         self.assertIn("sha256sum -c -", dockerfile)
+        self.assertIn("AS management", dockerfile)
+        self.assertIn("COPY --from=management /tmp/pro-management.html", dockerfile)
+        self.assertLess(dockerfile.index("AS management"), dockerfile.index("AS builder"))
         self.assertGreater(
             dockerfile.index('ARG SOURCE_DATE_EPOCH=""'),
             dockerfile.index("RUN python3 /tmp/patches/apply_upstream_patches.py"),

@@ -263,13 +263,16 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  build-docker-image:
+  build-image-candidate:
     needs:
       - check-version
-      - build-core-binaries
+      - build-core-linux
       - validate-management
     if: needs.check-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
+
+    outputs:
+      digest: ${{ steps.build-image.outputs.digest }}
 
     permissions:
       contents: read
@@ -350,22 +353,22 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and push Docker image
+      - name: Build and push run-scoped Docker image candidate
+        id: build-image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./docker-runtime-context
           file: ./docker-runtime-context/Dockerfile.runtime
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/cliproxyapi-pro:latest
-            ${{ secrets.DOCKER_USERNAME }}/cliproxyapi-pro:${{ needs.check-version.outputs.release_tag }}
+          tags: ${{ secrets.DOCKER_USERNAME }}/cliproxyapi-pro:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          cache-from: type=gha,scope=release-runtime
+          cache-to: type=gha,scope=release-runtime,mode=min
 
-  build-core-binaries:
+  build-core-other:
     needs:
       - check-version
       - validate-repository
-      - validate-core
     if: needs.check-version.outputs.should_release == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
@@ -386,6 +389,7 @@ jobs:
             asset_arch: amd64
             archive_format: tar.gz
             asset_suffix: ""
+            manylinux_image: ""
           - target: darwin-arm64
             kind: hosted-plugin
             runner: macos-15
@@ -394,6 +398,7 @@ jobs:
             asset_arch: aarch64
             archive_format: tar.gz
             asset_suffix: ""
+            manylinux_image: ""
           - target: windows-amd64
             kind: hosted-plugin
             runner: windows-latest
@@ -402,32 +407,16 @@ jobs:
             asset_arch: amd64
             archive_format: zip
             asset_suffix: ""
+            manylinux_image: ""
           - target: windows-arm64-no-plugin
             kind: no-plugin
-            runner: windows-11-arm
+            runner: ubuntu-latest
             goos: windows
             goarch: arm64
             asset_arch: aarch64
             archive_format: zip
             asset_suffix: _no-plugin
-          - target: linux-amd64
-            kind: linux-glibc-plugin
-            runner: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            asset_arch: amd64
-            archive_format: tar.gz
-            asset_suffix: ""
-            manylinux_image: quay.io/pypa/manylinux2014_x86_64@sha256:0d25b049964b2549b83384036abdff06789a8c0b1e9ff003ec80f0d531f79e50
-          - target: linux-arm64
-            kind: linux-glibc-plugin
-            runner: ubuntu-24.04-arm
-            goos: linux
-            goarch: arm64
-            asset_arch: aarch64
-            archive_format: tar.gz
-            asset_suffix: ""
-            manylinux_image: quay.io/pypa/manylinux2014_aarch64@sha256:ae34a6ceeefe0b535c525b2e96f297311c8f1e01cfd8b9be5f647eece5b5c60b
+            manylinux_image: ""
           - target: linux-amd64-no-plugin
             kind: no-plugin
             runner: ubuntu-latest
@@ -436,6 +425,7 @@ jobs:
             asset_arch: amd64
             archive_format: tar.gz
             asset_suffix: _no-plugin
+            manylinux_image: ""
           - target: linux-arm64-no-plugin
             kind: no-plugin
             runner: ubuntu-latest
@@ -444,6 +434,7 @@ jobs:
             asset_arch: aarch64
             archive_format: tar.gz
             asset_suffix: _no-plugin
+            manylinux_image: ""
           - target: freebsd-amd64
             kind: freebsd-plugin
             runner: ubuntu-latest
@@ -452,6 +443,7 @@ jobs:
             asset_arch: amd64
             archive_format: tar.gz
             asset_suffix: ""
+            manylinux_image: ""
           - target: freebsd-amd64-no-plugin
             kind: no-plugin
             runner: ubuntu-latest
@@ -460,6 +452,7 @@ jobs:
             asset_arch: amd64
             archive_format: tar.gz
             asset_suffix: _no-plugin
+            manylinux_image: ""
           - target: freebsd-arm64-no-plugin
             kind: no-plugin
             runner: ubuntu-latest
@@ -468,6 +461,7 @@ jobs:
             asset_arch: aarch64
             archive_format: tar.gz
             asset_suffix: _no-plugin
+            manylinux_image: ""
 
     permissions:
       contents: read
@@ -500,6 +494,13 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.x'
+
+      - name: Cache manylinux Go toolchain archive
+        if: matrix.kind == 'linux-glibc-plugin'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/cliproxy-go-toolchains
+          key: ${{ runner.os }}-${{ runner.arch }}-manylinux-go-${{ matrix.goarch }}-${{ hashFiles('upstream-core/go.mod') }}
 
       - name: Prepare Pro core source
         id: prepare-core
@@ -601,22 +602,395 @@ jobs:
             exit 1
           fi
 
+          toolchain_cache="${HOME}/.cache/cliproxy-go-toolchains"
+          toolchain_archive="${toolchain_cache}/${go_archive}"
+          host_gomodcache="$(go env GOMODCACHE)"
+          host_gocache="$(go env GOCACHE)"
+          mkdir -p "${toolchain_cache}" "${host_gomodcache}" "${host_gocache}"
+          if ! printf '%s  %s\n' "${go_sha256}" "${toolchain_archive}" | sha256sum -c - >/dev/null 2>&1; then
+            curl -fsSL "https://go.dev/dl/${go_archive}" -o "${toolchain_archive}"
+          fi
+          printf '%s  %s\n' "${go_sha256}" "${toolchain_archive}" | sha256sum -c -
+
           docker run --rm \
             -v "${PWD}:/src" \
+            -v "${toolchain_cache}:/toolchains:ro" \
+            -v "${host_gomodcache}:/go/pkg/mod" \
+            -v "${host_gocache}:/root/.cache/go-build" \
             -w /src \
             -e GO_VERSION \
             -e GOARCH \
             -e RELEASE_TAG \
             -e CORE_TAG \
             -e BUILD_DATE \
+            -e GOMODCACHE=/go/pkg/mod \
+            -e GOCACHE=/root/.cache/go-build \
             -e "GO_SHA256=${go_sha256}" \
             "${MANYLINUX_IMAGE}" \
             bash -euo pipefail -c '
               go_archive="go${GO_VERSION}.linux-${GOARCH}.tar.gz"
-              curl -fsSL "https://go.dev/dl/${go_archive}" -o "/tmp/${go_archive}"
-              printf "%s  %s\n" "${GO_SHA256}" "/tmp/${go_archive}" | sha256sum -c -
+              printf "%s  %s\n" "${GO_SHA256}" "/toolchains/${go_archive}" | sha256sum -c -
               rm -rf /usr/local/go
-              tar -C /usr/local -xzf "/tmp/${go_archive}"
+              tar -C /usr/local -xzf "/toolchains/${go_archive}"
+              export PATH="/usr/local/go/bin:${PATH}"
+
+              CGO_ENABLED=1 GOOS=linux GOARCH="${GOARCH}" go build -buildvcs=false -trimpath \
+                -ldflags="-s -w -X main.Version=${RELEASE_TAG} -X main.Commit=release-${CORE_TAG} -X main.BuildDate=${BUILD_DATE}" \
+                -o "'"${archive_dir}"'/cli-proxy-api" ./cmd/server/
+
+              glibc_versions="$(readelf --version-info "'"${archive_dir}"'/cli-proxy-api" | sed -n "s/.*Name: GLIBC_\([0-9.]*\).*/\1/p" | sort -Vu)"
+              if [ -n "${glibc_versions}" ]; then
+                printf "GLIBC versions:\n%s\n" "${glibc_versions}"
+                max_glibc="$(printf "%s\n" "${glibc_versions}" | sort -V | tail -n 1)"
+                if [ "$(printf "2.17\n%s\n" "${max_glibc}" | sort -V | tail -n 1)" != "2.17" ]; then
+                  printf "linux %s binary requires GLIBC_%s, expected GLIBC_2.17 or older\n" "${GOARCH}" "${max_glibc}" >&2
+                  exit 1
+                fi
+              fi
+            '
+
+          cp LICENSE README.md README_EN.md config.example.yaml "${archive_dir}/"
+          python ../customizations-repo/scripts/build/create_reproducible_archive.py \
+            --format tar.gz \
+            --output "dist/${archive_name}" \
+            --root "${archive_dir}" \
+            --source-date-epoch "${SOURCE_DATE_EPOCH}" \
+            cli-proxy-api LICENSE README.md README_EN.md config.example.yaml
+
+      - name: Install FreeBSD plugin build dependencies
+        if: matrix.kind == 'freebsd-plugin'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld
+
+      - name: Build FreeBSD plugin-capable binary
+        if: matrix.kind == 'freebsd-plugin'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+          CORE_TAG: ${{ needs.check-version.outputs.core_tag }}
+          BUILD_DATE: ${{ steps.prepare-core.outputs.build_date }}
+        run: |
+          set -euo pipefail
+
+          freebsd_release="$({
+            curl -fsSL --retry 5 --retry-all-errors \
+              https://download.freebsd.org/releases/amd64/ |
+              grep -oE 'href="14\.[0-9]+-RELEASE/"' |
+              sed -E 's/^href="//; s#/"$##' |
+              sort -V |
+              tail -n 1
+          })"
+          if [[ ! "${freebsd_release}" =~ ^14\.[0-9]+-RELEASE$ ]]; then
+            printf 'Unable to determine a current FreeBSD 14.x release, got: %s\n' "${freebsd_release}" >&2
+            exit 1
+          fi
+
+          freebsd_version="${freebsd_release%-RELEASE}"
+          sysroot_dir="${RUNNER_TEMP}/freebsd-${freebsd_version}-sysroot"
+          archive_path="${RUNNER_TEMP}/freebsd-${freebsd_version}-base.txz"
+          mkdir -p "${sysroot_dir}"
+          curl -fL --retry 5 --retry-all-errors \
+            "https://download.freebsd.org/releases/amd64/${freebsd_release}/base.txz" \
+            -o "${archive_path}"
+          tar -xf "${archive_path}" -C "${sysroot_dir}"
+
+          mkdir -p "upstream-core/dist/${{ matrix.target }}/bin"
+          cd upstream-core
+          CGO_ENABLED=1 \
+          GOOS=freebsd \
+          GOARCH=amd64 \
+          GOFLAGS='-buildvcs=false -trimpath' \
+          CGO_LDFLAGS='-fuse-ld=lld' \
+          CC="clang --target=x86_64-unknown-freebsd${freebsd_version} --sysroot=${sysroot_dir}" \
+          go build \
+            -ldflags="-s -w -X main.Version=${RELEASE_TAG} -X main.Commit=release-${CORE_TAG} -X main.BuildDate=${BUILD_DATE}" \
+            -o "dist/${{ matrix.target }}/bin/cli-proxy-api" \
+            ./cmd/server/
+
+      - name: Package FreeBSD plugin-capable archive
+        if: matrix.kind == 'freebsd-plugin'
+        env:
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+          GOOS: ${{ matrix.goos }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+          SOURCE_DATE_EPOCH: ${{ steps.prepare-core.outputs.source_date_epoch }}
+        run: |
+          set -euo pipefail
+          cd upstream-core
+
+          archive_dir="dist/${{ matrix.target }}/archive"
+          archive_name="CLIProxyAPI_${RELEASE_TAG#v}_${GOOS}_${ASSET_ARCH}.tar.gz"
+          mkdir -p "${archive_dir}"
+          cp "dist/${{ matrix.target }}/bin/cli-proxy-api" "${archive_dir}/cli-proxy-api"
+          cp LICENSE README.md README_EN.md config.example.yaml "${archive_dir}/"
+          python ../customizations-repo/scripts/build/create_reproducible_archive.py \
+            --format tar.gz \
+            --output "dist/${archive_name}" \
+            --root "${archive_dir}" \
+            --source-date-epoch "${SOURCE_DATE_EPOCH}" \
+            cli-proxy-api LICENSE README.md README_EN.md config.example.yaml
+
+      - name: Build no-plugin archive
+        if: matrix.kind == 'no-plugin'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+          CORE_TAG: ${{ needs.check-version.outputs.core_tag }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+          ARCHIVE_FORMAT: ${{ matrix.archive_format }}
+          ASSET_SUFFIX: ${{ matrix.asset_suffix }}
+          BUILD_DATE: ${{ steps.prepare-core.outputs.build_date }}
+          SOURCE_DATE_EPOCH: ${{ steps.prepare-core.outputs.source_date_epoch }}
+        run: |
+          set -euo pipefail
+          cd upstream-core
+
+          binary_name="cli-proxy-api"
+          if [ "${GOOS}" = "windows" ]; then
+            binary_name="cli-proxy-api.exe"
+          fi
+
+          archive_dir="dist/${GOOS}-${GOARCH}${ASSET_SUFFIX}/archive"
+          archive_name="CLIProxyAPI_${RELEASE_TAG#v}_${GOOS}_${ASSET_ARCH}${ASSET_SUFFIX}.${ARCHIVE_FORMAT}"
+          rm -rf "dist/${GOOS}-${GOARCH}${ASSET_SUFFIX}"
+          mkdir -p "${archive_dir}"
+
+          CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" go build -buildvcs=false -trimpath \
+            -ldflags="-s -w -X main.Version=${RELEASE_TAG} -X main.Commit=release-${CORE_TAG} -X main.BuildDate=${BUILD_DATE}" \
+            -o "${archive_dir}/${binary_name}" ./cmd/server/
+
+          if [ "${GOOS}" = "linux" ] && readelf -l "${archive_dir}/${binary_name}" | grep -q 'Requesting program interpreter'; then
+            readelf -l "${archive_dir}/${binary_name}" >&2
+            echo "no-plugin linux binary must not require a dynamic interpreter" >&2
+            exit 1
+          fi
+
+          cp LICENSE README.md README_EN.md config.example.yaml "${archive_dir}/"
+          python ../customizations-repo/scripts/build/create_reproducible_archive.py \
+            --format "${ARCHIVE_FORMAT}" \
+            --output "dist/${archive_name}" \
+            --root "${archive_dir}" \
+            --source-date-epoch "${SOURCE_DATE_EPOCH}" \
+            "${binary_name}" LICENSE README.md README_EN.md config.example.yaml
+
+      - name: Upload core binary assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: core-release-assets-${{ matrix.target }}
+          path: |
+            upstream-core/dist/*.tar.gz
+            upstream-core/dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  build-core-linux:
+    needs:
+      - check-version
+      - validate-repository
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            kind: linux-glibc-plugin
+            runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            asset_arch: amd64
+            archive_format: tar.gz
+            asset_suffix: ""
+            manylinux_image: quay.io/pypa/manylinux2014_x86_64@sha256:0d25b049964b2549b83384036abdff06789a8c0b1e9ff003ec80f0d531f79e50
+          - target: linux-arm64
+            kind: linux-glibc-plugin
+            runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            asset_arch: aarch64
+            archive_format: tar.gz
+            asset_suffix: ""
+            manylinux_image: quay.io/pypa/manylinux2014_aarch64@sha256:ae34a6ceeefe0b535c525b2e96f297311c8f1e01cfd8b9be5f647eece5b5c60b
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout customizations
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: customizations-repo
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Checkout core upstream release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: router-for-me/CLIProxyAPI
+          ref: ${{ needs.check-version.outputs.core_sha }}
+          path: upstream-core
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: upstream-core/go.mod
+          cache: true
+          cache-dependency-path: upstream-core/go.sum
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.x'
+
+      - name: Cache manylinux Go toolchain archive
+        if: matrix.kind == 'linux-glibc-plugin'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/cliproxy-go-toolchains
+          key: ${{ runner.os }}-${{ runner.arch }}-manylinux-go-${{ matrix.goarch }}-${{ hashFiles('upstream-core/go.mod') }}
+
+      - name: Prepare Pro core source
+        id: prepare-core
+        env:
+          SRC_ROOT: ${{ github.workspace }}/upstream-core
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+          CORE_TAG: ${{ needs.check-version.outputs.core_tag }}
+          MODELS_SHA: ${{ needs.check-version.outputs.models_sha }}
+        run: |
+          set -euo pipefail
+          core_source_date_epoch="$(git -C upstream-core show -s --format=%ct HEAD)"
+          customization_source_date_epoch="$(git -C customizations-repo show -s --format=%ct HEAD)"
+          git -C upstream-core fetch --depth 1 https://github.com/router-for-me/models.git "${MODELS_SHA}"
+          test "$(git -C upstream-core rev-parse FETCH_HEAD)" = "${MODELS_SHA}"
+          models_source_date_epoch="$(git -C upstream-core show -s --format=%ct FETCH_HEAD)"
+          source_date_epoch="$(printf '%s\n' "${core_source_date_epoch}" "${customization_source_date_epoch}" "${models_source_date_epoch}" | sort -n | tail -n 1)"
+          build_date="$(SOURCE_DATE_EPOCH="${source_date_epoch}" python3 -c 'import datetime, os; print(datetime.datetime.fromtimestamp(int(os.environ["SOURCE_DATE_EPOCH"]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+          git -C upstream-core show FETCH_HEAD:models.json > upstream-core/internal/registry/models/models.json
+          python customizations-repo/cliproxyapi-pro-core/patches/apply_upstream_patches.py
+          cp customizations-repo/README.md upstream-core/README.md
+          cp customizations-repo/README_EN.md upstream-core/README_EN.md
+          cd upstream-core
+          go mod tidy
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git diff --cached --quiet || GIT_AUTHOR_DATE="${build_date}" GIT_COMMITTER_DATE="${build_date}" git commit -m "Apply CLIProxyAPI Pro release customizations"
+          git tag -f "${RELEASE_TAG}"
+          echo "GO_VERSION=$(go env GOVERSION | sed 's/^go//')" >> "${GITHUB_ENV}"
+          echo "BUILD_DATE=${build_date}" >> "${GITHUB_ENV}"
+          echo "SOURCE_DATE_EPOCH=${source_date_epoch}" >> "${GITHUB_ENV}"
+          echo "build_date=${build_date}" >> "${GITHUB_OUTPUT}"
+          echo "source_date_epoch=${source_date_epoch}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build hosted plugin-capable archive
+        if: matrix.kind == 'hosted-plugin'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+          CORE_TAG: ${{ needs.check-version.outputs.core_tag }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+          ARCHIVE_FORMAT: ${{ matrix.archive_format }}
+          BUILD_DATE: ${{ steps.prepare-core.outputs.build_date }}
+          SOURCE_DATE_EPOCH: ${{ steps.prepare-core.outputs.source_date_epoch }}
+        run: |
+          set -euo pipefail
+          cd upstream-core
+
+          binary_name="cli-proxy-api"
+          if [ "${GOOS}" = "windows" ]; then
+            binary_name="cli-proxy-api.exe"
+          fi
+
+          archive_dir="dist/${GOOS}-${GOARCH}/archive"
+          archive_name="CLIProxyAPI_${RELEASE_TAG#v}_${GOOS}_${ASSET_ARCH}.${ARCHIVE_FORMAT}"
+          rm -rf "dist/${GOOS}-${GOARCH}"
+          mkdir -p "${archive_dir}"
+
+          CGO_ENABLED=1 GOOS="${GOOS}" GOARCH="${GOARCH}" go build -buildvcs=false -trimpath \
+            -ldflags="-s -w -X main.Version=${RELEASE_TAG} -X main.Commit=release-${CORE_TAG} -X main.BuildDate=${BUILD_DATE}" \
+            -o "${archive_dir}/${binary_name}" ./cmd/server/
+
+          cp LICENSE README.md README_EN.md config.example.yaml "${archive_dir}/"
+          python ../customizations-repo/scripts/build/create_reproducible_archive.py \
+            --format "${ARCHIVE_FORMAT}" \
+            --output "dist/${archive_name}" \
+            --root "${archive_dir}" \
+            --source-date-epoch "${SOURCE_DATE_EPOCH}" \
+            "${binary_name}" LICENSE README.md README_EN.md config.example.yaml
+
+      - name: Build Linux glibc plugin-capable archive
+        if: matrix.kind == 'linux-glibc-plugin'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+          CORE_TAG: ${{ needs.check-version.outputs.core_tag }}
+          GOARCH: ${{ matrix.goarch }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+          MANYLINUX_IMAGE: ${{ matrix.manylinux_image }}
+          SOURCE_DATE_EPOCH: ${{ steps.prepare-core.outputs.source_date_epoch }}
+        run: |
+          set -euo pipefail
+          cd upstream-core
+
+          archive_dir="dist/linux-${GOARCH}/archive"
+          archive_name="CLIProxyAPI_${RELEASE_TAG#v}_linux_${ASSET_ARCH}.tar.gz"
+          rm -rf "dist/linux-${GOARCH}"
+          mkdir -p "${archive_dir}"
+
+          go_archive="go${GO_VERSION}.linux-${GOARCH}.tar.gz"
+          go_sha256="$(
+            curl -fsSL 'https://go.dev/dl/?mode=json&include=all' |
+              python3 -c 'import json, sys; filename = sys.argv[1]; print(next(item["sha256"] for release in json.load(sys.stdin) for item in release["files"] if item["filename"] == filename))' "${go_archive}"
+          )"
+          if [[ ! "${go_sha256}" =~ ^[0-9a-f]{64}$ ]]; then
+            printf 'Invalid SHA256 for %s: %s\n' "${go_archive}" "${go_sha256}" >&2
+            exit 1
+          fi
+
+          toolchain_cache="${HOME}/.cache/cliproxy-go-toolchains"
+          toolchain_archive="${toolchain_cache}/${go_archive}"
+          host_gomodcache="$(go env GOMODCACHE)"
+          host_gocache="$(go env GOCACHE)"
+          mkdir -p "${toolchain_cache}" "${host_gomodcache}" "${host_gocache}"
+          if ! printf '%s  %s\n' "${go_sha256}" "${toolchain_archive}" | sha256sum -c - >/dev/null 2>&1; then
+            curl -fsSL "https://go.dev/dl/${go_archive}" -o "${toolchain_archive}"
+          fi
+          printf '%s  %s\n' "${go_sha256}" "${toolchain_archive}" | sha256sum -c -
+
+          docker run --rm \
+            -v "${PWD}:/src" \
+            -v "${toolchain_cache}:/toolchains:ro" \
+            -v "${host_gomodcache}:/go/pkg/mod" \
+            -v "${host_gocache}:/root/.cache/go-build" \
+            -w /src \
+            -e GO_VERSION \
+            -e GOARCH \
+            -e RELEASE_TAG \
+            -e CORE_TAG \
+            -e BUILD_DATE \
+            -e GOMODCACHE=/go/pkg/mod \
+            -e GOCACHE=/root/.cache/go-build \
+            -e "GO_SHA256=${go_sha256}" \
+            "${MANYLINUX_IMAGE}" \
+            bash -euo pipefail -c '
+              go_archive="go${GO_VERSION}.linux-${GOARCH}.tar.gz"
+              printf "%s  %s\n" "${GO_SHA256}" "/toolchains/${go_archive}" | sha256sum -c -
+              rm -rf /usr/local/go
+              tar -C /usr/local -xzf "/toolchains/${go_archive}"
               export PATH="/usr/local/go/bin:${PATH}"
 
               CGO_ENABLED=1 GOOS=linux GOARCH="${GOARCH}" go build -buildvcs=false -trimpath \
@@ -775,7 +1149,8 @@ jobs:
   assemble-core-assets:
     needs:
       - check-version
-      - build-core-binaries
+      - build-core-linux
+      - build-core-other
     if: needs.check-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
 
@@ -792,14 +1167,37 @@ jobs:
 
       - name: Generate checksums
         working-directory: core-assets
+        env:
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
         run: |
           set -euo pipefail
           shopt -s nullglob
+          version="${RELEASE_TAG#v}"
+          expected=(
+            "CLIProxyAPI_${version}_darwin_amd64.tar.gz"
+            "CLIProxyAPI_${version}_darwin_aarch64.tar.gz"
+            "CLIProxyAPI_${version}_windows_amd64.zip"
+            "CLIProxyAPI_${version}_windows_aarch64_no-plugin.zip"
+            "CLIProxyAPI_${version}_linux_amd64.tar.gz"
+            "CLIProxyAPI_${version}_linux_aarch64.tar.gz"
+            "CLIProxyAPI_${version}_linux_amd64_no-plugin.tar.gz"
+            "CLIProxyAPI_${version}_linux_aarch64_no-plugin.tar.gz"
+            "CLIProxyAPI_${version}_freebsd_amd64.tar.gz"
+            "CLIProxyAPI_${version}_freebsd_amd64_no-plugin.tar.gz"
+            "CLIProxyAPI_${version}_freebsd_aarch64_no-plugin.tar.gz"
+          )
           archives=(CLIProxyAPI_*.tar.gz CLIProxyAPI_*.zip)
-          if [ "${#archives[@]}" -eq 0 ]; then
-            echo "No core binary assets found" >&2
+          if [ "${#archives[@]}" -ne "${#expected[@]}" ]; then
+            printf 'Expected %s core archives, found %s\n' "${#expected[@]}" "${#archives[@]}" >&2
+            printf 'Found: %s\n' "${archives[*]:-none}" >&2
             exit 1
           fi
+          for archive in "${expected[@]}"; do
+            test -f "${archive}" || {
+              echo "Missing expected core archive: ${archive}" >&2
+              exit 1
+            }
+          done
           sha256sum "${archives[@]}" | sort -k2 > checksums.txt
 
       - name: Upload assembled core assets
@@ -813,13 +1211,55 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  release-gate:
+    needs:
+      - check-version
+      - validate-repository
+      - validate-core
+      - validate-management
+      - build-core-linux
+      - build-core-other
+      - build-image-candidate
+      - assemble-core-assets
+    if: always() && needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Enforce complete release inputs
+        env:
+          REPOSITORY_RESULT: ${{ needs.validate-repository.result }}
+          CORE_RESULT: ${{ needs.validate-core.result }}
+          MANAGEMENT_RESULT: ${{ needs.validate-management.result }}
+          LINUX_RESULT: ${{ needs.build-core-linux.result }}
+          OTHER_RESULT: ${{ needs.build-core-other.result }}
+          IMAGE_RESULT: ${{ needs.build-image-candidate.result }}
+          ASSETS_RESULT: ${{ needs.assemble-core-assets.result }}
+          IMAGE_DIGEST: ${{ needs.build-image-candidate.outputs.digest }}
+        run: |
+          set -euo pipefail
+          for result in \
+            "${REPOSITORY_RESULT}" \
+            "${CORE_RESULT}" \
+            "${MANAGEMENT_RESULT}" \
+            "${LINUX_RESULT}" \
+            "${OTHER_RESULT}" \
+            "${IMAGE_RESULT}" \
+            "${ASSETS_RESULT}"; do
+            test "${result}" = "success"
+          done
+          [[ "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+
   publish-release:
     needs:
       - check-version
-      - build-docker-image
+      - release-gate
+      - build-image-candidate
       - assemble-core-assets
       - validate-management
-    if: needs.check-version.outputs.should_release == 'true'
+    if: needs.check-version.outputs.should_release == 'true' && needs.release-gate.result == 'success'
     runs-on: ubuntu-latest
 
     permissions:
@@ -859,6 +1299,32 @@ jobs:
         with:
           name: management-release-asset
           path: release-assets/management
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Promote validated Docker image digest
+        env:
+          IMAGE_REPOSITORY: ${{ secrets.DOCKER_USERNAME }}/cliproxyapi-pro
+          IMAGE_DIGEST: ${{ needs.build-image-candidate.outputs.digest }}
+          RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          [[ "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker buildx imagetools create \
+            --tag "${IMAGE_REPOSITORY}:${RELEASE_TAG}" \
+            --tag "${IMAGE_REPOSITORY}:latest" \
+            "${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
+          release_digest="$(docker buildx imagetools inspect "${IMAGE_REPOSITORY}:${RELEASE_TAG}" | awk '$1 == "Digest:" { print $2; exit }')"
+          latest_digest="$(docker buildx imagetools inspect "${IMAGE_REPOSITORY}:latest" | awk '$1 == "Digest:" { print $2; exit }')"
+          test "${release_digest}" = "${IMAGE_DIGEST}"
+          test "${latest_digest}" = "${IMAGE_DIGEST}"
 
       - name: Generate release notes
         env:
@@ -1167,18 +1633,6 @@ jobs:
               "$(echo "$target" | jq -r 'if type == "object" then (.hook_url // .url // empty) else empty end')"
           done
 
-  send-telegram-notification:
-    needs:
-      - check-version
-      - publish-release
-      - trigger-render-deployment
-    if: needs.check-version.outputs.should_release == 'true' && needs.publish-release.result == 'success'
-    runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-
-    steps:
       - name: Send Telegram notification
         env:
           GITHUB_REPO: ${{ github.repository }}
@@ -1237,23 +1691,3 @@ jobs:
           EOF
 
           python3 telegram_notify.py
-
-  cleanup-runs:
-    runs-on: ubuntu-latest
-    needs:
-      - publish-release
-      - backup-pro-data
-      - trigger-render-deployment
-      - send-telegram-notification
-    if: always() && needs.publish-release.result == 'success'
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - name: Delete old workflow runs
-        uses: Mattraks/delete-workflow-runs@0cf693bc9909e5e867ee8f27b813224ba862939c # v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          retain_days: 7
-          keep_minimum_runs: 6
