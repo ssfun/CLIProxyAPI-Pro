@@ -205,7 +205,12 @@ export function RoutingPolicyPage() {
     if (showLoading) setLoading(true);
     try {
       const response = await routingPolicyApi.get(request.signal);
-      if (request.isCurrent()) applyResponse(response);
+      if (request.isCurrent()) {
+        applyResponse(response);
+        if (notify) {
+          showNotification(t('routing_policy.runtime.refresh_success', { defaultValue: '数据已刷新' }), 'success');
+        }
+      }
     } catch (error) {
       if (request.isCurrent()) {
         setRuntimeError(error instanceof Error ? error.message : String(error || ''));
@@ -225,7 +230,7 @@ export function RoutingPolicyPage() {
       setLoading(false);
       return undefined;
     }
-    void loadBoard({ notify: true, showLoading: true });
+    void loadBoard({ notify: false, showLoading: true });
     const stop = startPolling(() => loadBoard(), 15000);
     return () => {
       stop();
@@ -307,6 +312,7 @@ export function RoutingPolicyPage() {
   }, [activeSurface, closeSurface, data, selectedAccount, selectedAuthId]);
 
   const openInspection = useCallback((account: SchedulingBoardAccount) => {
+    closeSurface();
     navigate('/account-inspection', {
       state: buildInspectionFocusLocationState({
         authId: account.authId,
@@ -314,20 +320,50 @@ export function RoutingPolicyPage() {
         fileName: account.fileName,
       }),
     });
-  }, [navigate]);
+  }, [closeSurface, navigate]);
 
   const handleCopyAuthId = useCallback((authId: string, event: MouseEvent) => {
     event.stopPropagation();
-    if (!navigator.clipboard) return;
-    void navigator.clipboard.writeText(authId).then(() => {
-      setCopiedAuthId(authId);
-      setTimeout(() => {
-        setCopiedAuthId((current) => (current === authId ? null : current));
-      }, 2000);
+    const copyViaClipboard = async () => {
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(authId);
+          return true;
+        }
+      } catch {
+        // fallback to execCommand below
+      }
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = authId;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        return ok;
+      } catch {
+        return false;
+      }
+    };
+
+    void copyViaClipboard().then((ok) => {
+      if (ok) {
+        setCopiedAuthId(authId);
+        setTimeout(() => {
+          setCopiedAuthId((current) => (current === authId ? null : current));
+        }, 2000);
+      }
     });
   }, []);
 
   const hasActiveFilter = Boolean(keyword.trim() || providerFilter !== 'all' || scopeFilter !== 'all');
+
+  const switchView = useCallback((view: SchedulingBoardView) => {
+    setActiveView(view);
+    setPage(1);
+  }, []);
 
   return (
     <div className={styles.container}>
@@ -356,26 +392,51 @@ export function RoutingPolicyPage() {
         </div>
 
         <div className={styles.summaryGrid}>
-          <div className={`${styles.summaryCard} ${styles.cardBlocked}`}>
+          <button
+            type="button"
+            className={`${styles.summaryCard} ${styles.cardBlocked} ${activeView === 'all' ? styles.cardActive : ''}`}
+            onClick={() => switchView('all')}
+            aria-pressed={activeView === 'all'}
+          >
             <small>{t('routing_policy.summary.blocked')}</small>
             <strong>{data?.summary?.blocked ?? 0}</strong>
-          </div>
-          <div className={`${styles.summaryCard} ${styles.cardQuota}`}>
+          </button>
+          <button
+            type="button"
+            className={`${styles.summaryCard} ${styles.cardQuota} ${activeView === 'quota' ? styles.cardActive : ''}`}
+            onClick={() => switchView('quota')}
+            aria-pressed={activeView === 'quota'}
+          >
             <small>{t('routing_policy.summary.quota')}</small>
             <strong>{data?.summary?.quota ?? 0}</strong>
-          </div>
-          <div className={`${styles.summaryCard} ${styles.cardAuth}`}>
+          </button>
+          <button
+            type="button"
+            className={`${styles.summaryCard} ${styles.cardAuth} ${activeView === 'authTransient' ? styles.cardActive : ''}`}
+            onClick={() => switchView('authTransient')}
+            aria-pressed={activeView === 'authTransient'}
+          >
             <small>{t('routing_policy.summary.authTransient')}</small>
             <strong>{data?.summary?.authTransient ?? 0}</strong>
-          </div>
-          <div className={`${styles.summaryCard} ${styles.cardRecheck}`}>
+          </button>
+          <button
+            type="button"
+            className={`${styles.summaryCard} ${styles.cardRecheck} ${activeView === 'recheck' ? styles.cardActive : ''}`}
+            onClick={() => switchView('recheck')}
+            aria-pressed={activeView === 'recheck'}
+          >
             <small>{t('routing_policy.summary.recheck')}</small>
             <strong>{data?.summary?.recheck ?? 0}</strong>
-          </div>
-          <div className={`${styles.summaryCard} ${styles.cardOverlap}`}>
+          </button>
+          <button
+            type="button"
+            className={`${styles.summaryCard} ${styles.cardOverlap} ${activeView === 'overlap' ? styles.cardActive : ''}`}
+            onClick={() => switchView('overlap')}
+            aria-pressed={activeView === 'overlap'}
+          >
             <small>{t('routing_policy.summary.overlap')}</small>
             <strong>{data?.summary?.overlap ?? 0}</strong>
-          </div>
+          </button>
           <div className={`${styles.summaryCard} ${styles.cardExcluded}`} title={t('routing_policy.summary.excluded_hint')}>
             <small>{t('routing_policy.summary.excluded')}</small>
             <strong>{data?.summary?.excluded ?? 0}</strong>
@@ -451,7 +512,7 @@ export function RoutingPolicyPage() {
       {(runtimeError || connectionStatus !== 'connected') && (
         <div role="status" className={styles.staleNotice}>
           <strong>{t('routing_policy.runtime.stale')}</strong>
-          {runtimeError && <span>{runtimeError}</span>}
+          {runtimeError ? <span>{runtimeError}</span> : <span>{t('routing_policy.runtime.disconnected_notice')}</span>}
         </div>
       )}
 
@@ -459,10 +520,7 @@ export function RoutingPolicyPage() {
         <ProFeatureTabs
           ariaLabel={t('routing_policy.title')}
           activeKey={activeView}
-          onChange={(key) => {
-            setActiveView(key as SchedulingBoardView);
-            setPage(1);
-          }}
+          onChange={(key) => switchView(key as SchedulingBoardView)}
           items={VIEW_KEYS.map((view) => ({
             key: view,
             label: t(`routing_policy.views.${view}`),
@@ -493,7 +551,7 @@ export function RoutingPolicyPage() {
                 setProviderFilter(value);
                 setPage(1);
               }}
-              size="sm"
+              triggerClassName={styles.selectTrigger}
               ariaLabel={t('routing_policy.runtime.all_providers')}
             />
           </div>
@@ -506,7 +564,7 @@ export function RoutingPolicyPage() {
                 setScopeFilter(value);
                 setPage(1);
               }}
-              size="sm"
+              triggerClassName={styles.selectTrigger}
               ariaLabel={t('routing_policy.runtime.all_scopes')}
             />
           </div>
@@ -515,6 +573,7 @@ export function RoutingPolicyPage() {
             <Button
               variant="secondary"
               size="sm"
+              className={styles.resetButton}
               onClick={() => {
                 setKeyword('');
                 setProviderFilter('all');
@@ -533,6 +592,10 @@ export function RoutingPolicyPage() {
           <div className={styles.loadingState}>
             <IconRefreshCw size={24} className={styles.spinningIcon} />
             <p>{t('common.loading')}</p>
+          </div>
+        ) : connectionStatus !== 'connected' ? (
+          <div className={styles.loadingState}>
+            <p>{t('routing_policy.runtime.disconnected_notice')}</p>
           </div>
         ) : (data?.accounts?.length ?? 0) === 0 ? (
           <div className={styles.healthyState}>
@@ -556,6 +619,7 @@ export function RoutingPolicyPage() {
                 setKeyword('');
                 setProviderFilter('all');
                 setScopeFilter('all');
+                setPage(1);
               }}
             >
               {t('routing_policy.runtime.filter_reset')}

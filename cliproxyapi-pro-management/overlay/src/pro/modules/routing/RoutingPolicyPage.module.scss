@@ -85,11 +85,20 @@
 }
 
 .summaryCard {
+  @include button-reset;
+  width: 100%;
+  text-align: left;
   border: 1px solid var(--border-color);
   border-radius: 9px;
   padding: 12px 14px;
   background: var(--bg-secondary);
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+
+  &:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--primary-color) 50%, var(--border-color));
+    transform: translateY(-1px);
+  }
 
   small {
     display: block;
@@ -106,6 +115,11 @@
     font-variant-numeric: tabular-nums;
     color: var(--text-primary);
   }
+}
+
+.cardActive {
+  border-color: var(--primary-color) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 25%, transparent);
 }
 
 .cardBlocked {
@@ -152,6 +166,11 @@
 .cardExcluded {
   opacity: 0.85;
   cursor: help;
+
+  &:hover {
+    transform: none;
+    border-color: var(--border-color);
+  }
 }
 
 .timelineBanner {
@@ -251,12 +270,36 @@
 
 .searchWrap {
   flex: 1 1 260px;
-  min-width: 200px;
+  min-width: 220px;
+
+  :global(.form-group) {
+    margin-bottom: 0;
+  }
+
+  :global(.input) {
+    height: 38px;
+    padding: 0 32px 0 12px;
+    font-size: 13px;
+    box-sizing: border-box;
+  }
 }
 
 .selectWrap {
   flex: 0 0 auto;
   min-width: 150px;
+}
+
+.selectTrigger {
+  height: 38px !important;
+  font-size: 13px !important;
+}
+
+.resetButton {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
 }
 
 .tableScroller {
@@ -372,6 +415,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  user-select: all;
 }
 
 .providerTag {
