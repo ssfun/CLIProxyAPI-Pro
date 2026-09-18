@@ -416,6 +416,40 @@ def replace_once(path: Path, old: str, new: str) -> None:
     write(path, text.replace(old, new, 1))
 
 
+def ensure_string_union_member(
+    path: Path,
+    declaration_name: str,
+    member: str,
+    after_member: str,
+) -> None:
+    text = read(path)
+    marker = f'export type {declaration_name}'
+    if text.count(marker) != 1:
+        raise RuntimeError(
+            f'Expected one type declaration in {path}, found {text.count(marker)}: {marker!r}'
+        )
+    start = text.index(marker)
+    end = text.find(';', start)
+    if end == -1:
+        raise RuntimeError(f'Type declaration terminator not found in {path}: {marker!r}')
+    declaration = text[start : end + 1]
+    member_literal = repr(member)
+    if member_literal in declaration:
+        return
+    after_literal = repr(after_member)
+    if declaration.count(after_literal) != 1:
+        raise RuntimeError(
+            f'Expected one union member in {path}, found {declaration.count(after_literal)}: '
+            f'{after_literal!r}'
+        )
+    updated = declaration.replace(
+        after_literal,
+        f'{after_literal} | {member_literal}',
+        1,
+    )
+    write(path, f'{text[:start]}{updated}{text[end + 1 :]}')
+
+
 def remove_once(path: Path, old: str, present: str) -> None:
     text = read(path)
     if present in text:
@@ -1796,7 +1830,7 @@ def patch_quota_types_latest(target: Path) -> None:
 def patch_quota_provider_model_latest(target: Path) -> None:
     types_path = target / 'src/features/quota/providers/types.ts'
     replace_once(types_path, '  CodexQuotaState,\n', '  CodexQuotaState,\n  GeminiCliQuotaState,\n')
-    replace_once(types_path, "export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'devin' | 'kimi' | 'xai';", "export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'gemini-cli' | 'devin' | 'kimi' | 'xai';")
+    ensure_string_union_member(types_path, 'QuotaProviderType', 'gemini-cli', 'codex')
     replace_once(types_path, '  codexQuota: Record<string, CodexQuotaState>;\n', '  codexQuota: Record<string, CodexQuotaState>;\n  geminiCliQuota: Record<string, GeminiCliQuotaState>;\n')
     replace_once(types_path, '  setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;\n', '  setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;\n  setGeminiCliQuota: (updater: QuotaUpdater<Record<string, GeminiCliQuotaState>>) => void;\n')
 
@@ -1971,7 +2005,7 @@ def patch_quota_success_timestamps(target: Path) -> None:
 
 def patch_auth_files_gemini_quota_latest(target: Path) -> None:
     path = target / 'src/features/authFiles/constants.ts'
-    replace_once(path, "export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'devin' | 'kimi' | 'xai';", "export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'gemini-cli' | 'devin' | 'kimi' | 'xai';")
+    ensure_string_union_member(path, 'QuotaProviderType', 'gemini-cli', 'codex')
     for marker in (
         'export const QUOTA_PROVIDER_TYPES = new Set<QuotaProviderType>([',
         'export const AUTH_FILE_MANUAL_REFRESH_PROVIDERS = new Set([',

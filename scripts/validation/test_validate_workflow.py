@@ -77,6 +77,7 @@ class ValidateWorkflowTests(unittest.TestCase):
         )
         self.assertIn("stopSlowHandler", fixture)
         self.assertEqual(2, fixture.count("close(stopSlowHandler)"))
+        self.assertEqual(4, fixture.count("resetAntigravityCapabilityCache"))
 
     def test_source_image_uses_buildx_cache_and_pinned_management_asset(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
