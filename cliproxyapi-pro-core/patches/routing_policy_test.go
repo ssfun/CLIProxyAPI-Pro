@@ -102,7 +102,7 @@ func TestRetiredRoutingPolicyWritesAreGone(t *testing.T) {
 	}
 }
 
-func TestSchedulingBoardPrefersInspectionRecheckOverUpstreamExpiry(t *testing.T) {
+func TestSchedulingBoardSeparatesInspectionActionFromUpstreamTransition(t *testing.T) {
 	now := time.Now()
 	auth := &coreauth.Auth{
 		ID:             "overlap-auth",
@@ -121,11 +121,75 @@ func TestSchedulingBoardPrefersInspectionRecheckOverUpstreamExpiry(t *testing.T)
 		inspectionQuotaSource: {Recheck: true, RetryAt: now.Add(10 * time.Minute).UnixMilli(), Reason: "inspection quota threshold"},
 	})
 	account := schedulingBoardAccount(auth, now)
-	if account.Resume != "recheck-quota" || account.Bucket != "overlap" || !account.Overlap {
+	if account.Resume != "multiple" || account.Bucket != "overlap" || !account.Overlap {
 		t.Fatalf("account = %+v", account)
 	}
-	if account.RetryAt != now.Add(10*time.Minute).UnixMilli() {
-		t.Fatalf("retry at = %d", account.RetryAt)
+	if account.NextActionAt != now.Add(10*time.Minute).UnixMilli() {
+		t.Fatalf("next action at = %d", account.NextActionAt)
+	}
+	if account.NextTransitionAt != now.Add(time.Minute).UnixMilli() || account.RetryAt != account.NextTransitionAt {
+		t.Fatalf("transition/retry = %d/%d", account.NextTransitionAt, account.RetryAt)
+	}
+}
+
+func TestSchedulingBoardKeepsDueInspectionActionSeparateFromLaterCooldown(t *testing.T) {
+	now := time.Now()
+	due := now.Add(-time.Minute).UnixMilli()
+	auth := &coreauth.Auth{
+		ID: "due-overlap", Provider: "claude", FileName: "due-overlap.json",
+		Unavailable: true, NextRetryAfter: now.Add(10 * time.Minute),
+		Metadata: map[string]any{},
+	}
+	setQuotaProtectionsForTest(auth, map[string]prorouting.QuotaProtection{
+		inspectionQuotaSource: {Recheck: true, RetryAt: due, Reason: "inspection quota threshold"},
+	})
+	account := schedulingBoardAccount(auth, now)
+	if account.NextActionAt != due || account.NextTransitionAt != now.Add(10*time.Minute).UnixMilli() {
+		t.Fatalf("account = %+v", account)
+	}
+}
+
+func TestSchedulingBoardUsesEarliestKnownModelTransition(t *testing.T) {
+	now := time.Now()
+	auth := &coreauth.Auth{ID: "multi-model", Provider: "codex", ModelStates: map[string]*coreauth.ModelState{
+		"model-a": {Unavailable: true, NextRetryAfter: now.Add(time.Minute)},
+		"model-b": {Unavailable: true, NextRetryAfter: now.Add(5 * time.Minute)},
+	}}
+	account := schedulingBoardAccount(auth, now)
+	if account.NextTransitionAt != now.Add(time.Minute).UnixMilli() {
+		t.Fatalf("account = %+v", account)
+	}
+	if len(account.Details) != 2 || account.Details[0].RetryAt == account.Details[1].RetryAt {
+		t.Fatalf("details = %+v", account.Details)
+	}
+}
+
+func TestSchedulingBoardReportsUntimedUnavailableAccount(t *testing.T) {
+	now := time.Now()
+	auth := &coreauth.Auth{ID: "untimed", Provider: "codex", Unavailable: true}
+	account := schedulingBoardAccount(auth, now)
+	if account.AuthID != auth.ID || account.Resume != "await-state-change" || account.RetryAt != 0 || account.Bucket != "authTransient" {
+		t.Fatalf("account = %+v", account)
+	}
+	if len(account.Details) != 1 || account.Details[0].Reason != "unavailable" {
+		t.Fatalf("details = %+v", account.Details)
+	}
+}
+
+func TestSchedulingBoardCredentialScopeOverridesModelList(t *testing.T) {
+	now := time.Now()
+	auth := &coreauth.Auth{
+		ID: "scope-overlap", Provider: "claude", Metadata: map[string]any{},
+		ModelStates: map[string]*coreauth.ModelState{
+			"model-a": {Unavailable: true, NextRetryAfter: now.Add(time.Minute)},
+		},
+	}
+	setQuotaProtectionsForTest(auth, map[string]prorouting.QuotaProtection{
+		inspectionQuotaSource: {Recheck: true, RetryAt: now.Add(2 * time.Minute).UnixMilli(), Reason: "inspection quota threshold"},
+	})
+	account := schedulingBoardAccount(auth, now)
+	if account.Scope != "credential" || !reflect.DeepEqual(account.Models, []string{"model-a"}) {
+		t.Fatalf("account = %+v", account)
 	}
 }
 
@@ -149,7 +213,7 @@ func TestSchedulingBoardKeepsDueInspectionRecheckTime(t *testing.T) {
 		inspectionQuotaSource: {Recheck: true, RetryAt: due, Reason: "inspection quota threshold"},
 	})
 	account := schedulingBoardAccount(auth, now)
-	if account.Resume != "recheck-quota" || account.RetryAt != due || account.Bucket != "recheck" {
+	if account.Resume != "recheck-quota" || account.RetryAt != due || account.NextActionAt != due || account.NextTransitionAt != 0 || account.Bucket != "recheck" {
 		t.Fatalf("account = %+v", account)
 	}
 }
@@ -162,7 +226,7 @@ func TestSchedulingBoardKeepsDueProbeBlockedUntilRecoveryRuns(t *testing.T) {
 		inspectionQuotaSource: {RetryAt: due, Reason: "inspection quota threshold"},
 	})
 	account := schedulingBoardAccount(auth, now)
-	if account.Resume != "probe-request" || account.RetryAt != due || account.Bucket != "quota" {
+	if account.Resume != "probe-request" || account.RetryAt != due || account.NextActionAt != due || account.NextTransitionAt != 0 || account.Bucket != "quota" {
 		t.Fatalf("account = %+v", account)
 	}
 }

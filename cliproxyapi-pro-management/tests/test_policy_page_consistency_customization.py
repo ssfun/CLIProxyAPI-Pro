@@ -127,7 +127,9 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
         self.assertIn('buildInspectionFocusLocationState', routing)
         self.assertNotIn('updateRequestProtection', service)
         self.assertNotIn("post<SchedulingBoardRawResponse>('/routing-policy/release'", service)
-        self.assertIn("get<SchedulingBoardRawResponse>('/routing-policy')", service)
+        self.assertIn("get<SchedulingBoardRawResponse>('/routing-policy', { signal })", service)
+        self.assertIn('createLatestRequestGate', routing)
+        self.assertIn('account.authId === selectedAuthId', routing)
         self.assertNotIn('<ProFeatureHeader', routing)
         self.assertNotIn('dirtyRef', routing)
 

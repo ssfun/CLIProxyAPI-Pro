@@ -1490,7 +1490,11 @@
         "overlap": "Overlap",
         "excluded": "Not in pool",
         "next_retry": "Next account returns at {{time}}",
-        "no_retry": "No timed return is currently scheduled."
+        "no_retry": "No timed return is currently scheduled.",
+        "next_action": "Next recheck or probe is due at {{time}}",
+        "no_action": "No recheck or probe is currently scheduled.",
+        "next_transition": "Next known cooldown transition is at {{time}}",
+        "no_transition": "No timed cooldown transition is currently known."
       },
       "buckets": {
         "quota": "Quota",
@@ -1504,13 +1508,25 @@
       },
       "resume": {
         "auto-expire": "Retry when due",
+        "await-state-change": "Wait for runtime recovery",
+        "refresh-token": "Refresh access token",
+        "reauthenticate": "Re-authenticate",
         "recheck-quota": "Recheck quota",
         "probe-request": "Probe with a real request",
-        "manual": "Manual release"
+        "manual": "Manual release",
+        "multiple": "Multiple recovery actions"
       },
       "sources": {
         "upstream": "Upstream cooldown",
         "inspection": "Inspection hold"
+      },
+      "reasons": {
+        "unavailable": "Unavailable without a known recovery time",
+        "unauthorized": "Authentication was rejected",
+        "invalid_grant": "Authentication grant is invalid",
+        "token_expired": "Access token has expired",
+        "model_disabled": "Model is disabled for this account",
+        "credential_disabled": "Account is disabled"
       },
       "providers": {
         "antigravity": "Antigravity",
@@ -1595,11 +1611,15 @@
         "confirmation": "Confirmation",
         "manual": "Manual",
         "no_active": "No accounts are currently withheld from scheduling.",
+        "no_longer_listed": "This account is no longer present in the current blocked-account snapshot.",
         "scope": "Scope",
         "models": "Models",
         "all_models": "All models",
         "resume": "Resume",
         "retry_at": "Next check",
+        "next_action_at": "Next action",
+        "next_transition_at": "Next transition",
+        "not_scheduled": "Not scheduled",
         "restriction": "Restriction",
         "open_inspection": "View in inspection",
         "due_now": "Due now",
@@ -2775,7 +2795,11 @@
         "overlap": "Перекрытие",
         "excluded": "Вне пула",
         "next_retry": "Следующий аккаунт вернётся в {{time}}",
-        "no_retry": "Сейчас нет запланированного возврата по времени."
+        "no_retry": "Сейчас нет запланированного возврата по времени.",
+        "next_action": "Следующая перепроверка или проба: {{time}}",
+        "no_action": "Перепроверка или проба не запланирована.",
+        "next_transition": "Следующее известное изменение охлаждения: {{time}}",
+        "no_transition": "Известных изменений охлаждения по времени нет."
       },
       "buckets": {
         "quota": "Квота",
@@ -2789,13 +2813,25 @@
       },
       "resume": {
         "auto-expire": "Повторить по сроку",
+        "await-state-change": "Ждать восстановления состояния",
+        "refresh-token": "Обновить токен доступа",
+        "reauthenticate": "Повторно войти",
         "recheck-quota": "Перепроверить квоту",
         "probe-request": "Проверить реальным запросом",
-        "manual": "Ручное снятие"
+        "manual": "Ручное снятие",
+        "multiple": "Несколько действий восстановления"
       },
       "sources": {
         "upstream": "Охлаждение upstream",
         "inspection": "Удержание инспекции"
+      },
+      "reasons": {
+        "unavailable": "Недоступен без известного времени восстановления",
+        "unauthorized": "Аутентификация отклонена",
+        "invalid_grant": "Недействительный grant аутентификации",
+        "token_expired": "Токен доступа истёк",
+        "model_disabled": "Модель отключена для аккаунта",
+        "credential_disabled": "Аккаунт отключён"
       },
       "providers": {
         "antigravity": "Antigravity",
@@ -2880,11 +2916,15 @@
         "confirmation": "Подтверждение",
         "manual": "Вручную",
         "no_active": "Сейчас нет аккаунтов, исключённых из планирования.",
+        "no_longer_listed": "Этого аккаунта больше нет в текущем снимке заблокированных аккаунтов.",
         "scope": "Область",
         "models": "Модели",
         "all_models": "Все модели",
         "resume": "Возобновление",
         "retry_at": "Следующая проверка",
+        "next_action_at": "Следующее действие",
+        "next_transition_at": "Следующее изменение",
+        "not_scheduled": "Не запланировано",
         "restriction": "Ограничение",
         "open_inspection": "Открыть в инспекции",
         "due_now": "Срок наступил",
@@ -4535,7 +4575,11 @@
         "overlap": "重叠",
         "excluded": "未进入调度池",
         "next_retry": "最近一个账号将在 {{time}} 回到调度池",
-        "no_retry": "当前没有按时间自动回到调度池的账号。"
+        "no_retry": "当前没有按时间自动回到调度池的账号。",
+        "next_action": "下一次复查或探测时间：{{time}}",
+        "no_action": "当前没有已安排的复查或探测。",
+        "next_transition": "下一次已知冷却状态变化：{{time}}",
+        "no_transition": "当前没有已知的定时冷却状态变化。"
       },
       "buckets": {
         "quota": "额度",
@@ -4549,13 +4593,25 @@
       },
       "resume": {
         "auto-expire": "到期再试",
+        "await-state-change": "等待运行状态恢复",
+        "refresh-token": "刷新访问令牌",
+        "reauthenticate": "重新认证",
         "recheck-quota": "复查额度",
         "probe-request": "到期试一次请求",
-        "manual": "手动解除"
+        "manual": "手动解除",
+        "multiple": "需要多项恢复动作"
       },
       "sources": {
         "upstream": "上游冷却",
         "inspection": "巡检保护"
+      },
+      "reasons": {
+        "unavailable": "账号不可用，暂无明确恢复时间",
+        "unauthorized": "认证被上游拒绝",
+        "invalid_grant": "认证授权已失效",
+        "token_expired": "访问令牌已过期",
+        "model_disabled": "该账号的模型已被禁用",
+        "credential_disabled": "账号已被禁用"
       },
       "providers": {
         "antigravity": "Antigravity",
@@ -4640,11 +4696,15 @@
         "confirmation": "确认进度",
         "manual": "手动解除",
         "no_active": "当前没有被调度挡住的账号。",
+        "no_longer_listed": "该账号已不在当前不可调度账号快照中。",
         "scope": "范围",
         "models": "模型",
         "all_models": "全部模型",
         "resume": "验证方式",
         "retry_at": "下次验证",
+        "next_action_at": "下次动作",
+        "next_transition_at": "下次状态变化",
+        "not_scheduled": "未安排",
         "restriction": "限制",
         "open_inspection": "在巡检中查看",
         "due_now": "已到期",
@@ -6156,7 +6216,11 @@
         "overlap": "重疊",
         "excluded": "未進入調度池",
         "next_retry": "最近一個帳號將在 {{time}} 回到調度池",
-        "no_retry": "目前沒有依時間自動回到調度池的帳號。"
+        "no_retry": "目前沒有依時間自動回到調度池的帳號。",
+        "next_action": "下一次複查或探測時間：{{time}}",
+        "no_action": "目前沒有已安排的複查或探測。",
+        "next_transition": "下一次已知冷卻狀態變化：{{time}}",
+        "no_transition": "目前沒有已知的定時冷卻狀態變化。"
       },
       "buckets": {
         "quota": "額度",
@@ -6170,13 +6234,25 @@
       },
       "resume": {
         "auto-expire": "到期再試",
+        "await-state-change": "等待執行狀態恢復",
+        "refresh-token": "重新整理存取權杖",
+        "reauthenticate": "重新驗證",
         "recheck-quota": "複查額度",
         "probe-request": "到期試一次請求",
-        "manual": "手動解除"
+        "manual": "手動解除",
+        "multiple": "需要多項恢復動作"
       },
       "sources": {
         "upstream": "上游冷卻",
         "inspection": "巡檢保護"
+      },
+      "reasons": {
+        "unavailable": "帳號不可用，暫無明確恢復時間",
+        "unauthorized": "驗證被上游拒絕",
+        "invalid_grant": "驗證授權已失效",
+        "token_expired": "存取權杖已過期",
+        "model_disabled": "此帳號的模型已停用",
+        "credential_disabled": "帳號已停用"
       },
       "providers": {
         "antigravity": "Antigravity",
@@ -6261,11 +6337,15 @@
         "confirmation": "確認進度",
         "manual": "手動解除",
         "no_active": "目前沒有被調度擋住的帳號。",
+        "no_longer_listed": "此帳號已不在目前不可調度帳號快照中。",
         "scope": "範圍",
         "models": "模型",
         "all_models": "全部模型",
         "resume": "驗證方式",
         "retry_at": "下次驗證",
+        "next_action_at": "下次動作",
+        "next_transition_at": "下次狀態變化",
+        "not_scheduled": "未安排",
         "restriction": "限制",
         "open_inspection": "在巡檢中查看",
         "due_now": "已到期",

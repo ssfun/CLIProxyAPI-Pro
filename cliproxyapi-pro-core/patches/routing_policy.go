@@ -22,13 +22,15 @@ type routingPolicyController struct {
 }
 
 type routingBoardSummary struct {
-	Blocked       int   `json:"blocked"`
-	Quota         int   `json:"quota"`
-	AuthTransient int   `json:"authTransient"`
-	Recheck       int   `json:"recheck"`
-	Overlap       int   `json:"overlap"`
-	Excluded      int   `json:"excluded"`
-	NextRetryAt   int64 `json:"nextRetryAt,omitempty"`
+	Blocked          int   `json:"blocked"`
+	Quota            int   `json:"quota"`
+	AuthTransient    int   `json:"authTransient"`
+	Recheck          int   `json:"recheck"`
+	Overlap          int   `json:"overlap"`
+	Excluded         int   `json:"excluded"`
+	NextRetryAt      int64 `json:"nextRetryAt,omitempty"`
+	NextActionAt     int64 `json:"nextActionAt,omitempty"`
+	NextTransitionAt int64 `json:"nextTransitionAt,omitempty"`
 }
 
 type routingBoardDetail struct {
@@ -54,6 +56,8 @@ type routingBoardAccount struct {
 	Sources          []string             `json:"sources"`
 	Resume           string               `json:"resume"`
 	RetryAt          int64                `json:"retryAt,omitempty"`
+	NextActionAt     int64                `json:"nextActionAt,omitempty"`
+	NextTransitionAt int64                `json:"nextTransitionAt,omitempty"`
 	RemainingSeconds int64                `json:"remainingSeconds,omitempty"`
 	Reason           string               `json:"reason"`
 	HTTPStatus       int                  `json:"httpStatus,omitempty"`
@@ -157,9 +161,9 @@ func (h *Handler) routingPolicyResponse() routingPolicyResponse {
 		default:
 			response.Summary.AuthTransient++
 		}
-		if account.RetryAt > 0 && (response.Summary.NextRetryAt == 0 || account.RetryAt < response.Summary.NextRetryAt) {
-			response.Summary.NextRetryAt = account.RetryAt
-		}
+		response.Summary.NextActionAt = earlierTimestamp(response.Summary.NextActionAt, account.NextActionAt)
+		response.Summary.NextTransitionAt = earlierTimestamp(response.Summary.NextTransitionAt, account.NextTransitionAt)
+		response.Summary.NextRetryAt = earlierTimestamp(response.Summary.NextRetryAt, account.RetryAt)
 	}
 	sort.Slice(response.Accounts, func(i, j int) bool {
 		left, right := response.Accounts[i], response.Accounts[j]
@@ -187,51 +191,62 @@ func schedulingBoardAccount(auth *coreauth.Auth, now time.Time) routingBoardAcco
 	}
 	sources := uniqueSortedStrings(mapSlice(details, func(detail routingBoardDetail) string { return detail.Source }))
 	models := uniqueSortedStrings(compactStrings(mapSlice(details, func(detail routingBoardDetail) string { return detail.Model })))
-	resume := "auto-expire"
+	resume := ""
 	kind := "transient"
 	scope := "model"
-	retryAt := int64(0)
-	permanent := false
+	nextActionAt := int64(0)
+	nextTransitionAt := int64(0)
+	resumeSet := make(map[string]struct{})
 	httpStatus := 0
 	reason := ""
 	for _, detail := range details {
-		resume = stricterResume(resume, detail.Resume)
+		if detail.Resume != "" {
+			resumeSet[detail.Resume] = struct{}{}
+			resume = stricterResume(resume, detail.Resume)
+		}
 		kind = stricterKind(kind, detail.Kind)
 		if detail.Scope == "credential" {
 			scope = "credential"
 		}
-		if detail.RetryAt == 0 && (detail.Resume == "manual" || detail.Resume == "recheck-quota") {
-			permanent = true
-		} else if !permanent && detail.RetryAt > retryAt {
-			retryAt = detail.RetryAt
+		if detail.RetryAt > 0 {
+			if detail.Resume == "auto-expire" {
+				if detail.RetryAt > now.UnixMilli() {
+					nextTransitionAt = earlierTimestamp(nextTransitionAt, detail.RetryAt)
+				}
+			} else if detail.Resume == "recheck-quota" || detail.Resume == "probe-request" {
+				nextActionAt = earlierTimestamp(nextActionAt, detail.RetryAt)
+			}
 		}
 		if reason == "" || detail.Source == "inspection" && kind == "quota" {
 			reason = detail.Reason
 			httpStatus = detail.HTTPStatus
 		}
 	}
-	if permanent {
-		retryAt = 0
+	if len(resumeSet) > 1 {
+		resume = "multiple"
 	}
+	retryAt := earlierTimestamp(nextActionAt, nextTransitionAt)
 	inspection := containsString(sources, "inspection")
 	upstream := containsString(sources, "upstream")
 	overlap := inspection && upstream
 	account := routingBoardAccount{
-		Provider:   strings.ToLower(strings.TrimSpace(auth.Provider)),
-		AuthID:     auth.ID,
-		AuthIndex:  auth.Index,
-		FileName:   routingProtectionAuthFileName(auth),
-		Scope:      scope,
-		Models:     models,
-		Kind:       kind,
-		Sources:    sources,
-		Resume:     resume,
-		RetryAt:    retryAt,
-		Reason:     reason,
-		HTTPStatus: httpStatus,
-		Inspection: inspection,
-		Overlap:    overlap,
-		Details:    details,
+		Provider:         strings.ToLower(strings.TrimSpace(auth.Provider)),
+		AuthID:           auth.ID,
+		AuthIndex:        auth.Index,
+		FileName:         routingProtectionAuthFileName(auth),
+		Scope:            scope,
+		Models:           models,
+		Kind:             kind,
+		Sources:          sources,
+		Resume:           resume,
+		RetryAt:          retryAt,
+		NextActionAt:     nextActionAt,
+		NextTransitionAt: nextTransitionAt,
+		Reason:           reason,
+		HTTPStatus:       httpStatus,
+		Inspection:       inspection,
+		Overlap:          overlap,
+		Details:          details,
 	}
 	if retryAt > now.UnixMilli() {
 		remaining := time.UnixMilli(retryAt).Sub(now)
@@ -240,7 +255,7 @@ func schedulingBoardAccount(auth *coreauth.Auth, now time.Time) routingBoardAcco
 	switch {
 	case overlap:
 		account.Bucket = "overlap"
-	case resume == "recheck-quota":
+	case detailsContainResume(details, "recheck-quota"):
 		account.Bucket = "recheck"
 	case kind == "quota":
 		account.Bucket = "quota"
@@ -255,7 +270,7 @@ func schedulingBoardDetails(auth *coreauth.Auth, now time.Time) []routingBoardDe
 	if hold, ok := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]; ok {
 		details = append(details, inspectionBoardDetail(hold))
 	}
-	for _, view := range coreauth.CooldownSnapshotForAuth(auth, now) {
+	for _, view := range coreauth.SchedulingBlockSnapshotForAuth(auth, now) {
 		details = append(details, upstreamBoardDetail(view))
 	}
 	return details
@@ -289,13 +304,12 @@ func inspectionBoardDetail(hold prorouting.QuotaProtection) routingBoardDetail {
 	return detail
 }
 
-func upstreamBoardDetail(view coreauth.CooldownView) routingBoardDetail {
+func upstreamBoardDetail(view coreauth.SchedulingBlockView) routingBoardDetail {
 	detail := routingBoardDetail{
 		Source:     "upstream",
 		Scope:      "credential",
 		Kind:       upstreamBoardKind(view.Reason),
-		Resume:     "auto-expire",
-		RetryAt:    view.RetryAt.UnixMilli(),
+		Resume:     upstreamBoardResume(view),
 		Reason:     view.Reason,
 		HTTPStatus: view.HTTPStatus,
 	}
@@ -305,6 +319,8 @@ func upstreamBoardDetail(view coreauth.CooldownView) routingBoardDetail {
 	}
 	if view.RetryAt.IsZero() {
 		detail.RetryAt = 0
+	} else {
+		detail.RetryAt = view.RetryAt.UnixMilli()
 	}
 	return detail
 }
@@ -313,21 +329,40 @@ func upstreamBoardKind(reason string) string {
 	switch strings.TrimSpace(reason) {
 	case "quota", "credential_quota":
 		return "quota"
-	case "unauthorized", "payment_required", "invalid_grant":
+	case "unauthorized", "payment_required", "invalid_grant", "token_expired":
 		return "auth"
-	case "model_not_supported", "not_found":
+	case "model_not_supported", "not_found", "model_disabled":
 		return "model"
 	default:
 		return "transient"
 	}
 }
 
+func upstreamBoardResume(view coreauth.SchedulingBlockView) string {
+	if !view.RetryAt.IsZero() {
+		return "auto-expire"
+	}
+	switch strings.TrimSpace(view.Reason) {
+	case "credential_disabled", "model_disabled", "model_not_supported", "not_found", "payment_required":
+		return "manual"
+	case "unauthorized", "invalid_grant":
+		return "reauthenticate"
+	case "token_expired":
+		return "refresh-token"
+	default:
+		return "await-state-change"
+	}
+}
+
 func stricterResume(current, next string) string {
 	return pickByRank(current, next, map[string]int{
-		"auto-expire":   1,
-		"probe-request": 2,
-		"recheck-quota": 3,
-		"manual":        4,
+		"auto-expire":        1,
+		"await-state-change": 2,
+		"refresh-token":      3,
+		"probe-request":      4,
+		"recheck-quota":      5,
+		"reauthenticate":     6,
+		"manual":             7,
 	})
 }
 
@@ -411,6 +446,25 @@ func mapSlice[T any, R any](values []T, project func(T) R) []R {
 func containsString(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func earlierTimestamp(current, candidate int64) int64 {
+	if candidate <= 0 {
+		return current
+	}
+	if current <= 0 || candidate < current {
+		return candidate
+	}
+	return current
+}
+
+func detailsContainResume(details []routingBoardDetail, wanted string) bool {
+	for _, detail := range details {
+		if detail.Resume == wanted {
 			return true
 		}
 	}

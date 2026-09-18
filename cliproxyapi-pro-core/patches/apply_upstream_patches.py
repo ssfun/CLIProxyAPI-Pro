@@ -299,6 +299,8 @@ new_customization_paths = (
 	'sdk/cliproxy/auth/auth_account_policy.go',
 	'sdk/cliproxy/auth/auth_account_policy_test.go',
 	'sdk/cliproxy/auth/codex_retry_after_headers_test.go',
+	'sdk/cliproxy/auth/schedulability_view.go',
+	'sdk/cliproxy/auth/schedulability_view_test.go',
 	'sdk/cliproxy/runtime_proxy_override_test.go',
 	'sdk/cliproxy/auth/scheduler_runtime_state.go',
     'sdk/cliproxy/auth/inspection_refresh.go',
@@ -348,6 +350,8 @@ queue_go_source('sdk/auth/filestore_identity.go')
 queue_go_source('sdk/cliproxy/auth/scheduler_runtime_state.go')
 queue_go_source('internal/runtime/executor/claude_stream_terminal.go')
 queue_go_source('sdk/cliproxy/auth/codex_retry_after_headers_test.go')
+queue_go_source('sdk/cliproxy/auth/schedulability_view.go')
+queue_go_source('sdk/cliproxy/auth/schedulability_view_test.go')
 
 claude_identity = ROOT / 'internal/auth/claude/identity.go'
 insert_before(

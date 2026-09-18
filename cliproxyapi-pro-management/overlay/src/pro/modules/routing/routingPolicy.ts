@@ -2,7 +2,15 @@ import { apiClient } from '@/services/api/client';
 
 export type SchedulingBoardBucket = 'quota' | 'authTransient' | 'recheck' | 'overlap';
 export type SchedulingBoardKind = 'quota' | 'auth' | 'transient' | 'model';
-export type SchedulingBoardResume = 'auto-expire' | 'recheck-quota' | 'probe-request' | 'manual';
+export type SchedulingBoardResume =
+  | 'auto-expire'
+  | 'await-state-change'
+  | 'refresh-token'
+  | 'reauthenticate'
+  | 'recheck-quota'
+  | 'probe-request'
+  | 'manual'
+  | 'multiple';
 export type SchedulingBoardScope = 'credential' | 'model';
 
 export interface SchedulingBoardSummary {
@@ -13,6 +21,8 @@ export interface SchedulingBoardSummary {
   overlap: number;
   excluded: number;
   nextRetryAt?: number;
+  nextActionAt?: number;
+  nextTransitionAt?: number;
 }
 
 export interface SchedulingBoardDetail {
@@ -38,6 +48,8 @@ export interface SchedulingBoardAccount {
   sources: string[];
   resume: SchedulingBoardResume | string;
   retryAt?: number;
+  nextActionAt?: number;
+  nextTransitionAt?: number;
   remainingSeconds?: number;
   reason: string;
   httpStatus?: number;
@@ -81,14 +93,25 @@ export const normalizeSchedulingBoardResponse = (
     overlap: Number(response?.summary?.overlap) || 0,
     excluded: Number(response?.summary?.excluded) || 0,
     nextRetryAt: Number(response?.summary?.nextRetryAt) || 0,
+    nextActionAt: Number(response?.summary?.nextActionAt) || 0,
+    nextTransitionAt: Number(response?.summary?.nextTransitionAt) || 0,
   },
   accounts: Array.isArray(response?.accounts) ? response.accounts : [],
 });
 
 export const routingPolicyApi = {
-  async get(): Promise<SchedulingBoardResponse> {
+  async get(signal?: AbortSignal): Promise<SchedulingBoardResponse> {
     return normalizeSchedulingBoardResponse(
-      await apiClient.get<SchedulingBoardRawResponse>('/routing-policy')
+      await apiClient.get<SchedulingBoardRawResponse>('/routing-policy', { signal })
     );
   },
+};
+
+export const schedulingBoardModelsLabel = (
+  account: Pick<SchedulingBoardAccount, 'scope' | 'models'>,
+  allModelsLabel: string,
+  emptyLabel = '-'
+): string => {
+  if (account.scope === 'credential') return allModelsLabel;
+  return account.models?.join(', ') || emptyLabel;
 };

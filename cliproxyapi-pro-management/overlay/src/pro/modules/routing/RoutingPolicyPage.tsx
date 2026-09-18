@@ -1,10 +1,16 @@
 import { startPolling } from '@/pro/shared/polling';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { IconRefreshCw } from '@/components/ui/icons';
-import { routingPolicyApi, type SchedulingBoardAccount, type SchedulingBoardResponse } from '@/pro/modules/routing/routingPolicy';
+import {
+  routingPolicyApi,
+  schedulingBoardModelsLabel,
+  type SchedulingBoardAccount,
+  type SchedulingBoardResponse,
+} from '@/pro/modules/routing/routingPolicy';
+import { createLatestRequestGate } from '@/pro/modules/routing/latestRequestGate';
 import { buildInspectionFocusLocationState } from '@/pro/shared/inspectionNavigation';
 import { ProFeatureTabs } from '@/pro/shared/ProFeatureTabs';
 import { ProDetailDialog } from '@/pro/shared/ProSurface';
@@ -29,22 +35,6 @@ const formatTimestamp = (value: number | undefined, locale: string, emptyText: s
     minute: '2-digit',
     second: '2-digit',
   }).format(date);
-};
-
-const remainingLabel = (
-  account: SchedulingBoardAccount,
-  t: ReturnType<typeof useTranslation>['t']
-): string => {
-  if (!account.retryAt || (account.remainingSeconds ?? 0) <= 0) {
-    if (account.resume === 'recheck-quota') return t('routing_policy.runtime.due_recheck');
-    if (account.resume === 'probe-request') return t('routing_policy.runtime.due_probe');
-    if (!account.retryAt) return t('routing_policy.runtime.manual');
-    return t('routing_policy.runtime.due_now');
-  }
-  const remaining = account.remainingSeconds ?? 0;
-  if (remaining < 60) return t('routing_policy.runtime.remaining_seconds', { count: remaining });
-  const minutes = Math.ceil(remaining / 60);
-  return t('routing_policy.runtime.remaining_minutes', { count: minutes });
 };
 
 function SchedulingBoardDetailPanel({
@@ -78,20 +68,34 @@ function SchedulingBoardDetailPanel({
           title: t('routing_policy.runtime.restriction'),
           items: [
             { label: t('routing_policy.runtime.scope'), value: t(`routing_policy.scopes.${account.scope}`, { defaultValue: account.scope }) },
-            { label: t('routing_policy.runtime.models'), value: account.models?.join(', ') || t('routing_policy.runtime.all_models') },
+            { label: t('routing_policy.runtime.models'), value: schedulingBoardModelsLabel(account, t('routing_policy.runtime.all_models')) },
             { label: t('routing_policy.runtime.resume'), value: t(`routing_policy.resume.${account.resume}`, { defaultValue: account.resume }) },
-            { label: t('routing_policy.runtime.retry_at'), value: formatTimestamp(account.retryAt, language, t('routing_policy.runtime.manual')) },
+            { label: t('routing_policy.runtime.next_action_at'), value: formatTimestamp(account.nextActionAt, language, t('routing_policy.runtime.not_scheduled')) },
+            { label: t('routing_policy.runtime.next_transition_at'), value: formatTimestamp(account.nextTransitionAt, language, t('routing_policy.runtime.not_scheduled')) },
           ],
         },
       ]}
       detailLabel={t('routing_policy.runtime.reason_details')}
       detail={(
         <div className={styles.detailList}>
-          {account.details.map((detail, index) => (
-            <pre key={`${detail.source}-${detail.model || 'all'}-${index}`}>
-              {`${t(`routing_policy.sources.${detail.source}`, { defaultValue: detail.source })} · ${t(`routing_policy.resume.${detail.resume}`, { defaultValue: detail.resume })}\n${detail.reason || '-'}`}
-            </pre>
-          ))}
+          {account.details.map((detail, index) => {
+            const scope = detail.scope === 'credential'
+              ? t('routing_policy.runtime.all_models')
+              : detail.model || '-';
+            const metadata = [
+              t(`routing_policy.sources.${detail.source}`, { defaultValue: detail.source }),
+              scope,
+              t(`routing_policy.resume.${detail.resume}`, { defaultValue: detail.resume }),
+              `${t('routing_policy.runtime.retry_at')}: ${formatTimestamp(detail.retryAt, language, t('routing_policy.runtime.not_scheduled'))}`,
+              detail.httpStatus ? `${t('routing_policy.runtime.status_code')}: ${detail.httpStatus}` : '',
+            ].filter(Boolean).join(' · ');
+            const reason = t(`routing_policy.reasons.${detail.reason}`, { defaultValue: detail.reason || '-' });
+            return (
+              <pre key={`${detail.source}-${detail.model || 'all'}-${index}`}>
+                {`${metadata}\n${reason}`}
+              </pre>
+            );
+          })}
         </div>
       )}
     />
@@ -107,11 +111,12 @@ export function RoutingPolicyPage() {
   const [data, setData] = useState<SchedulingBoardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [runtimeError, setRuntimeError] = useState('');
-  const [selectedAccount, setSelectedAccountState] = useState<SchedulingBoardAccount | null>(null);
+  const [selectedAuthId, setSelectedAuthId] = useState<string | null>(null);
+  const requestGate = useRef(createLatestRequestGate());
   const { activeSurface, openSurface, closeSurface } = useProSurfaceState<'runtime-detail'>();
   const setSelectedAccount = useCallback((account: SchedulingBoardAccount | null) => {
     if (account) {
-      setSelectedAccountState(account);
+      setSelectedAuthId(account.authId);
       openSurface('runtime-detail');
     } else if (activeSurface === 'runtime-detail') {
       closeSurface();
@@ -123,43 +128,59 @@ export function RoutingPolicyPage() {
     setRuntimeError('');
   }, []);
 
-  const loadBoard = useCallback(async () => {
+  const loadBoard = useCallback(async ({ notify = false, showLoading = false } = {}) => {
     if (connectionStatus !== 'connected') {
       setData(null);
       setLoading(false);
       return;
     }
-    setLoading(true);
+    const request = requestGate.current.begin();
+    if (showLoading) setLoading(true);
     try {
-      applyResponse(await routingPolicyApi.get());
+      const response = await routingPolicyApi.get(request.signal);
+      if (request.isCurrent()) applyResponse(response);
     } catch (error) {
-      setRuntimeError(error instanceof Error ? error.message : String(error || ''));
-      showNotification(t('routing_policy.load_failed'), 'error');
+      if (request.isCurrent()) {
+        setRuntimeError(error instanceof Error ? error.message : String(error || ''));
+        if (notify) showNotification(t('routing_policy.load_failed'), 'error');
+      }
     } finally {
-      setLoading(false);
+      if (request.isCurrent() && showLoading) setLoading(false);
+      request.finish();
     }
   }, [applyResponse, connectionStatus, showNotification, t]);
 
   useEffect(() => {
-    void loadBoard();
-  }, [loadBoard]);
-
-  useEffect(() => {
-    if (connectionStatus !== 'connected') return undefined;
-    return startPolling(async () => {
-      try {
-        applyResponse(await routingPolicyApi.get());
-      } catch (error) {
-        setRuntimeError(error instanceof Error ? error.message : String(error || ''));
-      }
-    }, 15000);
-  }, [applyResponse, connectionStatus]);
+    const gate = requestGate.current;
+    gate.invalidate();
+    if (connectionStatus !== 'connected') {
+      setData(null);
+      setLoading(false);
+      return undefined;
+    }
+    void loadBoard({ notify: true, showLoading: true });
+    const stop = startPolling(() => loadBoard(), 15000);
+    return () => {
+      stop();
+      gate.invalidate();
+    };
+  }, [connectionStatus, loadBoard]);
 
   const accounts = useMemo(() => {
     const rows = data?.accounts ?? [];
     if (activeView === 'all') return rows;
     return rows.filter((account) => account.bucket === activeView);
   }, [activeView, data?.accounts]);
+
+  const selectedAccount = useMemo(
+    () => data?.accounts.find((account) => account.authId === selectedAuthId) ?? null,
+    [data?.accounts, selectedAuthId]
+  );
+
+  useEffect(() => {
+    if (activeSurface !== 'runtime-detail' || !selectedAuthId || !data || selectedAccount) return;
+    closeSurface();
+  }, [activeSurface, closeSurface, data, selectedAccount, selectedAuthId]);
 
   const openInspection = useCallback((account: SchedulingBoardAccount) => {
     navigate('/account-inspection', {
@@ -179,7 +200,7 @@ export function RoutingPolicyPage() {
             <h1>{t('routing_policy.title')}</h1>
             <p>{t('routing_policy.subtitle')}</p>
           </div>
-          <Button variant="secondary" size="sm" onClick={() => void loadBoard()} disabled={loading}>
+          <Button variant="secondary" size="sm" onClick={() => void loadBoard({ notify: true, showLoading: true })} disabled={loading}>
             <IconRefreshCw size={15} /> {t('common.refresh')}
           </Button>
         </div>
@@ -192,9 +213,14 @@ export function RoutingPolicyPage() {
           ))}
         </div>
         <p className={styles.nextRetry}>
-          {data?.summary.nextRetryAt
-            ? t('routing_policy.summary.next_retry', { time: formatTimestamp(data.summary.nextRetryAt, i18n.language, '-') })
-            : t('routing_policy.summary.no_retry')}
+          {data?.summary.nextActionAt
+            ? t('routing_policy.summary.next_action', { time: formatTimestamp(data.summary.nextActionAt, i18n.language, '-') })
+            : t('routing_policy.summary.no_action')}
+        </p>
+        <p className={styles.nextRetry}>
+          {data?.summary.nextTransitionAt
+            ? t('routing_policy.summary.next_transition', { time: formatTimestamp(data.summary.nextTransitionAt, i18n.language, '-') })
+            : t('routing_policy.summary.no_transition')}
         </p>
       </section>
 
@@ -226,7 +252,8 @@ export function RoutingPolicyPage() {
                   <th>{t('routing_policy.runtime.account')}</th>
                   <th>{t('routing_policy.runtime.scope')}</th>
                   <th>{t('routing_policy.runtime.resume')}</th>
-                  <th>{t('routing_policy.runtime.retry_at')}</th>
+                  <th>{t('routing_policy.runtime.next_action_at')}</th>
+                  <th>{t('routing_policy.runtime.next_transition_at')}</th>
                   <th className={styles.runtimeActionHeader}>{t('routing_policy.runtime.actions')}</th>
                 </tr>
               </thead>
@@ -240,9 +267,10 @@ export function RoutingPolicyPage() {
                         <small>{t(`routing_policy.buckets.${account.bucket}`, { defaultValue: account.bucket })}</small>
                       </button>
                     </td>
-                    <td>{account.models?.join(', ') || t('routing_policy.runtime.all_models')}</td>
+                    <td>{schedulingBoardModelsLabel(account, t('routing_policy.runtime.all_models'))}</td>
                     <td>{t(`routing_policy.resume.${account.resume}`, { defaultValue: account.resume })}</td>
-                    <td>{remainingLabel(account, t)}</td>
+                    <td>{formatTimestamp(account.nextActionAt, i18n.language, t('routing_policy.runtime.not_scheduled'))}</td>
+                    <td>{formatTimestamp(account.nextTransitionAt, i18n.language, t('routing_policy.runtime.not_scheduled'))}</td>
                     <td>
                       <Button variant="secondary" size="sm" onClick={() => openInspection(account)}>
                         {t('routing_policy.runtime.open_inspection')}
@@ -264,9 +292,11 @@ export function RoutingPolicyPage() {
         open={activeSurface === 'runtime-detail'}
         title={t('routing_policy.runtime.details_title')}
         onClose={() => setSelectedAccount(null)}
-        onAfterClose={() => setSelectedAccountState(null)}
+        onAfterClose={() => setSelectedAuthId(null)}
       >
-        {selectedAccount ? <SchedulingBoardDetailPanel account={selectedAccount} t={t} language={i18n.language} /> : null}
+        {selectedAccount
+          ? <SchedulingBoardDetailPanel account={selectedAccount} t={t} language={i18n.language} />
+          : selectedAuthId ? <p>{t('routing_policy.runtime.no_longer_listed')}</p> : null}
       </ProDetailDialog>
     </div>
   );
