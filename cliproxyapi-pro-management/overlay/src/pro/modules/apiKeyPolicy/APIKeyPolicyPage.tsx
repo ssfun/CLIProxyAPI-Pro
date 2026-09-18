@@ -13,15 +13,20 @@ import { copyToClipboard } from '@/utils/clipboard';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import {
   IconAlertTriangle,
+  IconCheck,
 	IconCheckCircle2,
+  IconEye,
+  IconEyeOff,
 	IconInfo,
   IconKey,
   IconPlus,
 	IconShield,
   IconTrash2,
 } from '@/components/ui/icons';
+import { IconCopy } from '@/pro/icons';
 import { useAuthStore, useNotificationStore } from '@/stores';
 import { ProFeatureHeader } from '@/pro/shared/ProFeatureHeader';
 import { ProTaskDialog, ProWorkspaceSheet } from '@/pro/shared/ProSurface';
@@ -368,6 +373,8 @@ export function APIKeyPolicyPage() {
   const [concurrencyDraft, setConcurrencyDraft] = useState<{ value: string; baseline: number } | null>(null);
   const [revealedKeys, setRevealedKeys] = useState<Record<string, string>>({});
   const [keyActionBusy, setKeyActionBusy] = useState(false);
+  const [copiedKeyRef, setCopiedKeyRef] = useState<string | null>(null);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const keyActionBusyRef = useRef(false);
   const keyActionSessionRef = useRef(0);
   const workspaceSessionRef = useRef(0);
@@ -497,8 +504,18 @@ export function APIKeyPolicyPage() {
       savingRef.current = false;
       dangerBusyRef.current = false;
       quotaBusyRef.current = false;
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
     };
   }, [load]);
+
+  const onCopyKey = async (binding: APIKeyPolicyBinding) => {
+    await keyAction(binding, 'copy');
+    setCopiedKeyRef(binding.keyRef);
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = setTimeout(() => {
+      setCopiedKeyRef((current) => (current === binding.keyRef ? null : current));
+    }, 1500);
+  };
 
   const keyAction = async (binding: APIKeyPolicyBinding, action: 'reveal' | 'copy' | 'toggle') => {
     if (keyActionBusyRef.current || savingRef.current || dangerBusyRef.current || loading || connectionStatus !== 'connected') return;
@@ -1196,52 +1213,154 @@ export function APIKeyPolicyPage() {
               const activeProfile = policy?.profiles.find((profile) => profile.id === policy.activeProfileId);
               const concurrencyOnly = !policy && takeoverActive && (binding.concurrencyLimit ?? 0) > 0;
               return (
-                <article className={styles.card} key={binding.keyRef}>
+                <article className={`${styles.card} ${binding.disabled ? styles.cardDisabled : ''}`} key={binding.keyRef}>
                   <div className={styles.cardTop}>
                     <div className={styles.cardIdentity}>
-                      <span><IconKey size={18} /></span>
-                      <div><strong>{policy?.displayName || binding.maskedKey}</strong><code className={revealedKeys[binding.keyRef] ? styles.revealedKey : undefined}>{revealedKeys[binding.keyRef] ?? binding.maskedKey}</code></div>
+                      <span className={binding.disabled ? styles.keyIconDisabled : styles.keyIconEnabled}>
+                        <IconKey size={18} />
+                      </span>
+                      <div className={styles.cardTitles}>
+                        <strong title={policy?.displayName || binding.maskedKey}>
+                          {policy?.displayName || binding.maskedKey}
+                        </strong>
+                        <div className={styles.keyPill}>
+                          <code
+                            className={revealedKeys[binding.keyRef] ? styles.revealedKey : undefined}
+                            title={revealedKeys[binding.keyRef] ?? binding.maskedKey}
+                          >
+                            {revealedKeys[binding.keyRef] ?? binding.maskedKey}
+                          </code>
+                          {keyControlsSupported ? (
+                            <div className={styles.keyPillActions}>
+                              <button
+                                type="button"
+                                className={styles.keyPillButton}
+                                disabled={keyActionBusy || loading}
+                                onClick={() => void keyAction(binding, 'reveal')}
+                                title={t(revealedKeys[binding.keyRef] ? 'api_key_policy.hide_key' : 'api_key_policy.reveal_key')}
+                                aria-label={t(revealedKeys[binding.keyRef] ? 'api_key_policy.hide_key' : 'api_key_policy.reveal_key')}
+                              >
+                                {revealedKeys[binding.keyRef] ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+                              </button>
+                              <button
+                                type="button"
+                                className={`${styles.keyPillButton} ${copiedKeyRef === binding.keyRef ? styles.copiedSuccess : ''}`}
+                                disabled={keyActionBusy || loading}
+                                onClick={() => void onCopyKey(binding)}
+                                title={t('api_key_policy.copy_key')}
+                                aria-label={t('api_key_policy.copy_key')}
+                              >
+                                {copiedKeyRef === binding.keyRef ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
                     </div>
-                    <PolicyBadge state={binding.disabled ? takeoverActive ? 'key_disabled' : 'unconfigured' : concurrencyOnly ? 'configured' : binding.state}>{t(binding.disabled ? takeoverActive ? 'api_key_policy.key_disabled' : 'api_key_policy.key_disabled_pending' : concurrencyOnly ? 'api_key_policy.concurrency_limited' : `api_key_policy.state.${binding.state}`)}</PolicyBadge>
+                    <div className={styles.cardHeaderRight}>
+                      <PolicyBadge state={binding.disabled ? takeoverActive ? 'key_disabled' : 'unconfigured' : concurrencyOnly ? 'configured' : binding.state}>
+                        {t(binding.disabled ? takeoverActive ? 'api_key_policy.key_disabled' : 'api_key_policy.key_disabled_pending' : concurrencyOnly ? 'api_key_policy.concurrency_limited' : `api_key_policy.state.${binding.state}`)}
+                      </PolicyBadge>
+                      {keyControlsSupported ? (
+                        <div className={styles.toggleWrap} title={t(binding.disabled ? 'api_key_policy.enable_key' : 'api_key_policy.disable_key')}>
+                          <ToggleSwitch
+                            checked={!binding.disabled}
+                            disabled={keyActionBusy || loading || connectionStatus !== 'connected'}
+                            onChange={() => void keyAction(binding, 'toggle')}
+                            ariaLabel={t(binding.disabled ? 'api_key_policy.enable_key' : 'api_key_policy.disable_key')}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
-                  {keyControlsSupported ? <div className={styles.keyControls}>
-                    <span className={binding.disabled ? takeoverActive ? styles.keyDisabled : styles.keyPending : styles.keyEnabled}>{t(binding.disabled ? takeoverActive ? 'api_key_policy.key_disabled' : 'api_key_policy.key_disabled_pending' : 'api_key_policy.key_enabled')}</span>
-                    <Button variant="ghost" size="sm" disabled={keyActionBusy || loading} onClick={() => void keyAction(binding, 'reveal')}>{t(revealedKeys[binding.keyRef] ? 'api_key_policy.hide_key' : 'api_key_policy.reveal_key')}</Button>
-                    <Button variant="ghost" size="sm" disabled={keyActionBusy || loading} onClick={() => void keyAction(binding, 'copy')}>{t('api_key_policy.copy_key')}</Button>
-                    <Button variant={binding.disabled ? 'secondary' : 'danger'} size="sm" disabled={keyActionBusy || loading} onClick={() => void keyAction(binding, 'toggle')}>{t(binding.disabled ? 'api_key_policy.enable_key' : 'api_key_policy.disable_key')}</Button>
-                  </div> : null}
-                  {concurrencySupported ? <div className={styles.cardConcurrency}>
-                    <span>{t('api_key_policy.concurrency_limit')}</span>
-                    <strong>{(binding.concurrencyLimit ?? 0) > 0 ? binding.concurrencyLimit : t('api_key_policy.concurrency_unlimited')}</strong>
-                    {(binding.concurrencyLimit ?? 0) > 0 && !takeoverActive ? <small className={styles.keyPending}>{t('api_key_policy.concurrency_pending')}</small> : null}
-                  </div> : null}
+
+                  <div className={styles.metricsGrid}>
+                    <div className={styles.metricItem}>
+                      <span className={styles.metricLabel}>{t('api_key_policy.active_profile')}</span>
+                      <strong className={styles.metricValue} title={activeProfile?.name ?? t('api_key_policy.profile_not_configured')}>
+                        {activeProfile?.name ?? t('api_key_policy.profile_not_configured')}
+                      </strong>
+                    </div>
+                    {concurrencySupported ? (
+                      <div className={styles.metricItem}>
+                        <span className={styles.metricLabel}>{t('api_key_policy.concurrency_limit')}</span>
+                        <div className={styles.metricValueRow}>
+                          <strong className={styles.metricValue}>
+                            {(binding.concurrencyLimit ?? 0) > 0 ? binding.concurrencyLimit : t('api_key_policy.concurrency_unlimited')}
+                          </strong>
+                          {(binding.concurrencyLimit ?? 0) > 0 && !takeoverActive ? (
+                            <small className={styles.pendingTag} title={t('api_key_policy.concurrency_pending')}>
+                              {t('api_key_policy.concurrency_pending_badge')}
+                            </small>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                    {quotaOverviewSupported ? (
+                      <div className={styles.metricItem}>
+                        <span className={styles.metricLabel}>{t('api_key_policy.quota_metric')}</span>
+                        {(() => {
+                          if (!policy) {
+                            return <span className={styles.metricMuted}>-</span>;
+                          }
+                          const summary = quotaSummaryByPolicy.get(policy.id);
+                          const visualState = quotaVisualState(summary, takeoverActive, policy.quota?.enabled === true);
+                          const percent = Math.min(Math.round(quotaMaximumRatio(summary) * 100), 100);
+                          if (!policy.quota?.enabled) {
+                            return <span className={styles.metricMuted}>{t('api_key_policy.quota_state.disabled')}</span>;
+                          }
+                          return (
+                            <div className={styles.metricQuotaRow} title={`${t(`api_key_policy.quota_state.${visualState}`)}: ${percent}%`}>
+                              <span className={`${styles.quotaDot} ${styles[`quotaDot_${visualState}`] ?? ''}`} />
+                              <span className={styles.quotaPercent}>{percent}%</span>
+                              <span className={`${styles.quotaStateBadge} ${styles[`quotaState_${visualState}`] ?? ''}`}>
+                                {t(`api_key_policy.quota_state.${visualState}`)}
+                              </span>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    ) : null}
+                    <div className={styles.metricItem}>
+                      <span className={styles.metricLabel}>{t('api_key_policy.updated')}</span>
+                      <span className={styles.metricTime}>
+                        {policy ? formatAPIKeyPolicyTimestamp(policy.updatedAtMs, i18n.resolvedLanguage ?? i18n.language) : '-'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {binding.weakKey ? (
+                    <div className={styles.weakKeyBanner} role="status">
+                      <IconAlertTriangle size={14} />
+                      <span>{t('api_key_policy.weak_key')}</span>
+                    </div>
+                  ) : null}
+
                   <p className={styles.cardSummary}>
                     {binding.disabled ? t(takeoverActive ? 'api_key_policy.key_disabled_hint' : 'api_key_policy.key_disabled_pending_hint') : policy
-							? activeProfile
-							  ? t(takeoverActive ? 'api_key_policy.configured_summary' : 'api_key_policy.configured_inactive_summary', { profile: activeProfile.name, count: policy.profiles.length })
-							  : t(takeoverActive ? 'api_key_policy.configured_no_profile_summary' : 'api_key_policy.configured_no_profile_inactive_summary')
+                      ? activeProfile
+                        ? t(takeoverActive ? 'api_key_policy.configured_summary' : 'api_key_policy.configured_inactive_summary', { profile: activeProfile.name, count: policy.profiles.length })
+                        : t(takeoverActive ? 'api_key_policy.configured_no_profile_summary' : 'api_key_policy.configured_no_profile_inactive_summary')
                       : t((binding.concurrencyLimit ?? 0) > 0 && takeoverActive ? 'api_key_policy.concurrency_only_summary' : 'api_key_policy.passthrough_summary')}
                   </p>
-                  {binding.weakKey ? <div className={styles.weakKey}><IconAlertTriangle size={15} /> {t('api_key_policy.weak_key')}</div> : null}
-                  {policy && quotaOverviewSupported ? (() => {
-                    const summary = quotaSummaryByPolicy.get(policy.id);
-                    const visualState = quotaVisualState(summary, takeoverActive, policy.quota?.enabled === true);
-                    const percent = Math.min(Math.round(quotaMaximumRatio(summary) * 100), 100);
-                    return <div className={`${styles.cardQuota} ${styles[`cardQuota_${visualState}`] ?? ''}`}><span>{t(`api_key_policy.quota_state.${visualState}`)}</span><strong>{summary?.quota?.enabled ? `${percent}%` : '-'}</strong></div>;
-                  })() : null}
-                  <div className={styles.cardMeta}>
-                    <span>{t('api_key_policy.active_profile')}: <strong>{activeProfile?.name ?? t('api_key_policy.profile_not_configured')}</strong></span>
-                    <span>{t('api_key_policy.updated')}: {policy ? formatAPIKeyPolicyTimestamp(policy.updatedAtMs, i18n.resolvedLanguage ?? i18n.language) : '-'}</span>
-                  </div>
+
                   <div className={styles.cardActions}>
-                    {policy ? (
-                      <>
-                        <Button variant="secondary" size="sm" onClick={() => openWorkspace({ kind: 'policy', policy, readOnly: false })}>{t('api_key_policy.open_workspace')}</Button>
-                        {usageTargetSupported ? <Button variant="ghost" size="sm" onClick={() => void openUsage(binding)}>{t('api_key_policy.view_usage')}</Button> : null}
-                      </>
-                    ) : (
-                      <Button size="sm" onClick={() => openWorkspace({ kind: 'create', binding })}>{t('api_key_policy.configure')}</Button>
-                    )}
+                    {usageTargetSupported && policy ? (
+                      <Button variant="ghost" size="sm" onClick={() => void openUsage(binding)}>
+                        {t('api_key_policy.view_usage')}
+                      </Button>
+                    ) : <span />}
+                    <div className={styles.primaryActionGroup}>
+                      {policy ? (
+                        <Button variant="secondary" size="sm" onClick={() => openWorkspace({ kind: 'policy', policy, readOnly: false })}>
+                          {t('api_key_policy.open_workspace')}
+                        </Button>
+                      ) : (
+                        <Button size="sm" onClick={() => openWorkspace({ kind: 'create', binding })}>
+                          {t('api_key_policy.configure')}
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </article>
               );
@@ -1254,11 +1373,23 @@ export function APIKeyPolicyPage() {
               <div className={styles.cards}>
                 {visibleItems.orphaned.map((policy) => (
                   <article className={`${styles.card} ${styles.orphanedCard}`} key={policy.id}>
-                    <div className={styles.cardTop}><div className={styles.cardIdentity}><span><IconAlertTriangle size={18} /></span><div><strong>{policy.displayName}</strong><code>{policy.id}</code></div></div><PolicyBadge state="orphaned">{t('api_key_policy.state.orphaned')}</PolicyBadge></div>
+                    <div className={styles.cardTop}>
+                      <div className={styles.cardIdentity}>
+                        <span className={styles.orphanedIcon}><IconAlertTriangle size={18} /></span>
+                        <div className={styles.cardTitles}>
+                          <strong title={policy.displayName}>{policy.displayName}</strong>
+                          <code className={styles.orphanedId} title={policy.id}>{policy.id}</code>
+                        </div>
+                      </div>
+                      <PolicyBadge state="orphaned">{t('api_key_policy.state.orphaned')}</PolicyBadge>
+                    </div>
                     <p className={styles.cardSummary}>{t('api_key_policy.orphaned_summary', { count: policy.profiles.length })}</p>
                     <div className={styles.cardActions}>
-                      <Button variant="secondary" size="sm" onClick={() => openWorkspace({ kind: 'policy', policy, readOnly: true })}>{t('api_key_policy.inspect')}</Button>
-                      <Button variant="danger" size="sm" onClick={() => { setDangerPolicy(policy); setDangerKind('orphaned'); }}>{t('api_key_policy.purge')}</Button>
+                      <span />
+                      <div className={styles.primaryActionGroup}>
+                        <Button variant="secondary" size="sm" onClick={() => openWorkspace({ kind: 'policy', policy, readOnly: true })}>{t('api_key_policy.inspect')}</Button>
+                        <Button variant="danger" size="sm" onClick={() => { setDangerPolicy(policy); setDangerKind('orphaned'); }}>{t('api_key_policy.purge')}</Button>
+                      </div>
                     </div>
                   </article>
                 ))}

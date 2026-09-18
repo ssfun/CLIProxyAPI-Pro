@@ -14,6 +14,8 @@ const en = {
     concurrency_hint: "Turn off for unlimited concurrency. Excess requests return 429. Streams and WebSocket connections hold a slot until they end. Limits apply per server instance while takeover is on.",
     concurrency_invalid: "Enter an integer from 0 to 1,000,000.",
     concurrency_pending: "Limit saved · takeover off",
+    concurrency_pending_badge: "Pending",
+    quota_metric: "Quota",
 
     takeover_disabled_count: "{{count}} key(s) will be blocked while takeover is on.",
     key_disabled_pending_hint: "The disabled setting is saved but not enforced. Upstream authentication applies until takeover resumes.",
@@ -239,6 +241,8 @@ const zhCN = {
     concurrency_hint: "关闭限制表示不限，超限请求返回 429。流式请求和 WebSocket 连接结束后释放名额。仅在接管时生效，按服务实例独立计数。",
     concurrency_invalid: "请输入 0～1,000,000 之间的整数。",
     concurrency_pending: "已设置并发上限，尚未接管",
+    concurrency_pending_badge: "待接管",
+    quota_metric: "配额状态",
 
     takeover_disabled_count: "接管期间，{{count}} 个密钥将被禁用。",
     key_disabled_pending_hint: "禁用设置已保留，当前不生效；密钥遵循上游鉴权，再次开始接管后执行禁用。",
@@ -464,6 +468,8 @@ const ru = {
     concurrency_hint: "Отключите лимит для неограниченного параллелизма. При превышении возвращается 429. Потоки и WebSocket занимают слот до завершения. Лимит действует на экземпляр сервера при включённом управлении.",
     concurrency_invalid: "Введите целое число от 0 до 1 000 000.",
     concurrency_pending: "Лимит сохранён · управление выключено",
+    concurrency_pending_badge: "Ожидание",
+    quota_metric: "Квота",
 
     takeover_disabled_count: "При включённом управлении будет заблокировано ключей: {{count}}.",
     key_disabled_pending_hint: "Настройка отключения сохранена, но не применяется. До возобновления управления действует исходная проверка доступа.",
@@ -689,6 +695,8 @@ const zhTW = {
     concurrency_hint: "关闭限制表示不限，超限請求回傳 429。串流請求與 WebSocket 連線結束後釋放名額。僅在接管時生效，按服務執行個體獨立計數。",
     concurrency_invalid: "請輸入 0～1,000,000 之間的整數。",
     concurrency_pending: "已設定並行上限，尚未接管",
+    concurrency_pending_badge: "待接管",
+    quota_metric: "配額狀態",
 
     takeover_disabled_count: "接管期間，{{count}} 個金鑰將被停用。",
     key_disabled_pending_hint: "停用設定已保留，目前不生效；金鑰遵循上游驗證，再次開始接管後執行停用。",
