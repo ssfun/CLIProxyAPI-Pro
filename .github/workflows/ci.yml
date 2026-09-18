@@ -241,6 +241,7 @@ jobs:
             echo "- Source image: $(jq -r '.source_image' <<<"${decision}")"
             echo
             echo "Changed paths:"
+            # shellcheck disable=SC2016
             sed 's/^/- `/; s/$/`/' "${paths_file}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
