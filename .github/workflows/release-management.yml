@@ -2,6 +2,12 @@ name: Publish CLIProxyAPI Pro Management
 
 on:
   workflow_dispatch:
+    inputs:
+      allow_stale_publish:
+        description: Allow publishing even when a newer release input or customization commit is detected
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '0 20 * * *'
 
@@ -201,10 +207,33 @@ jobs:
     if: needs.check-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
 
+    concurrency:
+      group: cliproxyapi-pro-release-publish
+      cancel-in-progress: false
+
     permissions:
       contents: write
 
     steps:
+      - name: Checkout customizations
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: customizations-repo
+          fetch-depth: 1
+
+      - name: Reject stale management publication
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALLOW_STALE_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_stale_publish }}
+          RELEASE_PUBLISH_MODE: management
+          CURRENT_REPO: ${{ github.repository }}
+          CUSTOMIZATION_SHA: ${{ github.sha }}
+          MANAGEMENT_UPSTREAM_REPO: router-for-me/Cli-Proxy-API-Management-Center
+          TARGET_RELEASE_TAG: ${{ needs.check-version.outputs.target_release_tag }}
+          TARGET_MANAGEMENT_TAG: ${{ needs.check-version.outputs.upstream_tag }}
+          TARGET_MANAGEMENT_SHA: ${{ needs.check-version.outputs.upstream_sha }}
+        run: bash customizations-repo/scripts/validation/release_publish_guard.sh
+
       - name: Download validated management asset
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

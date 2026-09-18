@@ -2,6 +2,12 @@ name: Publish CLIProxyAPI Pro Release
 
 on:
   workflow_dispatch:
+    inputs:
+      allow_stale_publish:
+        description: Allow publishing even when a newer release input or customization commit is detected
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '0 */3 * * *'
 
@@ -1262,6 +1268,10 @@ jobs:
     if: needs.check-version.outputs.should_release == 'true' && needs.release-gate.result == 'success'
     runs-on: ubuntu-latest
 
+    concurrency:
+      group: cliproxyapi-pro-release-publish
+      cancel-in-progress: false
+
     permissions:
       contents: write
 
@@ -1271,6 +1281,24 @@ jobs:
         with:
           path: customizations-repo
           fetch-depth: 1
+
+      - name: Reject stale release publication
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALLOW_STALE_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_stale_publish }}
+          RELEASE_PUBLISH_MODE: core
+          CURRENT_REPO: ${{ github.repository }}
+          CUSTOMIZATION_SHA: ${{ github.sha }}
+          CORE_UPSTREAM_REPO: router-for-me/CLIProxyAPI
+          MANAGEMENT_UPSTREAM_REPO: router-for-me/Cli-Proxy-API-Management-Center
+          MODELS_REPO: router-for-me/models
+          TARGET_RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+          TARGET_CORE_TAG: ${{ needs.check-version.outputs.core_tag }}
+          TARGET_CORE_SHA: ${{ needs.check-version.outputs.core_sha }}
+          TARGET_MANAGEMENT_TAG: ${{ needs.check-version.outputs.management_tag }}
+          TARGET_MANAGEMENT_SHA: ${{ needs.check-version.outputs.management_sha }}
+          TARGET_MODELS_SHA: ${{ needs.check-version.outputs.models_sha }}
+        run: bash customizations-repo/scripts/validation/release_publish_guard.sh
 
       - name: Checkout core upstream release
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

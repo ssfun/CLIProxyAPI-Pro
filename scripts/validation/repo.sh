@@ -60,7 +60,8 @@ bash -n \
   "${repo_root}/cliproxyapi-pro-management/apply.sh" \
   "${repo_root}/scripts/validation/repo.sh" \
   "${repo_root}/scripts/validation/core.sh" \
-  "${repo_root}/scripts/validation/management.sh"
+  "${repo_root}/scripts/validation/management.sh" \
+  "${repo_root}/scripts/validation/release_publish_guard.sh"
 
 if command -v shellcheck >/dev/null 2>&1; then
   shellcheck \
@@ -68,7 +69,8 @@ if command -v shellcheck >/dev/null 2>&1; then
     "${repo_root}/cliproxyapi-pro-management/apply.sh" \
     "${repo_root}/scripts/validation/repo.sh" \
     "${repo_root}/scripts/validation/core.sh" \
-    "${repo_root}/scripts/validation/management.sh"
+    "${repo_root}/scripts/validation/management.sh" \
+    "${repo_root}/scripts/validation/release_publish_guard.sh"
 elif [[ "${VALIDATION_REQUIRE_TOOLS:-0}" == "1" ]]; then
   echo "shellcheck is required but was not found" >&2
   exit 1
