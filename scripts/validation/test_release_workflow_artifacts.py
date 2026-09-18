@@ -83,6 +83,11 @@ class ReleaseWorkflowArtifactTests(unittest.TestCase):
         self.assertIn("needs.release-gate.result == 'success'", publish_job)
         self.assertIn("docker buildx imagetools create", publish_job)
         self.assertIn("@${IMAGE_DIGEST}", publish_job)
+        self.assertIn(
+            "awk '$1 == \"Digest:\" && digest == \"\" { digest=$2 } END { print digest }'",
+            publish_job,
+        )
+        self.assertNotIn('awk \'$1 == "Digest:" { print $2; exit }\'', publish_job)
 
     def test_runtime_image_is_built_early_without_publishing_official_tags(self) -> None:
         workflow = (WORKFLOWS / "release-core.yml").read_text()

@@ -1321,8 +1321,8 @@ jobs:
             --tag "${IMAGE_REPOSITORY}:${RELEASE_TAG}" \
             --tag "${IMAGE_REPOSITORY}:latest" \
             "${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
-          release_digest="$(docker buildx imagetools inspect "${IMAGE_REPOSITORY}:${RELEASE_TAG}" | awk '$1 == "Digest:" { print $2; exit }')"
-          latest_digest="$(docker buildx imagetools inspect "${IMAGE_REPOSITORY}:latest" | awk '$1 == "Digest:" { print $2; exit }')"
+          release_digest="$(docker buildx imagetools inspect "${IMAGE_REPOSITORY}:${RELEASE_TAG}" | awk '$1 == "Digest:" && digest == "" { digest=$2 } END { print digest }')"
+          latest_digest="$(docker buildx imagetools inspect "${IMAGE_REPOSITORY}:latest" | awk '$1 == "Digest:" && digest == "" { digest=$2 } END { print digest }')"
           test "${release_digest}" = "${IMAGE_DIGEST}"
           test "${latest_digest}" = "${IMAGE_DIGEST}"
 
