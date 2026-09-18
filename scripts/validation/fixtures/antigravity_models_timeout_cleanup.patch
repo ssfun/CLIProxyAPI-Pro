@@ -1,0 +1,29 @@
+diff --git a/sdk/cliproxy/antigravity_models_timeout_test.go b/sdk/cliproxy/antigravity_models_timeout_test.go
+--- a/sdk/cliproxy/antigravity_models_timeout_test.go
++++ b/sdk/cliproxy/antigravity_models_timeout_test.go
+@@ -23 +23,2 @@ func TestAntigravityCapabilityProbe_HardTimeout(t *testing.T) {
+-	// Mock server that hangs unless client cancels
++	// Mock server that hangs unless client cancels
++	stopSlowHandler := make(chan struct{})
+@@ -31 +32,3 @@ func TestAntigravityCapabilityProbe_HardTimeout(t *testing.T) {
+-			return
++			return
++		case <-stopSlowHandler:
++			return
+@@ -36 +39,2 @@ func TestAntigravityCapabilityProbe_HardTimeout(t *testing.T) {
+-	t.Cleanup(func() {
++	t.Cleanup(func() {
++		close(stopSlowHandler)
+@@ -72 +76,2 @@ func TestAntigravityCapabilityProbe_ConcurrentBaseURLs(t *testing.T) {
+-func TestAntigravityCapabilityProbe_ConcurrentBaseURLs(t *testing.T) {
++func TestAntigravityCapabilityProbe_ConcurrentBaseURLs(t *testing.T) {
++	stopSlowHandler := make(chan struct{})
+@@ -83 +88,3 @@ func TestAntigravityCapabilityProbe_ConcurrentBaseURLs(t *testing.T) {
+-			return
++			return
++		case <-stopSlowHandler:
++			return
+@@ -87 +94,2 @@ func TestAntigravityCapabilityProbe_ConcurrentBaseURLs(t *testing.T) {
+-	t.Cleanup(func() {
++	t.Cleanup(func() {
++		close(stopSlowHandler)

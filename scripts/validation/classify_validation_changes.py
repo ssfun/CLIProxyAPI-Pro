@@ -29,17 +29,21 @@ def is_documentation(path: str) -> bool:
 
 
 def is_core_change(path: str) -> bool:
-    return path.startswith("cliproxyapi-pro-core/") or path in {
-        "scripts/validation/core.sh",
-        "scripts/validation/compare_go_test_results.py",
-        "scripts/validation/summarize_core_validation.py",
-        "scripts/validation/test_core_validation_summary.py",
-        "scripts/validation/test_go_test_baseline.py",
-        "scripts/validation/contracts/core-upstream-modified-files.txt",
-        "scripts/validation/contracts/core-upstream-modified-files.ownership.tsv",
-        "scripts/validation/test_core_module_boundaries.py",
-        "scripts/validation/test_core_patch_ownership.py",
-    }
+    return (
+        path.startswith("cliproxyapi-pro-core/")
+        or path.startswith("scripts/validation/fixtures/")
+        or path in {
+            "scripts/validation/core.sh",
+            "scripts/validation/compare_go_test_results.py",
+            "scripts/validation/summarize_core_validation.py",
+            "scripts/validation/test_core_validation_summary.py",
+            "scripts/validation/test_go_test_baseline.py",
+            "scripts/validation/contracts/core-upstream-modified-files.txt",
+            "scripts/validation/contracts/core-upstream-modified-files.ownership.tsv",
+            "scripts/validation/test_core_module_boundaries.py",
+            "scripts/validation/test_core_patch_ownership.py",
+        }
+    )
 
 
 def is_management_change(path: str) -> bool:

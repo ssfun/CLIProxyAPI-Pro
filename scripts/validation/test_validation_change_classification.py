@@ -28,12 +28,15 @@ class ValidationChangeClassificationTests(unittest.TestCase):
         self.assertFalse(decision.source_image)
 
     def test_core_change_also_builds_source_image(self) -> None:
-        decision = CLASSIFIER.classify(
-            ["cliproxyapi-pro-core/patches/apply_upstream_patches.py"]
-        )
-        self.assertTrue(decision.core)
-        self.assertFalse(decision.management)
-        self.assertTrue(decision.source_image)
+        for path in (
+            "cliproxyapi-pro-core/patches/apply_upstream_patches.py",
+            "scripts/validation/fixtures/antigravity_models_timeout_cleanup.patch",
+        ):
+            with self.subTest(path=path):
+                decision = CLASSIFIER.classify([path])
+                self.assertTrue(decision.core)
+                self.assertFalse(decision.management)
+                self.assertTrue(decision.source_image)
 
     def test_unknown_or_workflow_change_runs_everything(self) -> None:
         for path in (".github/workflows/ci.yml", "new-area/config.json"):

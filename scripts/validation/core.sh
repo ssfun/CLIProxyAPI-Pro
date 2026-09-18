@@ -160,17 +160,27 @@ apply_candidate_customization() {
 }
 
 run_static_checks() {
-  if [[ "${VALIDATION_STATICCHECK:-0}" == "1" ]]; then
-    if ! command -v staticcheck >/dev/null 2>&1; then
-      echo "VALIDATION_STATICCHECK=1 requires staticcheck" >&2
-      return 1
-    fi
-    (
-      cd "${upstream_root}"
-      staticcheck -checks=SA4011 ./internal/api/handlers/management
-      staticcheck -checks=U1000 ./internal/pro/...
-    ) || return
+  if ! command -v staticcheck >/dev/null 2>&1; then
+    echo "VALIDATION_STATICCHECK=1 requires staticcheck" >&2
+    return 1
   fi
+}
+
+run_staticcheck_sa4011() {
+  (
+    cd "${upstream_root}" || exit
+    staticcheck -checks=SA4011 ./internal/api/handlers/management || exit
+  ) || return
+}
+
+run_staticcheck_u1000() {
+  (
+    cd "${upstream_root}" || exit
+    staticcheck -checks=U1000 ./internal/pro/... || exit
+  ) || return
+}
+
+run_go_vet() {
   go -C "${upstream_root}" vet ./internal/pluginhost || return
 }
 
@@ -239,6 +249,19 @@ PY
   return 2
 }
 
+apply_validation_fixture_adjustments() {
+  local source_root="$1"
+  local fixture_patch="${repo_root}/scripts/validation/fixtures/antigravity_models_timeout_cleanup.patch"
+  if git -C "${source_root}" apply --unidiff-zero --reverse --check "${fixture_patch}" >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! git -C "${source_root}" apply --unidiff-zero --check "${fixture_patch}"; then
+    echo "Antigravity timeout cleanup fixture no longer matches the selected upstream" >&2
+    return 1
+  fi
+  git -C "${source_root}" apply --unidiff-zero "${fixture_patch}" || return
+}
+
 run_upstream_test_groups() {
   local source_root="$1"
   local aggregate_log="$2"
@@ -246,49 +269,48 @@ run_upstream_test_groups() {
   local result=0
   local saw_test_failure=0
   local saw_command_failure=0
+  local packages=(
+    ./cmd/server
+    ./internal/api
+    ./internal/api/handlers/management
+    ./internal/auth/claude
+    ./internal/client/codex/live
+    ./internal/cmd
+    ./internal/config
+    ./internal/managementasset
+    ./internal/pluginhost
+    ./internal/pluginstore
+    ./internal/redisqueue
+    ./internal/requestmeta
+    ./internal/runtime/executor/helps
+    ./internal/translator/codex/openai/chat-completions
+    ./internal/translator/codex/openai/responses
+    ./sdk/api/handlers
+    ./sdk/api/handlers/claude
+    ./sdk/api/handlers/gemini
+    ./sdk/api/handlers/openai
+    ./sdk/auth
+    ./sdk/cliproxy/auth
+    ./sdk/cliproxy/executor
+    ./sdk/cliproxy/usage
+    ./sdk/pluginapi
+    ./sdk/proxyutil
+  )
   : >"${aggregate_log}"
+  apply_validation_fixture_adjustments "${source_root}" || return 2
 
   # Keep this list scoped to packages containing a modified upstream file or
   # an injected Pro compatibility/test source. Generic upstream-only packages
   # belong in upstream CI, not in this customization comparison.
-  run_go_test_group "${source_root}" "${aggregate_log}" patch-relevant-upstream \
-    ./cmd/server \
-    ./internal/api \
-    ./internal/api/handlers/management \
-    ./internal/auth/claude \
-    ./internal/client/codex/live \
-    ./internal/cmd \
-    ./internal/config \
-    ./internal/managementasset \
-    ./internal/pluginhost \
-    ./internal/pluginstore \
-    ./internal/redisqueue \
-    ./internal/requestmeta \
-    ./internal/runtime/executor/helps \
-    ./internal/translator/codex/openai/chat-completions \
-    ./internal/translator/codex/openai/responses \
-    ./sdk/api/handlers \
-    ./sdk/api/handlers/claude \
-    ./sdk/api/handlers/gemini \
-    ./sdk/api/handlers/openai \
-    ./sdk/auth \
-    ./sdk/cliproxy/auth \
-    ./sdk/cliproxy/executor \
-    ./sdk/cliproxy/usage \
-    ./sdk/pluginapi \
-    ./sdk/proxyutil \
-    || result=$?
+  if [[ "${include_pro_packages}" == "1" ]]; then
+    packages+=(./internal/pro/... ./internal/embeddedusage/...)
+  fi
+  run_go_test_group "${source_root}" "${aggregate_log}" patch-and-pro-packages \
+    "${packages[@]}" || result=$?
   if [[ "${result}" -eq 2 ]]; then saw_command_failure=1; elif [[ "${result}" -ne 0 ]]; then saw_test_failure=1; fi
 
-  if [[ "${include_pro_packages}" == "1" ]]; then
-    result=0
-    run_go_test_group "${source_root}" "${aggregate_log}" pro-packages ./internal/pro/... || result=$?
-    if [[ "${result}" -eq 2 ]]; then saw_command_failure=1; elif [[ "${result}" -ne 0 ]]; then saw_test_failure=1; fi
-    result=0
-    run_go_test_group "${source_root}" "${aggregate_log}" embeddedusage ./internal/embeddedusage/... || result=$?
-    if [[ "${result}" -eq 2 ]]; then saw_command_failure=1; elif [[ "${result}" -ne 0 ]]; then saw_test_failure=1; fi
-  fi
-
+  # These two packages must remain isolated. Combining them with the broad
+  # group has triggered grouping-dependent WebSocket races in remote CI.
   result=0
   run_go_test_group "${source_root}" "${aggregate_log}" runtime-executor ./internal/runtime/executor || result=$?
   if [[ "${result}" -eq 2 ]]; then saw_command_failure=1; elif [[ "${result}" -ne 0 ]]; then saw_test_failure=1; fi
@@ -316,7 +338,12 @@ build_candidate() {
 
 run_timed "patch preflight guard" validate_late_patch_guard
 run_timed "apply customization and dependencies" apply_candidate_customization
-run_timed "static checks" run_static_checks
+if [[ "${VALIDATION_STATICCHECK:-0}" == "1" ]]; then
+  run_static_checks
+  run_timed "staticcheck SA4011" run_staticcheck_sa4011
+  run_timed "staticcheck U1000" run_staticcheck_u1000
+fi
+run_timed "go vet" run_go_vet
 run_timed "reapplication guard" validate_reapplication_guard
 
 candidate_status=0

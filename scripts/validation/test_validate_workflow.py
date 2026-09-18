@@ -34,10 +34,49 @@ class ValidateWorkflowTests(unittest.TestCase):
         self.assertIn("cache: false", workflow)
         self.assertIn("Restore Go module cache", workflow)
         self.assertIn("Restore rotating Go build cache", workflow)
+        self.assertIn("Restore Staticcheck analysis cache", workflow)
         self.assertIn("GOMODCACHE=${RUNNER_TEMP}/go-mod-cache", workflow)
         self.assertIn("GOCACHE=${RUNNER_TEMP}/go-build-cache", workflow)
+        self.assertIn("STATICCHECK_CACHE=${RUNNER_TEMP}/staticcheck-cache", workflow)
         self.assertIn("${{ runner.temp }}/go-mod-cache", workflow)
         self.assertIn("${{ runner.temp }}/go-build-cache", workflow)
+        self.assertIn("${{ runner.temp }}/staticcheck-cache", workflow)
+
+    def test_core_validation_propagates_staticcheck_failures(self) -> None:
+        script = (ROOT / "scripts" / "validation" / "core.sh").read_text()
+        self.assertIn(
+            "staticcheck -checks=SA4011 ./internal/api/handlers/management || exit",
+            script,
+        )
+        self.assertIn("staticcheck -checks=U1000 ./internal/pro/... || exit", script)
+        self.assertIn('run_timed "staticcheck SA4011"', script)
+        self.assertIn('run_timed "staticcheck U1000"', script)
+        self.assertIn('run_timed "go vet"', script)
+
+    def test_core_validation_reduces_groups_without_merging_race_sensitive_packages(self) -> None:
+        script = (ROOT / "scripts" / "validation" / "core.sh").read_text()
+        self.assertIn("packages+=(./internal/pro/... ./internal/embeddedusage/...)", script)
+        self.assertIn("patch-and-pro-packages", script)
+        self.assertIn("runtime-executor ./internal/runtime/executor", script)
+        self.assertIn("sdk-cliproxy ./sdk/cliproxy", script)
+
+    def test_core_validation_applies_timeout_fixture_to_every_test_root(self) -> None:
+        script = (ROOT / "scripts" / "validation" / "core.sh").read_text()
+        fixture = (
+            ROOT
+            / "scripts"
+            / "validation"
+            / "fixtures"
+            / "antigravity_models_timeout_cleanup.patch"
+        ).read_text()
+        function_start = script.index("run_upstream_test_groups()")
+        function_end = script.index("prepare_baseline_worktree()")
+        self.assertIn(
+            'apply_validation_fixture_adjustments "${source_root}"',
+            script[function_start:function_end],
+        )
+        self.assertIn("stopSlowHandler", fixture)
+        self.assertEqual(2, fixture.count("close(stopSlowHandler)"))
 
     def test_source_image_uses_buildx_cache_and_pinned_management_asset(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()

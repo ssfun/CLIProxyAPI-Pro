@@ -300,6 +300,7 @@ jobs:
         run: |
           echo "GOMODCACHE=${RUNNER_TEMP}/go-mod-cache" >> "${GITHUB_ENV}"
           echo "GOCACHE=${RUNNER_TEMP}/go-build-cache" >> "${GITHUB_ENV}"
+          echo "STATICCHECK_CACHE=${RUNNER_TEMP}/staticcheck-cache" >> "${GITHUB_ENV}"
 
       - name: Set up Go without implicit cache
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -323,6 +324,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-go-build-${{ hashFiles('upstream-core/go.mod') }}-${{ needs.resolve-upstream.outputs.core_sha }}-
             ${{ runner.os }}-${{ runner.arch }}-go-build-${{ hashFiles('upstream-core/go.mod') }}-
+
+      - name: Restore Staticcheck analysis cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/staticcheck-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-staticcheck-v0.7.0-${{ hashFiles('upstream-core/go.mod') }}-${{ needs.resolve-upstream.outputs.core_sha }}-${{ hashFiles('customizations-repo/cliproxyapi-pro-core/patches/**', 'customizations-repo/scripts/validation/core.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-staticcheck-v0.7.0-${{ hashFiles('upstream-core/go.mod') }}-${{ needs.resolve-upstream.outputs.core_sha }}-
+            ${{ runner.os }}-${{ runner.arch }}-staticcheck-v0.7.0-${{ hashFiles('upstream-core/go.mod') }}-
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
