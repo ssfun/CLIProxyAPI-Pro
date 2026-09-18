@@ -55,7 +55,8 @@ jobs:
           pro_release="$(gh api "repos/${CURRENT_REPO}/releases/latest")"
           pro_management_release_tag="$(jq -r '.tag_name' <<<"${pro_release}")"
           pro_management_asset_digest="$(
-            jq -r '[.assets[] | select(.name == "management.html") | .digest // ""][0] // ""' +              <<<"${pro_release}"
+            jq -r '[.assets[] | select(.name == "management.html") | .digest // ""][0] // ""' \
+              <<<"${pro_release}"
           )"
 
           test -n "${pro_management_release_tag}"
@@ -103,7 +104,9 @@ jobs:
           fi
 
           runs_file="${RUNNER_TEMP}/successful-validation-runs.json"
-          if ! gh api +            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?status=success&per_page=50" +            > "${runs_file}"; then
+          if ! gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?status=success&per_page=50" \
+            > "${runs_file}"; then
             echo "NOTICE: could not query prior validation runs; running full validation"
             exit 0
           fi
@@ -111,6 +114,7 @@ jobs:
           candidate_ids_file="${RUNNER_TEMP}/candidate-validation-runs.txt"
           : > "${candidate_ids_file}"
           if [ "${EVENT_NAME}" = "pull_request" ]; then
+            # shellcheck disable=SC2016
             jq -r --argjson pr "${PR_NUMBER}" '
               .workflow_runs[]
               | select(.event == "pull_request")
@@ -123,6 +127,7 @@ jobs:
               | .id
             ' "${runs_file}" >> "${candidate_ids_file}"
           else
+            # shellcheck disable=SC2016
             jq -r --arg branch "${REF_NAME}" '
               .workflow_runs[]
               | select(.event == "push" and .head_branch == $branch)
@@ -133,7 +138,9 @@ jobs:
           while IFS= read -r run_id; do
             [ -n "${run_id}" ] || continue
             artifact_id="$(
-              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" +                --jq '.artifacts[] | select(.name == "validation-state" and (.expired | not)) | .id' +                2>/dev/null | head -n 1 || true
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" \
+                --jq '.artifacts[] | select(.name == "validation-state" and (.expired | not)) | .id' \
+                2>/dev/null | head -n 1 || true
             )"
             if [ -n "${artifact_id}" ]; then
               if gh run download "${run_id}" \
@@ -185,7 +192,8 @@ jobs:
             previous_pro_management_asset_digest="$(jq -r '.pro_management_asset_digest' "${state_file}")"
             [ "${previous_core_sha}" = "${CORE_SHA}" ] || core_upstream_changed=true
             [ "${previous_management_sha}" = "${MANAGEMENT_SHA}" ] || management_upstream_changed=true
-            if [ "${previous_pro_management_release_tag}" != "${PRO_MANAGEMENT_RELEASE_TAG}" ] || +               [ "${previous_pro_management_asset_digest}" != "${PRO_MANAGEMENT_ASSET_DIGEST}" ]; then
+            if [ "${previous_pro_management_release_tag}" != "${PRO_MANAGEMENT_RELEASE_TAG}" ] || \
+               [ "${previous_pro_management_asset_digest}" != "${PRO_MANAGEMENT_ASSET_DIGEST}" ]; then
               image_input_changed=true
             fi
           fi
@@ -198,8 +206,10 @@ jobs:
             fi
           elif [ "${EVENT_NAME}" = "push" ] && [ "${force_all}" = "false" ]; then
             previous_head_sha="$(jq -r '.head_sha' "${state_file}")"
-            if git cat-file -e "${previous_head_sha}^{commit}" 2>/dev/null && +               git merge-base --is-ancestor "${previous_head_sha}" "${HEAD_SHA}"; then
-              git diff --name-only --diff-filter=ACDMRTUXB +                "${previous_head_sha}..${HEAD_SHA}" > "${paths_file}"
+            if git cat-file -e "${previous_head_sha}^{commit}" 2>/dev/null && \
+               git merge-base --is-ancestor "${previous_head_sha}" "${HEAD_SHA}"; then
+              git diff --name-only --diff-filter=ACDMRTUXB \
+                "${previous_head_sha}..${HEAD_SHA}" > "${paths_file}"
             else
               force_all=true
             fi
