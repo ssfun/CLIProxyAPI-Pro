@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -316,5 +317,45 @@ func TestProbeDoesNotReenterPoolWhenNodeMatchesGlobalProxy(t *testing.T) {
 	}
 	if working.count.Load() != 1 {
 		t.Fatalf("pool node proxy connections = %d, want 1", working.count.Load())
+	}
+}
+
+func TestProbeUpdatesHealthWithoutChangingTunnelCounters(t *testing.T) {
+	working := startConnectProxy(t)
+	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"ip":"203.0.113.11","country":"Testland"}`)
+	}))
+	t.Cleanup(target.Close)
+
+	cfg := proxyconfig.Default()
+	cfg.Listen = freeAddress(t)
+	cfg.HealthCheck.Enabled = false
+	cfg.Nodes = []proxyconfig.NodeConfig{{ID: "probe", URL: "http://" + working.listener.Addr().String(), Enabled: true, Weight: 1}}
+	engine := New()
+	if errApply := engine.ApplyConfig(cfg); errApply != nil {
+		t.Fatal(errApply)
+	}
+	t.Cleanup(engine.Close)
+
+	result := engine.Probe(context.Background(), "probe", target.URL)
+	if !result.Success {
+		t.Fatalf("Probe() = %+v", result)
+	}
+	snapshot := engine.Status().Nodes[0]
+	if snapshot.State != "healthy" || snapshot.ExitIP != "203.0.113.11" {
+		t.Fatalf("probe health snapshot = %+v", snapshot)
+	}
+	if snapshot.TotalConnects != 0 || snapshot.SuccessConnects != 0 || snapshot.FailedConnects != 0 {
+		t.Fatalf("probe changed tunnel counters: %+v", snapshot)
+	}
+}
+
+func TestDialNodeRejectsResolvedLoopbackAlias(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := dialNode(ctx, "socks5://localhost:8318", "example.com:443", "127.0.0.1:8318")
+	if err == nil || !strings.Contains(err.Error(), "local proxy pool listener") {
+		t.Fatalf("dialNode() error = %v", err)
 	}
 }

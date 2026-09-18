@@ -69,6 +69,17 @@ const parseLoopbackListener = (value: string): { host: string; port: string } | 
   return { host, port: String(port) };
 };
 
+const isLoopbackHostname = (value: string): boolean => {
+  const host = value.trim().replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === 'localhost' || host === '::1') return true;
+  const octets = host.split('.');
+  return (
+    octets.length === 4 &&
+    octets[0] === '127' &&
+    octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255)
+  );
+};
+
 const validateProxyPoolConfig = (config: ProxyPoolConfig): ValidationError | null => {
   const listener = parseLoopbackListener(config.listen);
   if (!listener)
@@ -113,7 +124,10 @@ const validateProxyPoolConfig = (config: ProxyPoolConfig): ValidationError | nul
       const normalizedPort =
         parsed.port ||
         (parsed.protocol === 'http:' ? '80' : parsed.protocol === 'https:' ? '443' : '');
-      if (normalizedHost === listener.host && normalizedPort === listener.port)
+      if (
+        normalizedPort === listener.port &&
+        (normalizedHost === listener.host || isLoopbackHostname(normalizedHost))
+      )
         return {
           key: 'proxy_pool.validation_recursive_url',
           defaultValue: 'A proxy node cannot point back to the internal listener: {{value}}',

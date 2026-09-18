@@ -254,10 +254,11 @@ new_customization_paths = (
     'internal/pluginhost/gemini_cli_quota_legacy_test.go',
     'internal/pluginhost/gemini_cli_storage_compat.go',
     'internal/pluginhost/gemini_cli_storage_compat_test.go',
-    'internal/pluginhost/plugin_executor_usage_test.go',
+	'internal/pluginhost/plugin_executor_usage_test.go',
 	'internal/pluginhost/plugin_executor_usage.go',
-    'internal/pluginhost/pro_quota_provider.go',
-    'internal/pluginhost/pro_quota_provider_test.go',
+	'internal/pluginhost/pro_quota_provider.go',
+	'internal/pluginhost/pro_quota_provider_test.go',
+	'internal/pluginhost/runtime_proxy_override_test.go',
     'internal/pluginstore/autoinstall.go',
     'internal/pluginstore/autoinstall_test.go',
     'internal/pluginstore/gitstore_auth_test.go',
@@ -273,6 +274,9 @@ new_customization_paths = (
 	'internal/runtime/executor/claude_stream_terminal.go',
 	'internal/runtime/executor/api_key_policy_usage_test.go',
 	'internal/runtime/executor/response_translation.go',
+	'internal/runtime/executor/antigravity_runtime_proxy_test.go',
+	'internal/runtime/executor/helps/runtime_proxy_override_test.go',
+	'internal/client/codex/live/runtime_proxy_override_test.go',
 	'internal/pro/observability/config_test.go',
 	'internal/redisqueue/speed_test.go',
 	'internal/redisqueue/api_key_policy_usage_test.go',
@@ -295,6 +299,7 @@ new_customization_paths = (
 	'sdk/cliproxy/auth/auth_account_policy.go',
 	'sdk/cliproxy/auth/auth_account_policy_test.go',
 	'sdk/cliproxy/auth/codex_retry_after_headers_test.go',
+	'sdk/cliproxy/runtime_proxy_override_test.go',
 	'sdk/cliproxy/auth/scheduler_runtime_state.go',
     'sdk/cliproxy/auth/inspection_refresh.go',
     'sdk/cliproxy/auth/pro_quota_protection.go',
@@ -330,6 +335,11 @@ queue_go_source('internal/runtime/executor/helps/quota_settlement_test.go')
 queue_go_source('internal/runtime/executor/helps/usage_pro_extensions.go')
 queue_go_source('internal/runtime/executor/codex_retry_after_test.go')
 queue_go_source('internal/runtime/executor/response_translation.go')
+queue_go_source('internal/runtime/executor/antigravity_runtime_proxy_test.go')
+queue_go_source('internal/runtime/executor/helps/runtime_proxy_override_test.go')
+queue_go_source('internal/client/codex/live/runtime_proxy_override_test.go')
+queue_go_source('sdk/cliproxy/runtime_proxy_override_test.go')
+queue_go_source('internal/pluginhost/runtime_proxy_override_test.go')
 queue_go_source('internal/pro/observability/config_test.go')
 queue_go_source('sdk/cliproxy/usage/manager_pro_test.go')
 queue_go_source('sdk/cliproxy/usage/manager_extensions.go')
@@ -658,14 +668,802 @@ proxyutil_source = ROOT / 'sdk/proxyutil/proxy.go'
 replace_once(
     proxyutil_source,
     'func BuildHTTPTransport(raw string) (*http.Transport, Mode, error) {\n\tsetting, errParse := Parse(raw)\n',
-    'func BuildHTTPTransport(raw string) (*http.Transport, Mode, error) {\n\traw = resolveRuntimeProxyOverride(raw)\n\tsetting, errParse := Parse(raw)\n',
-    'raw = resolveRuntimeProxyOverride(raw)',
+    'func BuildHTTPTransport(raw string) (*http.Transport, Mode, error) {\n\treturn buildHTTPTransport(ResolveEffectiveProxy(raw).Effective)\n}\n\n// BuildHTTPTransportWithoutRuntimeOverride builds a transport from an already\n// resolved setting. Cache users use it with ResolveEffectiveProxy so their key\n// and transport are derived from the same atomic override snapshot.\nfunc BuildHTTPTransportWithoutRuntimeOverride(raw string) (*http.Transport, Mode, error) {\n\treturn buildHTTPTransport(raw)\n}\n\nfunc buildHTTPTransport(raw string) (*http.Transport, Mode, error) {\n\tsetting, errParse := Parse(raw)\n',
+    'func BuildHTTPTransportWithoutRuntimeOverride(',
 )
 replace_once(
     proxyutil_source,
     'func BuildDialer(raw string) (proxy.Dialer, Mode, error) {\n\tsetting, errParse := Parse(raw)\n',
-    'func BuildDialer(raw string) (proxy.Dialer, Mode, error) {\n\treturn buildDialer(resolveRuntimeProxyOverride(raw))\n}\n\n// BuildDialerWithoutRuntimeOverride builds a dialer from the supplied raw\n// setting without applying the process-wide runtime proxy takeover. Internal\n// proxy-pool hops use this boundary to avoid dialing back into the pool.\nfunc BuildDialerWithoutRuntimeOverride(raw string) (proxy.Dialer, Mode, error) {\n\treturn buildDialer(raw)\n}\n\nfunc buildDialer(raw string) (proxy.Dialer, Mode, error) {\n\tsetting, errParse := Parse(raw)\n',
-    'func BuildDialer(raw string) (proxy.Dialer, Mode, error) {\n\treturn buildDialer(resolveRuntimeProxyOverride(raw))',
+    'func BuildDialer(raw string) (proxy.Dialer, Mode, error) {\n\treturn buildDialer(ResolveEffectiveProxy(raw).Effective)\n}\n\n// BuildDialerWithoutRuntimeOverride builds a dialer from the supplied raw\n// setting without applying the process-wide runtime proxy takeover. Internal\n// proxy-pool hops use this boundary to avoid dialing back into the pool.\nfunc BuildDialerWithoutRuntimeOverride(raw string) (proxy.Dialer, Mode, error) {\n\treturn buildDialer(raw)\n}\n\nfunc buildDialer(raw string) (proxy.Dialer, Mode, error) {\n\tsetting, errParse := Parse(raw)\n',
+    'func BuildDialer(raw string) (proxy.Dialer, Mode, error) {\n\treturn buildDialer(ResolveEffectiveProxy(raw).Effective)',
+)
+
+proxy_helpers = ROOT / 'internal/runtime/executor/helps/proxy_helpers.go'
+add_go_import(proxy_helpers, '\t"strings"\n', '\t"sync/atomic"\n')
+replace_go_function(
+    proxy_helpers,
+    'func NewProxyAwareHTTPClient(',
+    '''func NewProxyAwareHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, timeout time.Duration) *http.Client {
+	httpClient := &http.Client{}
+	if timeout > 0 {
+		httpClient.Timeout = timeout
+	}
+
+	var rawProxyURL string
+	if auth != nil {
+		rawProxyURL = strings.TrimSpace(auth.ProxyURL)
+	}
+	if rawProxyURL == "" && cfg != nil {
+		rawProxyURL = strings.TrimSpace(cfg.ProxyURL)
+	}
+	resolution := proxyutil.ResolveEffectiveProxy(rawProxyURL)
+	if resolution.Effective != "" {
+		transport := buildResolvedProxyTransport(resolution)
+		if transport != nil {
+			httpClient.Transport = transport
+			return httpClient
+		}
+		log.Debugf("failed to setup proxy from URL: %s, falling back to context transport", proxyutil.Redact(resolution.Effective))
+	}
+
+	if rt, ok := ctx.Value("cliproxy.roundtripper").(http.RoundTripper); ok && rt != nil {
+		httpClient.Transport = rt
+	}
+	return httpClient
+}
+''',
+    'resolution := proxyutil.ResolveEffectiveProxy(rawProxyURL)',
+)
+replace_once(
+    proxy_helpers,
+    'var devinTransportCache = NewTransportCache[string](DefaultTransportCacheCapacity)\n',
+    '''type runtimeProxyTransportKey struct {
+	scope      string
+	generation uint64
+}
+
+var (
+	devinTransportCache           = NewTransportCache[runtimeProxyTransportKey](DefaultTransportCacheCapacity)
+	devinRuntimeProxyGeneration atomic.Uint64
+)
+
+func syncDevinRuntimeProxyGeneration(generation uint64) {
+	for {
+		current := devinRuntimeProxyGeneration.Load()
+		if current >= generation {
+			return
+		}
+		if devinRuntimeProxyGeneration.CompareAndSwap(current, generation) {
+			devinTransportCache.Purge()
+			return
+		}
+	}
+}
+''',
+    'devinRuntimeProxyGeneration atomic.Uint64',
+)
+replace_go_function(
+    proxy_helpers,
+    'func NewDevinHTTPClient(',
+    '''func NewDevinHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, timeout time.Duration) *http.Client {
+	generation := proxyutil.ResolveEffectiveProxy("").Generation
+	syncDevinRuntimeProxyGeneration(generation)
+	if ctx != nil {
+		if rt, ok := ctx.Value("cliproxy.roundtripper").(http.RoundTripper); ok && rt != nil {
+			if tr, ok := rt.(*http.Transport); ok {
+				key := runtimeProxyTransportKey{scope: fmt.Sprintf("rt:%p", tr), generation: generation}
+				cloned, err := devinTransportCache.Get(key, func() (*http.Transport, error) {
+					c := tr.Clone()
+					c.DisableCompression = true
+					return c, nil
+				})
+				if err == nil && cloned != nil {
+					return &http.Client{Transport: cloned, Timeout: timeout}
+				}
+			}
+			return &http.Client{Transport: devinNoGzipRoundTripper{base: rt}, Timeout: timeout}
+		}
+	}
+
+	rawProxyURL := ""
+	if auth != nil && strings.TrimSpace(auth.ProxyURL) != "" {
+		rawProxyURL = strings.TrimSpace(auth.ProxyURL)
+	} else if cfg != nil {
+		rawProxyURL = strings.TrimSpace(cfg.ProxyURL)
+	}
+	resolution := proxyutil.ResolveEffectiveProxy(rawProxyURL)
+	syncDevinRuntimeProxyGeneration(resolution.Generation)
+	key := runtimeProxyTransportKey{scope: resolution.Effective, generation: resolution.Generation}
+	tr, err := devinTransportCache.Get(key, func() (*http.Transport, error) {
+		base := buildResolvedProxyTransport(resolution)
+		if base == nil {
+			if defaultTransport, ok := http.DefaultTransport.(*http.Transport); ok {
+				base = defaultTransport.Clone()
+			} else {
+				base = &http.Transport{}
+			}
+		}
+		base.DisableCompression = true
+		return base, nil
+	})
+	if err != nil || tr == nil {
+		tr = &http.Transport{DisableCompression: true}
+	}
+	return &http.Client{Transport: tr, Timeout: timeout}
+}
+''',
+    'key := runtimeProxyTransportKey{scope: resolution.Effective',
+)
+replace_go_function(
+    proxy_helpers,
+    'func buildProxyTransport(',
+    '''func buildProxyTransport(proxyURL string) *http.Transport {
+	return buildResolvedProxyTransport(proxyutil.ResolveEffectiveProxy(proxyURL))
+}
+
+func buildResolvedProxyTransport(resolution proxyutil.RuntimeProxyResolution) *http.Transport {
+	transport, _, errBuild := proxyutil.BuildHTTPTransportWithoutRuntimeOverride(resolution.Effective)
+	if errBuild != nil {
+		log.Errorf("%v", errBuild)
+		return nil
+	}
+	return transport
+}
+''',
+    'func buildResolvedProxyTransport(',
+)
+
+round_tripper_provider = ROOT / 'sdk/cliproxy/rtprovider.go'
+replace_once(
+    round_tripper_provider,
+    '''type defaultRoundTripperProvider struct {
+	mu    sync.RWMutex
+	cache map[string]http.RoundTripper
+}
+
+func newDefaultRoundTripperProvider() *defaultRoundTripperProvider {
+	return &defaultRoundTripperProvider{cache: make(map[string]http.RoundTripper)}
+}
+''',
+    '''type runtimeProxyRoundTripperKey struct {
+	effective  string
+	generation uint64
+}
+
+type defaultRoundTripperProvider struct {
+	mu         sync.RWMutex
+	generation uint64
+	cache      map[runtimeProxyRoundTripperKey]http.RoundTripper
+}
+
+func newDefaultRoundTripperProvider() *defaultRoundTripperProvider {
+	return &defaultRoundTripperProvider{cache: make(map[runtimeProxyRoundTripperKey]http.RoundTripper)}
+}
+''',
+    'type runtimeProxyRoundTripperKey struct',
+)
+replace_go_function(
+    round_tripper_provider,
+    'func (p *defaultRoundTripperProvider) RoundTripperFor(',
+    '''func (p *defaultRoundTripperProvider) RoundTripperFor(auth *coreauth.Auth) http.RoundTripper {
+	if auth == nil {
+		return nil
+	}
+	rawProxyURL := strings.TrimSpace(auth.ProxyURL)
+	for {
+		resolution := proxyutil.ResolveEffectiveProxy(rawProxyURL)
+		key := runtimeProxyRoundTripperKey{effective: resolution.Effective, generation: resolution.Generation}
+
+		p.mu.Lock()
+		if p.generation > resolution.Generation {
+			p.mu.Unlock()
+			continue
+		}
+		if p.generation < resolution.Generation {
+			for _, cached := range p.cache {
+				if closer, ok := cached.(interface{ CloseIdleConnections() }); ok {
+					closer.CloseIdleConnections()
+				}
+			}
+			p.cache = make(map[runtimeProxyRoundTripperKey]http.RoundTripper)
+			p.generation = resolution.Generation
+		}
+		if resolution.Effective == "" {
+			p.mu.Unlock()
+			return nil
+		}
+		if cached := p.cache[key]; cached != nil {
+			p.mu.Unlock()
+			return cached
+		}
+		p.mu.Unlock()
+
+		transport, _, errBuild := proxyutil.BuildHTTPTransportWithoutRuntimeOverride(resolution.Effective)
+		if errBuild != nil {
+			log.Errorf("%v", errBuild)
+			return nil
+		}
+		if transport == nil {
+			return nil
+		}
+		latest := proxyutil.ResolveEffectiveProxy(rawProxyURL)
+		if latest.Generation != resolution.Generation || latest.Effective != resolution.Effective {
+			transport.CloseIdleConnections()
+			continue
+		}
+
+		p.mu.Lock()
+		if p.generation != resolution.Generation {
+			p.mu.Unlock()
+			transport.CloseIdleConnections()
+			continue
+		}
+		if cached := p.cache[key]; cached != nil {
+			p.mu.Unlock()
+			transport.CloseIdleConnections()
+			return cached
+		}
+		p.cache[key] = transport
+		p.mu.Unlock()
+		return transport
+	}
+}
+''',
+    'runtimeProxyRoundTripperKey{effective:',
+)
+
+bounded_lru = ROOT / 'internal/cache/bounded_lru.go'
+insert_before(
+    bounded_lru,
+    'func (cache *BoundedLRU[K, V]) Delete(key K) bool {\n',
+    '''// Purge removes every cached value and invokes the eviction callback after
+// releasing the cache lock.
+func (cache *BoundedLRU[K, V]) Purge() {
+	if cache == nil {
+		return
+	}
+	cache.mu.Lock()
+	entries := make([]boundedLRUEntry[K, V], 0, len(cache.entries))
+	for element := cache.order.Front(); element != nil; element = element.Next() {
+		entries = append(entries, element.Value.(boundedLRUEntry[K, V]))
+	}
+	cache.entries = make(map[K]*list.Element, cache.capacity)
+	cache.order.Init()
+	cache.mu.Unlock()
+	if cache.onEvict != nil {
+		for _, entry := range entries {
+			cache.onEvict(entry.key, entry.value)
+		}
+	}
+}
+
+''',
+    'func (cache *BoundedLRU[K, V]) Purge()',
+)
+
+utls_client = ROOT / 'internal/runtime/executor/helps/utls_client.go'
+add_go_import(utls_client, '\t"sync"\n', '\t"sync/atomic"\n')
+replace_go_function(
+    utls_client,
+    'func newUtlsRoundTripper(',
+    '''func newUtlsRoundTripper(proxyURL string) *utlsRoundTripper {
+	return newUtlsRoundTripperResolved(proxyutil.ResolveEffectiveProxy(proxyURL).Effective)
+}
+
+func newUtlsRoundTripperResolved(effectiveProxyURL string) *utlsRoundTripper {
+	var dialer proxy.Dialer = proxy.Direct
+	if effectiveProxyURL != "" {
+		proxyDialer, mode, errBuild := proxyutil.BuildDialerWithoutRuntimeOverride(effectiveProxyURL)
+		if errBuild != nil {
+			log.Errorf("utls: failed to configure proxy dialer for %q: %v", proxyutil.Redact(effectiveProxyURL), errBuild)
+		} else if mode != proxyutil.ModeInherit && proxyDialer != nil {
+			dialer = proxyDialer
+		}
+	}
+	return &utlsRoundTripper{dialer: dialer}
+}
+''',
+    'func newUtlsRoundTripperResolved(',
+)
+replace_once(
+    utls_client,
+    '''var claudeCodeRoundTripperCache = internalcache.NewBoundedLRU[string, http.RoundTripper](
+	claudeCodeRoundTripperCacheCapacity,
+	func(_ string, roundTripper http.RoundTripper) {
+''',
+    '''type claudeCodeRoundTripperKey struct {
+	effective  string
+	generation uint64
+}
+
+var (
+	claudeCodeRoundTripperCache = internalcache.NewBoundedLRU[claudeCodeRoundTripperKey, http.RoundTripper](
+		claudeCodeRoundTripperCacheCapacity,
+		func(_ claudeCodeRoundTripperKey, roundTripper http.RoundTripper) {
+''',
+    'type claudeCodeRoundTripperKey struct',
+)
+replace_once(
+    utls_client,
+    '''		transport.CloseIdleConnections()
+		}
+	},
+)
+''',
+    '''			transport.CloseIdleConnections()
+			}
+		},
+	)
+	claudeCodeRuntimeProxyGeneration atomic.Uint64
+)
+
+func syncClaudeCodeRuntimeProxyGeneration(generation uint64) {
+	for {
+		current := claudeCodeRuntimeProxyGeneration.Load()
+		if current >= generation {
+			return
+		}
+		if claudeCodeRuntimeProxyGeneration.CompareAndSwap(current, generation) {
+			claudeCodeRoundTripperCache.Purge()
+			return
+		}
+	}
+}
+''',
+    'claudeCodeRuntimeProxyGeneration atomic.Uint64',
+)
+replace_go_function(
+    utls_client,
+    'func cachedClaudeCodeRoundTripper(',
+    '''func cachedClaudeCodeRoundTripper(proxyURL string) http.RoundTripper {
+	return cachedClaudeCodeRoundTripperResolved(proxyutil.ResolveEffectiveProxy(proxyURL))
+}
+
+func cachedClaudeCodeRoundTripperResolved(resolution proxyutil.RuntimeProxyResolution) http.RoundTripper {
+	syncClaudeCodeRuntimeProxyGeneration(resolution.Generation)
+	key := claudeCodeRoundTripperKey{effective: resolution.Effective, generation: resolution.Generation}
+	return claudeCodeRoundTripperCache.GetOrAdd(key, func() http.RoundTripper {
+		return newClaudeCodeRoundTripperResolved(resolution.Effective)
+	})
+}
+''',
+    'func cachedClaudeCodeRoundTripperResolved(',
+)
+replace_go_function(
+    utls_client,
+    'func newClaudeCodeRoundTripper(',
+    '''func newClaudeCodeRoundTripper(proxyURL string) http.RoundTripper {
+	return newClaudeCodeRoundTripperResolved(proxyutil.ResolveEffectiveProxy(proxyURL).Effective)
+}
+
+func newClaudeCodeRoundTripperResolved(effectiveProxyURL string) http.RoundTripper {
+	// The cache is scoped to this round tripper, which is already keyed by proxy,
+	// so resumption never crosses proxy boundaries.
+	sessionCache := tls.NewLRUClientSessionCache(claudeCodeSessionCacheCapacity)
+	var dialer proxy.Dialer = proxy.Direct
+	if effectiveProxyURL != "" {
+		proxyDialer, mode, errBuild := proxyutil.BuildDialerWithoutRuntimeOverride(effectiveProxyURL)
+		if errBuild != nil {
+			log.Errorf("claude tls: failed to configure proxy dialer for %q: %v", proxyutil.Redact(effectiveProxyURL), errBuild)
+		} else if mode != proxyutil.ModeInherit && proxyDialer != nil {
+			dialer = proxyDialer
+		}
+	}
+
+	transport := &http.Transport{
+		ForceAttemptHTTP2: false,
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			var (
+				conn net.Conn
+				err  error
+			)
+			if contextDialer, ok := dialer.(proxy.ContextDialer); ok {
+				conn, err = contextDialer.DialContext(ctx, network, addr)
+			} else {
+				conn, err = dialer.Dial(network, addr)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("claude tls: dial upstream: %w", err)
+			}
+
+			host, _, errSplit := net.SplitHostPort(addr)
+			if errSplit != nil {
+				if errClose := conn.Close(); errClose != nil {
+					log.Debugf("claude tls: close failed connection: %v", errClose)
+				}
+				return nil, fmt.Errorf("claude tls: split upstream address: %w", errSplit)
+			}
+			tlsConn := tls.UClient(conn, newClaudeCodeTLSConfig(host, sessionCache), tls.HelloCustom)
+			if errPreset := tlsConn.ApplyPreset(claudeCodeTLSClientHelloSpec()); errPreset != nil {
+				if errClose := tlsConn.Close(); errClose != nil {
+					log.Debugf("claude tls: close connection after preset failure: %v", errClose)
+				}
+				return nil, fmt.Errorf("claude tls: apply Claude Code ClientHello: %w", errPreset)
+			}
+			if errHandshake := tlsConn.HandshakeContext(ctx); errHandshake != nil {
+				if errClose := tlsConn.Close(); errClose != nil {
+					log.Debugf("claude tls: close connection after handshake failure: %v", errClose)
+				}
+				return nil, fmt.Errorf("claude tls: handshake upstream: %w", errHandshake)
+			}
+			return httpwire.NewOrderedRequestConn(tlsConn, claudeCodeRequestHeaderOrder), nil
+		},
+	}
+	return transport
+}
+''',
+    'func newClaudeCodeRoundTripperResolved(',
+)
+replace_go_function(
+    utls_client,
+    'func NewUtlsHTTPClient(',
+    '''func NewUtlsHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, timeout time.Duration) *http.Client {
+	var rawProxyURL string
+	if auth != nil {
+		rawProxyURL = strings.TrimSpace(auth.ProxyURL)
+	}
+	if rawProxyURL == "" && cfg != nil {
+		rawProxyURL = strings.TrimSpace(cfg.ProxyURL)
+	}
+	resolution := proxyutil.ResolveEffectiveProxy(rawProxyURL)
+
+	var ctxRoundTripper http.RoundTripper
+	if ctx != nil {
+		ctxRoundTripper, _ = ctx.Value("cliproxy.roundtripper").(http.RoundTripper)
+	}
+
+	var chromeRT http.RoundTripper = newUtlsRoundTripperResolved(resolution.Effective)
+	var anthropicRT http.RoundTripper = cachedClaudeCodeRoundTripperResolved(resolution)
+	var standardTransport http.RoundTripper = http.DefaultTransport
+	if resolution.Effective != "" {
+		if transport := buildResolvedProxyTransport(resolution); transport != nil {
+			standardTransport = transport
+		}
+	} else if ctxRoundTripper != nil {
+		chromeRT = ctxRoundTripper
+		anthropicRT = ctxRoundTripper
+		standardTransport = ctxRoundTripper
+	}
+
+	client := &http.Client{Transport: &fallbackRoundTripper{anthropic: anthropicRT, chrome: chromeRT, fallback: standardTransport}}
+	if timeout > 0 {
+		client.Timeout = timeout
+	}
+	return client
+}
+''',
+    'cachedClaudeCodeRoundTripperResolved(resolution)',
+)
+
+claude_oauth_transport = ROOT / 'internal/auth/claude/utls_transport.go'
+replace_once(
+    claude_oauth_transport,
+    '''var claudeOAuthSessionCaches = internalcache.NewBoundedLRU[string, tls.ClientSessionCache](
+	claudeOAuthProxySessionCacheCapacity,
+	nil,
+)
+
+func claudeOAuthSessionCache(proxyURL string) tls.ClientSessionCache {
+	return claudeOAuthSessionCaches.GetOrAdd(proxyURL, func() tls.ClientSessionCache {
+		return tls.NewLRUClientSessionCache(claudeOAuthSessionCacheCapacity)
+	})
+}
+''',
+    '''type claudeOAuthSessionCacheKey struct {
+	effective  string
+	generation uint64
+}
+
+var claudeOAuthSessionCaches = internalcache.NewBoundedLRU[claudeOAuthSessionCacheKey, tls.ClientSessionCache](
+	claudeOAuthProxySessionCacheCapacity,
+	nil,
+)
+
+func claudeOAuthSessionCache(proxyURL string) tls.ClientSessionCache {
+	return claudeOAuthSessionCacheResolved(proxyutil.ResolveEffectiveProxy(proxyURL))
+}
+
+func claudeOAuthSessionCacheResolved(resolution proxyutil.RuntimeProxyResolution) tls.ClientSessionCache {
+	key := claudeOAuthSessionCacheKey{effective: resolution.Effective, generation: resolution.Generation}
+	return claudeOAuthSessionCaches.GetOrAdd(key, func() tls.ClientSessionCache {
+		return tls.NewLRUClientSessionCache(claudeOAuthSessionCacheCapacity)
+	})
+}
+''',
+    'type claudeOAuthSessionCacheKey struct',
+)
+replace_go_function(
+    claude_oauth_transport,
+    'func newUtlsRoundTripper(',
+    '''func newUtlsRoundTripper(cfg *config.SDKConfig) *utlsRoundTripper {
+	rawProxyURL := ""
+	if cfg != nil {
+		rawProxyURL = cfg.ProxyURL
+	}
+	resolution := proxyutil.ResolveEffectiveProxy(rawProxyURL)
+	var dialer proxy.Dialer = proxy.Direct
+	if resolution.Effective != "" {
+		proxyDialer, mode, errBuild := proxyutil.BuildDialerWithoutRuntimeOverride(resolution.Effective)
+		if errBuild != nil {
+			log.Errorf("failed to configure proxy dialer for %q: %v", proxyutil.Redact(resolution.Effective), errBuild)
+		} else if mode != proxyutil.ModeInherit && proxyDialer != nil {
+			dialer = proxyDialer
+		}
+	}
+
+	roundTripper := &utlsRoundTripper{
+		dialer:       dialer,
+		sessionCache: claudeOAuthSessionCacheResolved(resolution),
+	}
+	roundTripper.transport = &http.Transport{ForceAttemptHTTP2: false, DialTLSContext: roundTripper.dialTLSContext}
+	return roundTripper
+}
+''',
+    'claudeOAuthSessionCacheResolved(resolution)',
+)
+
+antigravity_executor = ROOT / 'internal/runtime/executor/antigravity_executor.go'
+add_go_import(antigravity_executor, '\t"strings"\n', '\t"sync/atomic"\n')
+replace_once(
+    antigravity_executor,
+    '''type antigravityTransportKey struct {
+	credential          string
+	proxy               string
+	base                *http.Transport
+	shortMode           bool
+	idleConnTimeout     time.Duration
+	maxIdleConnsPerHost int
+}
+''',
+    '''type antigravityTransportKey struct {
+	credential          string
+	proxy               string
+	base                *http.Transport
+	generation          uint64
+	shortMode           bool
+	idleConnTimeout     time.Duration
+	maxIdleConnsPerHost int
+}
+
+var antigravityRuntimeProxyGeneration atomic.Uint64
+
+func syncAntigravityRuntimeProxyGeneration(generation uint64) {
+	for {
+		current := antigravityRuntimeProxyGeneration.Load()
+		if current >= generation {
+			return
+		}
+		if antigravityRuntimeProxyGeneration.CompareAndSwap(current, generation) {
+			antigravityTransports.Purge()
+			return
+		}
+	}
+}
+''',
+    'antigravityRuntimeProxyGeneration atomic.Uint64',
+)
+replace_once(
+    antigravity_executor,
+    '''	settings := resolveAntigravityPoolSettings(cfg)
+	key := antigravityTransportKey{
+		credential:          antigravityTransportScope(auth),
+		base:                base,
+''',
+    '''	settings := resolveAntigravityPoolSettings(cfg)
+	resolution := proxyutil.ResolveEffectiveProxy(antigravityProxyURL(cfg, auth))
+	syncAntigravityRuntimeProxyGeneration(resolution.Generation)
+	key := antigravityTransportKey{
+		credential:          antigravityTransportScope(auth),
+		base:                base,
+		generation:          resolution.Generation,
+''',
+    'generation:          resolution.Generation',
+)
+replace_go_function(
+    antigravity_executor,
+    'func antigravityHTTP11Transport(',
+    '''func antigravityHTTP11Transport(auth *cliproxyauth.Auth, base *http.Transport, cfgs ...*config.Config) *http.Transport {
+	var cfg *config.Config
+	if len(cfgs) > 0 {
+		cfg = cfgs[0]
+	}
+	resolution := proxyutil.ResolveEffectiveProxy(antigravityProxyURL(cfg, auth))
+	return antigravityHTTP11TransportResolved(auth, base, resolution, cfgs...)
+}
+
+func antigravityHTTP11TransportResolved(auth *cliproxyauth.Auth, base *http.Transport, resolution proxyutil.RuntimeProxyResolution, cfgs ...*config.Config) *http.Transport {
+	if base == nil {
+		return nil
+	}
+	syncAntigravityRuntimeProxyGeneration(resolution.Generation)
+	var cfg *config.Config
+	if len(cfgs) > 0 {
+		cfg = cfgs[0]
+	}
+	settings := resolveAntigravityPoolSettings(cfg)
+	key := antigravityTransportKey{
+		credential:          antigravityTransportScope(auth),
+		base:                base,
+		generation:          resolution.Generation,
+		shortMode:           settings.shortMode,
+		idleConnTimeout:     settings.idleConnTimeout,
+		maxIdleConnsPerHost: settings.maxIdleConnsPerHost,
+	}
+	transport, errGet := antigravityTransports.Get(key, func() (*http.Transport, error) {
+		return cloneTransportWithHTTP11(base, cfgs...), nil
+	})
+	if errGet != nil {
+		log.Debugf("antigravity executor: cache HTTP/1.1 transport failed: %v", errGet)
+		return cloneTransportWithHTTP11(base, cfgs...)
+	}
+	return transport
+}
+''',
+    'func antigravityHTTP11TransportResolved(',
+)
+replace_go_function(
+    antigravity_executor,
+    'func antigravityProxiedHTTP11Transport(',
+    '''func antigravityProxiedHTTP11Transport(auth *cliproxyauth.Auth, proxyURL string, cfgs ...*config.Config) *http.Transport {
+	return antigravityProxiedHTTP11TransportResolved(auth, proxyutil.ResolveEffectiveProxy(proxyURL), cfgs...)
+}
+
+func antigravityProxiedHTTP11TransportResolved(auth *cliproxyauth.Auth, resolution proxyutil.RuntimeProxyResolution, cfgs ...*config.Config) *http.Transport {
+	if resolution.Effective == "" {
+		return nil
+	}
+	syncAntigravityRuntimeProxyGeneration(resolution.Generation)
+	var cfg *config.Config
+	if len(cfgs) > 0 {
+		cfg = cfgs[0]
+	}
+	settings := resolveAntigravityPoolSettings(cfg)
+	key := antigravityTransportKey{
+		credential:          antigravityTransportScope(auth),
+		proxy:               resolution.Effective,
+		generation:          resolution.Generation,
+		shortMode:           settings.shortMode,
+		idleConnTimeout:     settings.idleConnTimeout,
+		maxIdleConnsPerHost: settings.maxIdleConnsPerHost,
+	}
+	transport, errGet := antigravityTransports.Get(key, func() (*http.Transport, error) {
+		base, _, errBuild := proxyutil.BuildHTTPTransportWithoutRuntimeOverride(resolution.Effective)
+		if errBuild != nil {
+			return nil, errBuild
+		}
+		if base == nil {
+			return nil, fmt.Errorf("antigravity executor: proxy setting produced no transport")
+		}
+		return cloneTransportWithHTTP11(base, cfgs...), nil
+	})
+	if errGet != nil {
+		return nil
+	}
+	return transport
+}
+''',
+    'func antigravityProxiedHTTP11TransportResolved(',
+)
+replace_go_function(
+    antigravity_executor,
+    'func newAntigravityHTTPClient(',
+    '''func newAntigravityHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, timeout time.Duration) *http.Client {
+	// Resolve once so the transport route and its cache generation always come
+	// from the same runtime-override snapshot.
+	resolution := proxyutil.ResolveEffectiveProxy(antigravityProxyURL(cfg, auth))
+	syncAntigravityRuntimeProxyGeneration(resolution.Generation)
+
+	// Native Antigravity reuses one transport across requests. Opt into a
+	// credential-scoped proxy transport only here so other providers keep their
+	// existing lifecycle and different OAuth identities remain isolated.
+	if resolution.Effective != "" {
+		if transport := antigravityProxiedHTTP11TransportResolved(auth, resolution, cfg); transport != nil {
+			return &http.Client{Transport: transport, Timeout: timeout}
+		}
+		log.Debugf("antigravity executor: failed to setup proxy from URL: %s, falling back to context transport", proxyutil.Redact(resolution.Effective))
+	}
+
+	client := &http.Client{Timeout: timeout}
+	if rt, ok := ctx.Value("cliproxy.roundtripper").(http.RoundTripper); ok && rt != nil {
+		client.Transport = rt
+	}
+	// Direct requests share an HTTP/1.1 pool only within the selected credential.
+	if client.Transport == nil {
+		client.Transport = antigravityHTTP11TransportResolved(auth, antigravityBaseTransport, resolution, cfg)
+		return client
+	}
+
+	// Preserve a context-provided transport while forcing HTTP/1.1. The cache key
+	// includes credential identity, so sharing the base does not share TLS pools.
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		// A RoundTripper that is not an *http.Transport owns its own protocol behavior.
+		return client
+	}
+	if transport == nil {
+		// A typed-nil *http.Transport still satisfies the interface nil check.
+		// Substitute the process base transport so http.Client does not silently
+		// fall back to http.DefaultTransport and advertise h2 over ALPN.
+		transport = antigravityBaseTransport
+	}
+	client.Transport = antigravityHTTP11TransportResolved(auth, transport, resolution, cfg)
+	return client
+}
+''',
+    'Resolve once so the transport route and its cache generation always come',
+)
+
+pluginhost_http_bridge = ROOT / 'internal/pluginhost/http_bridge.go'
+replace_once(
+    pluginhost_http_bridge,
+    '''	if proxyStr == "" && cfg != nil {
+		proxyStr = strings.TrimSpace(cfg.ProxyURL)
+	}
+
+	var baseTransport *http.Transport
+''',
+    '''	if proxyStr == "" && cfg != nil {
+		proxyStr = strings.TrimSpace(cfg.ProxyURL)
+	}
+	resolution := proxyutil.ResolveEffectiveProxy(proxyStr)
+	proxyStr = resolution.Effective
+
+	var baseTransport *http.Transport
+''',
+    'proxyStr = resolution.Effective',
+)
+replace_once(
+    pluginhost_http_bridge,
+    'builtTransport, _, errBuild := proxyutil.BuildHTTPTransport(proxyStr)',
+    'builtTransport, _, errBuild := proxyutil.BuildHTTPTransportWithoutRuntimeOverride(proxyStr)',
+    'BuildHTTPTransportWithoutRuntimeOverride(proxyStr)',
+)
+replace_go_function(
+    pluginhost_http_bridge,
+    'func resolveProxyForRequest(',
+    '''func resolveProxyForRequest(r *http.Request, auth *coreauth.Auth, cfg *config.Config, proxyFunc func(*http.Request) (*url.URL, error)) (*url.URL, error) {
+	rawProxyURL := ""
+	if auth != nil {
+		rawProxyURL = strings.TrimSpace(auth.ProxyURL)
+	}
+	if rawProxyURL == "" && cfg != nil {
+		rawProxyURL = strings.TrimSpace(cfg.ProxyURL)
+	}
+	resolution := proxyutil.ResolveEffectiveProxy(rawProxyURL)
+	if resolution.Effective != "" {
+		setting, errParse := proxyutil.Parse(resolution.Effective)
+		if errParse != nil {
+			return nil, fmt.Errorf("pluginhost: parse effective proxy: %w", errParse)
+		}
+		if setting.Mode == proxyutil.ModeDirect {
+			return nil, nil
+		}
+		if setting.Mode == proxyutil.ModeProxy {
+			return setting.URL, nil
+		}
+	}
+	if proxyFunc != nil && r != nil {
+		return proxyFunc(r)
+	}
+	return nil, nil
+}
+''',
+    'pluginhost: parse effective proxy:',
+)
+
+codex_live_sideband = ROOT / 'internal/client/codex/live/sideband.go'
+replace_once(
+    codex_live_sideband,
+    '''func newSidebandDialer(proxyURL string) *websocket.Dialer {
+	dialer := &websocket.Dialer{Proxy: http.ProxyFromEnvironment}
+	if strings.TrimSpace(proxyURL) == "" {
+''',
+    '''func newSidebandDialer(proxyURL string) *websocket.Dialer {
+	dialer := &websocket.Dialer{Proxy: http.ProxyFromEnvironment}
+	proxyURL = proxyutil.ResolveEffectiveProxy(proxyURL).Effective
+	if proxyURL == "" {
+''',
+    'proxyURL = proxyutil.ResolveEffectiveProxy(proxyURL).Effective',
 )
 
 write(
@@ -6229,6 +7027,8 @@ if result_scheduler_upserts != {'sdk/cliproxy/auth/conductor_cooldown.go': 1}:
 
 format_go_writes([
     'cmd/server/main.go',
+	'internal/cache/bounded_lru.go',
+	'internal/auth/claude/utls_transport.go',
     'internal/api/server.go',
     'internal/api/api_key_policy_middleware_test.go',
     'internal/api/self_query.go',
@@ -6259,6 +7059,7 @@ format_go_writes([
     'internal/client/codex/live/client_secret.go',
 	'internal/client/codex/live/live.go',
 	'internal/client/codex/live/sideband.go',
+	'internal/client/codex/live/runtime_proxy_override_test.go',
     'internal/client/codex/live/websocket.go',
     'internal/client/codex/live/api_key_quota_relay_test.go',
     'internal/api/handlers/management/pro_plugin_quota.go',
@@ -6276,9 +7077,11 @@ format_go_writes([
     'internal/pluginhost/gemini_cli_storage_compat.go',
     'internal/pluginhost/gemini_cli_storage_compat_test.go',
     'internal/pluginhost/gemini_cli_quota_legacy.go',
-    'internal/pluginhost/gemini_cli_quota_legacy_test.go',
-    'internal/pluginhost/pro_quota_provider.go',
-    'internal/pluginhost/pro_quota_provider_test.go',
+	'internal/pluginhost/gemini_cli_quota_legacy_test.go',
+	'internal/pluginhost/http_bridge.go',
+	'internal/pluginhost/pro_quota_provider.go',
+	'internal/pluginhost/pro_quota_provider_test.go',
+	'internal/pluginhost/runtime_proxy_override_test.go',
     'internal/pluginhost/snapshot.go',
     'internal/pluginhost/executor_route.go',
     'internal/pluginhost/adapters_executors.go',
@@ -6296,6 +7099,9 @@ format_go_writes([
     'internal/requestmeta/observer.go',
     'internal/requestmeta/observer_test.go',
     'internal/runtime/executor/helps/logging_helpers.go',
+	'internal/runtime/executor/helps/proxy_helpers.go',
+	'internal/runtime/executor/helps/utls_client.go',
+	'internal/runtime/executor/helps/runtime_proxy_override_test.go',
 	'internal/runtime/executor/helps/quota_settlement_test.go',
 	'internal/runtime/executor/helps/usage_pro_extensions.go',
     'internal/runtime/executor/helps/response_observer_test.go',
@@ -6315,6 +7121,8 @@ format_go_writes([
     'internal/runtime/executor/codex_websockets_executor_test.go',
     'internal/runtime/executor/xai_websockets_executor_test.go',
     'internal/runtime/executor/codex_websockets_stream.go',
+	'internal/runtime/executor/antigravity_executor.go',
+	'internal/runtime/executor/antigravity_runtime_proxy_test.go',
     'internal/pro/oauthpolicy/config/config.go',
     'internal/pro/oauthpolicy/config/config_test.go',
     'internal/pro/oauthpolicy/policy/engine.go',
@@ -6413,6 +7221,7 @@ format_go_writes([
     'internal/pro/proxypool/pool/pool.go',
     'internal/pro/proxypool/pool/pool_test.go',
     'internal/pro/proxypool/socks5/server.go',
+	'internal/pro/proxypool/socks5/server_test.go',
     'internal/runtime/executor/xai_executor.go',
     'internal/runtime/executor/xai_executor_execute.go',
     'internal/runtime/executor/xai_executor_stream.go',
@@ -6447,6 +7256,8 @@ format_go_writes([
     'sdk/cliproxy/auth/conductor_execution.go',
     'sdk/cliproxy/auth/conductor_speed_test.go',
     'sdk/cliproxy/auth/codex_retry_after_headers_test.go',
+	'sdk/cliproxy/rtprovider.go',
+	'sdk/cliproxy/runtime_proxy_override_test.go',
     'sdk/cliproxy/auth/home_concurrency.go',
     'sdk/cliproxy/auth/scheduler.go',
     'sdk/cliproxy/auth/types.go',

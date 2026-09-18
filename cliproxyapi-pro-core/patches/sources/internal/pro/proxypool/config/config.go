@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -181,6 +182,7 @@ func (cfg *Config) NormalizeAndValidate() error {
 		return fmt.Errorf("invalid health-check test-url %q", cfg.HealthCheck.TestURL)
 	}
 
+	listenHost, listenPort, _ := net.SplitHostPort(cfg.Listen)
 	listenHostPort := canonicalHostPort(cfg.Listen)
 	seenIDs := make(map[string]struct{}, len(cfg.Nodes))
 	seenURLs := make(map[string]struct{}, len(cfg.Nodes))
@@ -212,7 +214,7 @@ func (cfg *Config) NormalizeAndValidate() error {
 			return fmt.Errorf("duplicate proxy node url at nodes[%d]", index)
 		}
 		seenURLs[canonicalURL(node.URL)] = struct{}{}
-		if canonicalHostPort(parsed.Host) == listenHostPort {
+		if canonicalHostPort(parsed.Host) == listenHostPort || proxyURLTargetsObviousLoopback(parsed, listenHost, listenPort) {
 			return fmt.Errorf("nodes[%d].url points to the local proxy pool listener", index)
 		}
 		if node.Weight <= 0 {
@@ -226,6 +228,53 @@ func (cfg *Config) NormalizeAndValidate() error {
 		return cfg.Nodes[i].Order < cfg.Nodes[j].Order
 	})
 	return nil
+}
+
+func proxyURLTargetsObviousLoopback(parsed *url.URL, listenHost, listenPort string) bool {
+	if parsed == nil || parsed.Port() != listenPort {
+		return false
+	}
+	listenerHost := strings.TrimSpace(listenHost)
+	listenerIP := net.ParseIP(listenerHost)
+	if !strings.EqualFold(listenerHost, "localhost") &&
+		(listenerIP == nil || (!listenerIP.IsLoopback() && !listenerIP.IsUnspecified())) {
+		return false
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	return strings.EqualFold(host, "localhost") || isLoopbackIP(host)
+}
+
+func isLoopbackIP(host string) bool {
+	ip := net.ParseIP(strings.TrimSpace(host))
+	return ip != nil && ip.IsLoopback()
+}
+
+// ResolvesToLocalListener performs the authoritative runtime recursion
+// check. DNS aliases are resolved immediately before dialing so a hostname or
+// a later DNS change cannot turn a pool node into the pool's own listener.
+func ResolvesToLocalListener(ctx context.Context, rawProxyURL, listen string) (bool, error) {
+	parsed, errParse := url.Parse(strings.TrimSpace(rawProxyURL))
+	if errParse != nil || parsed.Host == "" {
+		return false, errParse
+	}
+	listenHost, listenPort, errListen := net.SplitHostPort(strings.TrimSpace(listen))
+	if errListen != nil || parsed.Port() != listenPort {
+		return false, errListen
+	}
+	if canonicalHostPort(parsed.Host) == canonicalHostPort(listen) ||
+		proxyURLTargetsObviousLoopback(parsed, listenHost, listenPort) {
+		return true, nil
+	}
+	addresses, errLookup := net.DefaultResolver.LookupIPAddr(ctx, strings.TrimSpace(parsed.Hostname()))
+	if errLookup != nil {
+		return false, errLookup
+	}
+	for _, address := range addresses {
+		if address.IP != nil && address.IP.IsLoopback() {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func canonicalURL(raw string) string {

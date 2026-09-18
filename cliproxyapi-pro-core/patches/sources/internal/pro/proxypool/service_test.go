@@ -142,3 +142,38 @@ func TestUpdateConfigReportsPersistedRollbackFailure(t *testing.T) {
 		t.Fatalf("Status().LastError = %q", status.LastError)
 	}
 }
+
+func TestDisableImmediatelyReenableSameListener(t *testing.T) {
+	store := &serviceTestStore{items: map[string]settings.Item{}}
+	service, err := New(context.Background(), store, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listen := listener.Addr().String()
+	_ = listener.Close()
+
+	enabled := proxyconfig.Default()
+	enabled.Enabled = true
+	enabled.Listen = listen
+	enabled.HealthCheck.Enabled = false
+	disabled := enabled
+	disabled.Enabled = false
+
+	for iteration := 0; iteration < 200; iteration++ {
+		if err = service.UpdateConfig(context.Background(), enabled); err != nil {
+			t.Fatalf("enable iteration %d: %v", iteration, err)
+		}
+		if err = service.UpdateConfig(context.Background(), disabled); err != nil {
+			t.Fatalf("disable iteration %d: %v", iteration, err)
+		}
+		if err = service.UpdateConfig(context.Background(), enabled); err != nil {
+			t.Fatalf("reenable iteration %d: %v", iteration, err)
+		}
+	}
+}

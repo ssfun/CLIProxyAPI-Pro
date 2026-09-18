@@ -164,6 +164,12 @@ func (s *Service) UpdateConfig(ctx context.Context, cfg proxyconfig.Config) erro
 			}
 		} else {
 			oldEngine := s.engine
+			if s.override != nil {
+				s.override.Clear()
+			}
+			if oldEngine != nil {
+				oldEngine.StopAccepting()
+			}
 			s.engine = proxyengine.New()
 			if oldEngine != nil {
 				go oldEngine.Close()
@@ -208,6 +214,10 @@ func (s *Service) applyImportedSetting(_ context.Context, item settings.Item) er
 		}
 	} else if s.engine != nil {
 		oldEngine := s.engine
+		if s.override != nil {
+			s.override.Clear()
+		}
+		oldEngine.StopAccepting()
 		s.engine = proxyengine.New()
 		go oldEngine.Close()
 	}

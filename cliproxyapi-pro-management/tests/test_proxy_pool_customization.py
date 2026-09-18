@@ -51,6 +51,7 @@ class ProxyPoolCustomizationTest(unittest.TestCase):
         self.assertIn('proxy_pool.test_url', features)
         self.assertIn('proxy_pool.order', features)
         self.assertIn('parseLoopbackListener', source)
+        self.assertIn('isLoopbackHostname', source)
         self.assertIn('proxy_pool.validation_recursive_url', source)
         self.assertIn('maskProxyCredentials(item.proxyUrl)', features)
 

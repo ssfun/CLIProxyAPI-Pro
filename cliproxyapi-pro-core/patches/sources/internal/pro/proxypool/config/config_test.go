@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,29 @@ nodes:
 `))
 	if err == nil || !strings.Contains(err.Error(), "local proxy pool listener") {
 		t.Fatalf("Parse() error = %v, want proxy loop rejection", err)
+	}
+}
+
+func TestParseRejectsProxyLoopAliases(t *testing.T) {
+	for _, proxyURL := range []string{
+		"socks5://localhost:8318",
+		"socks5://127.0.0.2:8318",
+		"socks5://[::1]:8318",
+	} {
+		_, err := Parse([]byte("listen: 127.0.0.1:8318\nnodes:\n  - id: loop\n    url: " + proxyURL + "\n    enabled: true\n"))
+		if err == nil || !strings.Contains(err.Error(), "local proxy pool listener") {
+			t.Fatalf("Parse(%q) error = %v", proxyURL, err)
+		}
+	}
+}
+
+func TestResolvesLocalhostToLoopbackListener(t *testing.T) {
+	recursive, err := ResolvesToLocalListener(context.Background(), "socks5://localhost:8318", "127.0.0.1:8318")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !recursive {
+		t.Fatal("localhost proxy was not recognized as recursive")
 	}
 }
 

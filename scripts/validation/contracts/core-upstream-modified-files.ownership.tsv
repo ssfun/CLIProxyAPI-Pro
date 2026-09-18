@@ -1,4 +1,4 @@
-# Latest-only ownership review for Core v7.3.6.
+# Latest-only ownership review for Core v7.3.7.
 # Categories describe the whole Pro delta for each modified upstream file.
 # The current roadmap keeps host business-state extensions in host patches;
 # this review does not assume or require a plugin migration.
@@ -20,6 +20,8 @@ internal/api/server_reload.go	must-remain-host-patch	api-key-policy	retain-atomi
 internal/api/server_routes.go	must-remain-host-patch	final-response-and-routing	retain-root-route-api-key-policy-and-final-model-filtering
 internal/api/server_test.go	must-remain-host-patch	management-contracts	retain-mixed-host-management-regressions-while-moving-usage-contracts-with-plugin
 internal/auth/claude/identity.go	upstream-generic-fix	claude-auth-concurrency	upstream-lock-boolean-metadata-reads
+internal/auth/claude/utls_transport.go	must-remain-host-patch	final-outbound-transport	retain-runtime-proxy-generation-in-claude-control-plane
+internal/cache/bounded_lru.go	upstream-generic-fix	transport-cache	upstream-generic-purge-with-eviction-callbacks
 internal/client/codex/live/client_secret.go	must-remain-host-patch	api-key-policy	retain-realtime-issuer-policy-snapshot
 internal/client/codex/live/live.go	must-remain-host-patch	api-key-policy	retain-realtime-model-policy-and-quota-admission
 internal/client/codex/live/sideband.go	must-remain-host-patch	api-key-policy	retain-webrtc-quota-settlement
@@ -34,10 +36,12 @@ internal/pluginhost/auth_provider.go	generic-host-hook	plugin-auth	upstream-disa
 internal/pluginhost/executor_route.go	generic-host-hook	api-key-policy	upstream-plugin-executor-provider-introspection
 internal/pluginhost/host_callbacks.go	upstream-generic-fix	plugin-stream-lifecycle	upstream-stream-close-after-rpc-response
 internal/pluginhost/host_model_stream_callbacks.go	upstream-generic-fix	plugin-stream-lifecycle	upstream-stream-close-after-rpc-response
+internal/pluginhost/http_bridge.go	must-remain-host-patch	final-outbound-transport	retain-effective-proxy-resolution-for-plugin-wire-profiles
 internal/pluginhost/snapshot.go	generic-host-hook	plugin-quota	upstream-quota-capability-snapshot
 internal/pluginstore/auth.go	upstream-generic-fix	plugin-store-auth	upstream-private-github-release-auth
 internal/redisqueue/plugin.go	must-remain-host-patch	observability	retain-usage-enrichment-and-monitoring-controls
 internal/redisqueue/queue.go	must-remain-host-patch	observability	independent-bounded-persistence-sink-and-drop-metrics
+internal/runtime/executor/antigravity_executor.go	must-remain-host-patch	final-outbound-transport	retain-runtime-proxy-generation-in-antigravity-cache
 internal/runtime/executor/claude_executor_auth.go	upstream-generic-fix	claude-auth-concurrency	upstream-lock-setup-token-metadata-reads
 internal/runtime/executor/claude_executor_execute.go	upstream-generic-fix	usage-accounting	upstream-preserve-claude-failed-usage
 internal/runtime/executor/claude_executor_stream.go	upstream-generic-fix	usage-accounting	upstream-preserve-claude-stream-failed-usage
@@ -50,7 +54,9 @@ internal/runtime/executor/codex_websockets_execute.go	upstream-generic-fix	codex
 internal/runtime/executor/codex_websockets_executor_test.go	upstream-generic-fix	codex-websocket-tests	align-retry-after-and-wait-for-upload-before-terminal-response
 internal/runtime/executor/codex_websockets_stream.go	upstream-generic-fix	codex-rate-limit-retry	upstream-forward-standard-retry-after-through-websocket-stream
 internal/runtime/executor/helps/logging_helpers.go	generic-host-hook	request-observer	upstream-final-response-observer
+internal/runtime/executor/helps/proxy_helpers.go	must-remain-host-patch	final-outbound-transport	retain-effective-proxy-resolution-before-empty-checks
 internal/runtime/executor/helps/usage_helpers.go	must-remain-host-patch	api-key-policy	retain-synchronous-quota-settlement-while-upstreaming-usage-fixes
+internal/runtime/executor/helps/utls_client.go	must-remain-host-patch	final-outbound-transport	retain-runtime-proxy-generation-in-utls-caches
 internal/runtime/executor/openai_compat_executor.go	upstream-generic-fix	usage-accounting	upstream-terminal-usage-publication-correctness
 internal/runtime/executor/xai_executor.go	must-remain-host-patch	final-outbound-transport	retain-xai-request-identity-bridge
 internal/runtime/executor/xai_executor_execute.go	generic-host-hook	request-observer	upstream-built-in-executor-response-observer
@@ -84,6 +90,7 @@ sdk/cliproxy/auth/scheduler.go	must-remain-host-patch	scheduler-runtime-state	re
 sdk/cliproxy/auth/selector.go	must-remain-host-patch	scheduler-runtime-state	retain-cursor-selection-semantics
 sdk/cliproxy/auth/types.go	must-remain-host-patch	scheduler-runtime-state	retain-auth-runtime-counters
 sdk/cliproxy/builder.go	must-remain-host-patch	pro-composition	retain-mixed-pro-service-composition-until-every-static-module-has-plugin-parity
+sdk/cliproxy/rtprovider.go	must-remain-host-patch	final-outbound-transport	retain-runtime-proxy-generation-in-default-provider-cache
 sdk/cliproxy/service.go	upstream-generic-fix	model-registration	upstream-generation-fenced-model-registration
 sdk/cliproxy/service_auth.go	upstream-generic-fix	model-registration	upstream-generation-fenced-auth-registration
 sdk/cliproxy/service_auth_sync_test.go	upstream-generic-fix	model-registration-tests	remove-once-upstream-independent-wait-test-is-order-independent-and-drains-workers

@@ -43,13 +43,18 @@ type Server struct {
 	listener net.Listener
 	dial     DialFunc
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-	conns  sync.Map
+	ctx               context.Context
+	cancel            context.CancelFunc
+	startOnce         sync.Once
+	stopAcceptingOnce sync.Once
+	closeOnce         sync.Once
+	wg                sync.WaitGroup
+	conns             sync.Map
 }
 
-func Start(listener net.Listener, dial DialFunc) (*Server, error) {
+// New constructs a SOCKS5 server without starting its accept loop. Callers can
+// publish all state used by dial before Start makes the listener observable.
+func New(listener net.Listener, dial DialFunc) (*Server, error) {
 	if listener == nil {
 		return nil, fmt.Errorf("SOCKS5 listener is nil")
 	}
@@ -57,10 +62,20 @@ func Start(listener net.Listener, dial DialFunc) (*Server, error) {
 		return nil, fmt.Errorf("SOCKS5 dial function is nil")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	server := &Server{listener: listener, dial: dial, ctx: ctx, cancel: cancel}
-	server.wg.Add(1)
-	go server.acceptLoop()
-	return server, nil
+	return &Server{listener: listener, dial: dial, ctx: ctx, cancel: cancel}, nil
+}
+
+func (s *Server) Start() {
+	if s == nil {
+		return
+	}
+	s.startOnce.Do(func() {
+		if s.ctx.Err() != nil {
+			return
+		}
+		s.wg.Add(1)
+		go s.acceptLoop()
+	})
 }
 
 func (s *Server) Address() string {
@@ -70,21 +85,34 @@ func (s *Server) Address() string {
 	return s.listener.Addr().String()
 }
 
+// StopAccepting synchronously releases the listening socket while allowing
+// existing tunnels and background shutdown work to be completed separately.
+func (s *Server) StopAccepting() {
+	if s == nil {
+		return
+	}
+	s.stopAcceptingOnce.Do(func() {
+		if s.listener != nil {
+			_ = s.listener.Close()
+		}
+	})
+}
+
 func (s *Server) Close() {
 	if s == nil {
 		return
 	}
-	s.cancel()
-	if s.listener != nil {
-		_ = s.listener.Close()
-	}
-	s.conns.Range(func(key, _ any) bool {
-		if conn, ok := key.(net.Conn); ok {
-			_ = conn.Close()
-		}
-		return true
+	s.closeOnce.Do(func() {
+		s.cancel()
+		s.StopAccepting()
+		s.conns.Range(func(key, _ any) bool {
+			if conn, ok := key.(net.Conn); ok {
+				_ = conn.Close()
+			}
+			return true
+		})
+		s.wg.Wait()
 	})
-	s.wg.Wait()
 }
 
 func (s *Server) acceptLoop() {

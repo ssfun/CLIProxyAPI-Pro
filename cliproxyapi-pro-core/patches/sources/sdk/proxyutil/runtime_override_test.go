@@ -21,8 +21,34 @@ func TestRuntimeProxyOverrideSupportsEmptyBase(t *testing.T) {
 	ClearRuntimeProxyOverride()
 	t.Cleanup(ClearRuntimeProxyOverride)
 	SetRuntimeProxyOverride("", "socks5://127.0.0.1:8318")
-	if got := resolveRuntimeProxyOverride(""); got != "socks5://127.0.0.1:8318" {
-		t.Fatalf("empty base override = %q", got)
+	resolution := ResolveEffectiveProxy("")
+	if resolution.Effective != "socks5://127.0.0.1:8318" || !resolution.Overridden {
+		t.Fatalf("empty base override = %+v", resolution)
+	}
+}
+
+func TestRuntimeProxyOverrideGenerationChangesOnlyWithEffectiveState(t *testing.T) {
+	ClearRuntimeProxyOverride()
+	initial := ResolveEffectiveProxy("").Generation
+	ClearRuntimeProxyOverride()
+	if got := ResolveEffectiveProxy("").Generation; got != initial {
+		t.Fatalf("no-op clear generation = %d, want %d", got, initial)
+	}
+
+	SetRuntimeProxyOverride("", "socks5://127.0.0.1:8318")
+	first := ResolveEffectiveProxy("")
+	if first.Generation <= initial {
+		t.Fatalf("set generation = %d, want > %d", first.Generation, initial)
+	}
+	SetRuntimeProxyOverride("", "socks5://127.0.0.1:8318")
+	if got := ResolveEffectiveProxy("").Generation; got != first.Generation {
+		t.Fatalf("no-op set generation = %d, want %d", got, first.Generation)
+	}
+
+	ClearRuntimeProxyOverride()
+	cleared := ResolveEffectiveProxy("")
+	if cleared.Generation <= first.Generation || cleared.Overridden || cleared.Effective != "" {
+		t.Fatalf("cleared resolution = %+v", cleared)
 	}
 }
 

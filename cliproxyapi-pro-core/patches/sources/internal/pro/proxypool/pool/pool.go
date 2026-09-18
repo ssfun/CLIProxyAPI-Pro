@@ -191,6 +191,13 @@ func (n *Node) MarkCheck(latency time.Duration, err error, threshold int, isolat
 	n.updateSuccess(latency)
 }
 
+// MarkProbe updates health state without changing tunnel connection counters.
+// Manual probes and background checks are observations, not SOCKS connection
+// attempts, so they must not alter successConnects or failedConnects.
+func (n *Node) MarkProbe(latency time.Duration, err error, threshold int, isolationDuration time.Duration) {
+	n.MarkCheck(latency, err, threshold, isolationDuration)
+}
+
 func (n *Node) SetProbeResult(ip, location string, latency time.Duration) {
 	n.mu.Lock()
 	n.lastExitIP = strings.TrimSpace(ip)

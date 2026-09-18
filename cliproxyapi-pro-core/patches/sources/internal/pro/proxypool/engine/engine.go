@@ -96,7 +96,7 @@ func (e *Engine) ApplyConfig(cfg proxyconfig.Config) error {
 			e.setLastError(err)
 			return err
 		}
-		server, errServer := socks5.Start(listener, e.dial)
+		server, errServer := socks5.New(listener, e.dial)
 		if errServer != nil {
 			_ = listener.Close()
 			e.setLastError(errServer)
@@ -109,6 +109,7 @@ func (e *Engine) ApplyConfig(cfg proxyconfig.Config) error {
 		e.cfg = cfg
 		e.lastError = ""
 		e.lastAppliedAt = time.Now().UTC()
+		server.Start()
 		e.mu.Unlock()
 		if oldServer != nil {
 			oldServer.Close()
@@ -128,6 +129,21 @@ func (e *Engine) ApplyConfig(cfg proxyconfig.Config) error {
 		go e.healthLoop()
 	}
 	return nil
+}
+
+// StopAccepting synchronously releases the active listener. Full shutdown can
+// then continue asynchronously without racing a replacement bind on the same
+// address.
+func (e *Engine) StopAccepting() {
+	if e == nil {
+		return
+	}
+	e.mu.RLock()
+	server := e.server
+	e.mu.RUnlock()
+	if server != nil {
+		server.StopAccepting()
+	}
 }
 
 func (e *Engine) Close() {
@@ -279,7 +295,7 @@ func probeProxyURL(ctx context.Context, result ProbeResult, rawProxyURL, rawTest
 	transport.Proxy = nil
 	transport.DisableKeepAlives = true
 	transport.DialContext = func(dialCtx context.Context, network, address string) (net.Conn, error) {
-		return dialNode(dialCtx, rawProxyURL, address)
+		return dialNode(dialCtx, rawProxyURL, address, cfg.Listen)
 	}
 	client := &http.Client{
 		Transport: transport,
@@ -299,7 +315,7 @@ func probeProxyURL(ctx context.Context, result ProbeResult, rawProxyURL, rawTest
 	if errDo != nil {
 		result.Error = errDo.Error()
 		if node != nil {
-			node.MarkFailure(errDo, cfg.HealthCheck.IsolationThreshold, cfg.HealthCheck.IsolationDuration.Duration)
+			node.MarkProbe(time.Duration(result.LatencyMS)*time.Millisecond, errDo, cfg.HealthCheck.IsolationThreshold, cfg.HealthCheck.IsolationDuration.Duration)
 		}
 		return result
 	}
@@ -308,7 +324,7 @@ func probeProxyURL(ctx context.Context, result ProbeResult, rawProxyURL, rawTest
 	if errRead != nil {
 		result.Error = errRead.Error()
 		if node != nil {
-			node.MarkFailure(errRead, cfg.HealthCheck.IsolationThreshold, cfg.HealthCheck.IsolationDuration.Duration)
+			node.MarkProbe(time.Duration(result.LatencyMS)*time.Millisecond, errRead, cfg.HealthCheck.IsolationThreshold, cfg.HealthCheck.IsolationDuration.Duration)
 		}
 		return result
 	}
@@ -316,14 +332,14 @@ func probeProxyURL(ctx context.Context, result ProbeResult, rawProxyURL, rawTest
 		errStatus := fmt.Errorf("probe returned HTTP %d", response.StatusCode)
 		result.Error = errStatus.Error()
 		if node != nil {
-			node.MarkFailure(errStatus, cfg.HealthCheck.IsolationThreshold, cfg.HealthCheck.IsolationDuration.Duration)
+			node.MarkProbe(time.Duration(result.LatencyMS)*time.Millisecond, errStatus, cfg.HealthCheck.IsolationThreshold, cfg.HealthCheck.IsolationDuration.Duration)
 		}
 		return result
 	}
 	decodeProbeBody(body, &result)
 	result.Success = true
 	if node != nil {
-		node.MarkSuccess(time.Duration(result.LatencyMS) * time.Millisecond)
+		node.MarkProbe(time.Duration(result.LatencyMS)*time.Millisecond, nil, cfg.HealthCheck.IsolationThreshold, cfg.HealthCheck.IsolationDuration.Duration)
 		node.SetProbeResult(result.ExitIP, result.Location, time.Duration(result.LatencyMS)*time.Millisecond)
 	}
 	return result
@@ -401,7 +417,7 @@ func (e *Engine) dial(ctx context.Context, target string) (socks5.DialResult, er
 		node.MarkAttempt()
 		dialCtx, cancel := context.WithTimeout(ctx, cfg.DialTimeout.Duration)
 		started := time.Now()
-		conn, errDial := dialNode(dialCtx, node.URL(), target)
+		conn, errDial := dialNode(dialCtx, node.URL(), target, cfg.Listen)
 		cancel()
 		if errDial != nil {
 			node.MarkFailure(errDial, cfg.HealthCheck.IsolationThreshold, cfg.HealthCheck.IsolationDuration.Duration)
@@ -481,7 +497,7 @@ func (e *Engine) runHealthChecks(ctx context.Context) {
 			}
 			checkCtx, cancel := context.WithTimeout(ctx, cfg.HealthCheck.Timeout.Duration)
 			started := time.Now()
-			conn, errDial := dialNode(checkCtx, node.URL(), cfg.HealthCheck.ProbeAddress)
+			conn, errDial := dialNode(checkCtx, node.URL(), cfg.HealthCheck.ProbeAddress, cfg.Listen)
 			cancel()
 			if conn != nil {
 				_ = conn.Close()
@@ -505,10 +521,17 @@ func (e *Engine) setLastError(err error) {
 	e.mu.Unlock()
 }
 
-func dialNode(ctx context.Context, rawProxyURL, target string) (net.Conn, error) {
+func dialNode(ctx context.Context, rawProxyURL, target, listen string) (net.Conn, error) {
 	// A pool node is an explicit internal hop. It must use the configured node
 	// URL as-is; applying the process-wide takeover here would turn a node that
 	// equals the original global proxy into a dial back to the pool listener.
+	recursive, errResolve := proxyconfig.ResolvesToLocalListener(ctx, rawProxyURL, listen)
+	if errResolve != nil {
+		return nil, fmt.Errorf("resolve proxy node for recursion check: %w", errResolve)
+	}
+	if recursive {
+		return nil, fmt.Errorf("proxy node resolves to the local proxy pool listener")
+	}
 	dialer, mode, errBuild := proxyutil.BuildDialerWithoutRuntimeOverride(rawProxyURL)
 	if errBuild != nil {
 		return nil, errBuild

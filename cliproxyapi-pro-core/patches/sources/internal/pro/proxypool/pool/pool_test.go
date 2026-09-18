@@ -129,6 +129,18 @@ func TestSnapshotKeepsConnectionCountersConsistentAfterResetRace(t *testing.T) {
 	}
 }
 
+func TestMarkProbeDoesNotChangeTunnelCounters(t *testing.T) {
+	node := New(testConfig("round-robin")).Node("a")
+	node.MarkProbe(25*time.Millisecond, nil, 3, time.Minute)
+	snapshot := node.Snapshot()
+	if snapshot.State != HealthHealthy || snapshot.LastCheck.IsZero() || snapshot.LastSuccess.IsZero() {
+		t.Fatalf("probe did not update health: %+v", snapshot)
+	}
+	if snapshot.TotalConnects != 0 || snapshot.SuccessConnects != 0 || snapshot.FailedConnects != 0 {
+		t.Fatalf("probe changed tunnel counters: %+v", snapshot)
+	}
+}
+
 func TestRedactURL(t *testing.T) {
 	got := RedactURL("socks5://alice:secret@proxy.example:1080")
 	if got != "socks5://alice:***@proxy.example:1080" {
