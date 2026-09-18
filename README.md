@@ -267,11 +267,12 @@ PRO_TAG="${UPSTREAM_TAG}-pro"
 docker build \
   --build-arg CLIPROXY_VERSION="${UPSTREAM_TAG}" \
   --build-arg CLIPROXY_BUILD_VERSION="${PRO_TAG}" \
+  --build-arg PRO_MANAGEMENT_VERSION="${PRO_TAG}" \
   -t "cliproxyapi-pro:${PRO_TAG}" \
   ./cliproxyapi-pro-core
 ```
 
-Dockerfile 的 builder 和 runtime 基础镜像使用不可变 digest；Debian 软件仓库和外部工具链仍是滚动依赖，因此项目不承诺跨时间逐字节一致的完整镜像。本地需要确定的 source binary 时，还应传入不可变 `CLIPROXY_COMMIT` 和固定 `SOURCE_DATE_EPOCH`；release workflow 会从不可变输入提交推导该时间，并规范化全部 Core 归档。
+Dockerfile 的 builder 和 runtime 基础镜像使用不可变 digest；Debian 软件仓库和外部工具链仍是滚动依赖，因此项目不承诺跨时间逐字节一致的完整镜像。本地需要确定的 source binary 时，还应传入不可变 `CLIPROXY_COMMIT`、固定 `SOURCE_DATE_EPOCH`，并可通过 `PRO_MANAGEMENT_DIGEST=sha256:...` 校验固定版本的 Management 资产；release workflow 会从不可变输入提交推导构建时间，并规范化全部 Core 归档。
 
 ### 应用 management 定制层
 

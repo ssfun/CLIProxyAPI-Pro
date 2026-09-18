@@ -294,6 +294,7 @@ Build a specific upstream release while writing the Pro runtime version:
 ```bash
 docker build \
   --build-arg CLIPROXY_VERSION=vX.Y.Z \
+  --build-arg PRO_MANAGEMENT_VERSION=vX.Y.Z-pro \
   --build-arg CLIPROXY_BUILD_VERSION=vX.Y.Z-pro \
   -t cliproxyapi-pro:vX.Y.Z-pro \
   ./cliproxyapi-pro-core
@@ -307,6 +308,8 @@ Build args:
 - `CLIPROXY_VERSION` — upstream release tag. If empty, the Dockerfile resolves the latest release.
 - `CLIPROXY_COMMIT` — optional upstream commit SHA; when set, source is downloaded from that commit while `CLIPROXY_VERSION` remains the version label.
 - `CLIPROXY_BUILD_VERSION` — optional runtime version. If empty, it uses the upstream version resolved from `CLIPROXY_VERSION`.
+- `PRO_MANAGEMENT_VERSION` — optional Pro release tag used to download `management.html` from an immutable release instead of floating `latest`.
+- `PRO_MANAGEMENT_DIGEST` — optional `sha256:<hex>` digest used to verify the downloaded `management.html`.
 - `PRO_MANAGEMENT_REPO` — repository used by the source Docker build to obtain the Pro management asset packaged into the image; defaults to `ssfun/CLIProxyAPI-Pro`.
 - `SOURCE_DATE_EPOCH` — optional Unix timestamp used for the embedded build date. Set it together with an immutable upstream commit for a deterministic source binary.
 - `GITHUB_TOKEN` — optional token for GitHub API requests.

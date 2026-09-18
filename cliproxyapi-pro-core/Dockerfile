@@ -10,12 +10,7 @@ WORKDIR /src/CLIProxyAPI
 ARG CLIPROXY_REPO=router-for-me/CLIProxyAPI
 ARG CLIPROXY_VERSION=""
 ARG CLIPROXY_COMMIT=""
-ARG CLIPROXY_BUILD_VERSION=""
-ARG PRO_MANAGEMENT_REPO=ssfun/CLIProxyAPI-Pro
-ARG SOURCE_DATE_EPOCH=""
 ARG GITHUB_TOKEN=""
-ARG TARGETOS
-ARG TARGETARCH
 
 RUN set -eux; \
     auth_header=""; \
@@ -33,23 +28,45 @@ RUN set -eux; \
     curl -fsSL "https://github.com/${CLIPROXY_REPO}/archive/${source_ref}.tar.gz" -o /tmp/cliproxy.tar.gz; \
     tar -xzf /tmp/cliproxy.tar.gz --strip-components=1 -C /src/CLIProxyAPI; \
     rm /tmp/cliproxy.tar.gz; \
+    echo "$CLIPROXY_VERSION" > /tmp/cliproxy-version
+
+ARG PRO_MANAGEMENT_REPO=ssfun/CLIProxyAPI-Pro
+ARG PRO_MANAGEMENT_VERSION=""
+ARG PRO_MANAGEMENT_DIGEST=""
+
+RUN set -eux; \
+    auth_header=""; \
+    if [ -n "$GITHUB_TOKEN" ]; then auth_header="Authorization: Bearer $GITHUB_TOKEN"; fi; \
+    management_release_endpoint="latest"; \
+    if [ -n "$PRO_MANAGEMENT_VERSION" ]; then \
+      management_release_endpoint="tags/${PRO_MANAGEMENT_VERSION}"; \
+    fi; \
     if [ -n "$auth_header" ]; then \
-      management_asset_api="$(curl -fsSL -H "$auth_header" "https://api.github.com/repos/${PRO_MANAGEMENT_REPO}/releases/latest" | jq -er '[.assets[] | select(.name == "management.html") | .url][0]')"; \
+      management_asset_api="$(curl -fsSL -H "$auth_header" "https://api.github.com/repos/${PRO_MANAGEMENT_REPO}/releases/${management_release_endpoint}" | jq -er '[.assets[] | select(.name == "management.html") | .url][0]')"; \
       curl -fsSL -H "$auth_header" -H "Accept: application/octet-stream" "$management_asset_api" -o /tmp/pro-management.html; \
     else \
-      management_asset_api="$(curl -fsSL "https://api.github.com/repos/${PRO_MANAGEMENT_REPO}/releases/latest" | jq -er '[.assets[] | select(.name == "management.html") | .url][0]')"; \
+      management_asset_api="$(curl -fsSL "https://api.github.com/repos/${PRO_MANAGEMENT_REPO}/releases/${management_release_endpoint}" | jq -er '[.assets[] | select(.name == "management.html") | .url][0]')"; \
       curl -fsSL -H "Accept: application/octet-stream" "$management_asset_api" -o /tmp/pro-management.html; \
     fi; \
     test -s /tmp/pro-management.html; \
-    echo "$CLIPROXY_VERSION" > /tmp/cliproxy-version
+    if [ -n "$PRO_MANAGEMENT_DIGEST" ]; then \
+      test "${PRO_MANAGEMENT_DIGEST#sha256:}" != "$PRO_MANAGEMENT_DIGEST"; \
+      echo "${PRO_MANAGEMENT_DIGEST#sha256:}  /tmp/pro-management.html" | sha256sum -c -; \
+    fi
 
 COPY cliproxyapi-pro-core/embeddedusage /tmp/embeddedusage
 COPY cliproxyapi-pro-core/patches /tmp/patches
 
 RUN python3 /tmp/patches/apply_upstream_patches.py
 
+RUN go mod tidy
+
+ARG CLIPROXY_BUILD_VERSION=""
+ARG SOURCE_DATE_EPOCH=""
+ARG TARGETOS
+ARG TARGETARCH
+
 RUN set -eux; \
-    go mod tidy; \
     CLIPROXY_SOURCE_VERSION="$(cat /tmp/cliproxy-version)"; \
     if [ -z "$CLIPROXY_BUILD_VERSION" ]; then CLIPROXY_BUILD_VERSION="$CLIPROXY_SOURCE_VERSION"; fi; \
     if [ -n "$SOURCE_DATE_EPOCH" ]; then \

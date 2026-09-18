@@ -50,6 +50,19 @@ class GoTestBaselineComparisonTest(unittest.TestCase):
             )
             self.assertEqual(1, COMPARE.compare(baseline, candidate))
 
+    def test_unreliable_baseline_never_allows_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            baseline = root / "baseline.jsonl"
+            candidate = root / "candidate.jsonl"
+            command_failure = {
+                "Action": "fail",
+                "Package": "[command:patch-relevant-upstream]",
+            }
+            write_events(baseline, [command_failure])
+            write_events(candidate, [command_failure])
+            self.assertEqual(2, COMPARE.compare(baseline, candidate))
+
 
 if __name__ == "__main__":
     unittest.main()

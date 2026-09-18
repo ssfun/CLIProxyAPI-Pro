@@ -250,11 +250,12 @@ PRO_TAG="${UPSTREAM_TAG}-pro"
 docker build \
   --build-arg CLIPROXY_VERSION="${UPSTREAM_TAG}" \
   --build-arg CLIPROXY_BUILD_VERSION="${PRO_TAG}" \
+  --build-arg PRO_MANAGEMENT_VERSION="${PRO_TAG}" \
   -t "cliproxyapi-pro:${PRO_TAG}" \
   ./cliproxyapi-pro-core
 ```
 
-The Dockerfiles pin builder and runtime base images by immutable digest. Debian package repositories and external toolchains remain rolling dependencies, so the project does not claim a cross-time byte-for-byte guarantee for complete images. For a deterministic local source binary, also pass an immutable `CLIPROXY_COMMIT` and a fixed `SOURCE_DATE_EPOCH`; release workflows derive that epoch from immutable source commits and normalize all core archives.
+The Dockerfiles pin builder and runtime base images by immutable digest. Debian package repositories and external toolchains remain rolling dependencies, so the project does not claim a cross-time byte-for-byte guarantee for complete images. For a deterministic local source binary, also pass an immutable `CLIPROXY_COMMIT`, a fixed `SOURCE_DATE_EPOCH`, and optionally `PRO_MANAGEMENT_DIGEST=sha256:...` to verify the pinned Management asset; release workflows derive the build time from immutable source commits and normalize all core archives.
 
 ### Apply the management customization layer
 

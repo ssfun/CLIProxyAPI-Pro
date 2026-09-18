@@ -8,14 +8,15 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:
-  group: validation-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: validation-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   resolve-upstream:
@@ -29,17 +30,20 @@ jobs:
       management_repo: ${{ steps.resolve.outputs.management_repo }}
       management_tag: ${{ steps.resolve.outputs.management_tag }}
       management_sha: ${{ steps.resolve.outputs.management_sha }}
+      pro_management_release_tag: ${{ steps.resolve.outputs.pro_management_release_tag }}
+      pro_management_asset_digest: ${{ steps.resolve.outputs.pro_management_asset_digest }}
 
     steps:
       - name: Checkout customizations
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Resolve upstream versions
+      - name: Resolve upstream versions and source-image inputs
         id: resolve
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CORE_UPSTREAM_REPO: router-for-me/CLIProxyAPI
           MANAGEMENT_UPSTREAM_REPO: router-for-me/Cli-Proxy-API-Management-Center
+          CURRENT_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           core_tag="$(gh api "repos/${CORE_UPSTREAM_REPO}/releases/latest" --jq '.tag_name')"
@@ -48,6 +52,14 @@ jobs:
           core_commit_date="$(gh api "repos/${CORE_UPSTREAM_REPO}/commits/${core_sha}" --jq '.commit.committer.date')"
           core_source_date_epoch="$(date -u -d "${core_commit_date}" +%s)"
           management_sha="$(gh api "repos/${MANAGEMENT_UPSTREAM_REPO}/commits/${management_tag}" --jq '.sha')"
+          pro_release="$(gh api "repos/${CURRENT_REPO}/releases/latest")"
+          pro_management_release_tag="$(jq -r '.tag_name' <<<"${pro_release}")"
+          pro_management_asset_digest="$(
+            jq -r '[.assets[] | select(.name == "management.html") | .digest // ""][0] // ""' +              <<<"${pro_release}"
+          )"
+
+          test -n "${pro_management_release_tag}"
+          test "${pro_management_release_tag}" != "null"
 
           echo "core_repo=${CORE_UPSTREAM_REPO}" >> "${GITHUB_OUTPUT}"
           echo "core_tag=${core_tag}" >> "${GITHUB_OUTPUT}"
@@ -56,6 +68,171 @@ jobs:
           echo "management_repo=${MANAGEMENT_UPSTREAM_REPO}" >> "${GITHUB_OUTPUT}"
           echo "management_tag=${management_tag}" >> "${GITHUB_OUTPUT}"
           echo "management_sha=${management_sha}" >> "${GITHUB_OUTPUT}"
+          echo "pro_management_release_tag=${pro_management_release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "pro_management_asset_digest=${pro_management_asset_digest}" >> "${GITHUB_OUTPUT}"
+
+  classify-changes:
+    needs: resolve-upstream
+    runs-on: ubuntu-latest
+
+    outputs:
+      core: ${{ steps.classify.outputs.core }}
+      management: ${{ steps.classify.outputs.management }}
+      source_image: ${{ steps.classify.outputs.source_image }}
+      reason: ${{ steps.classify.outputs.reason }}
+
+    steps:
+      - name: Checkout customizations with history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Locate previous successful validation state
+        id: previous
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          echo "run_id=" >> "${GITHUB_OUTPUT}"
+          mkdir -p previous-validation
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            exit 0
+          fi
+
+          runs_file="${RUNNER_TEMP}/successful-validation-runs.json"
+          if ! gh api +            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?status=success&per_page=50" +            > "${runs_file}"; then
+            echo "NOTICE: could not query prior validation runs; running full validation"
+            exit 0
+          fi
+
+          candidate_ids_file="${RUNNER_TEMP}/candidate-validation-runs.txt"
+          : > "${candidate_ids_file}"
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            jq -r --argjson pr "${PR_NUMBER}" '
+              .workflow_runs[]
+              | select(.event == "pull_request")
+              | select(any(.pull_requests[]?; .number == $pr))
+              | .id
+            ' "${runs_file}" >> "${candidate_ids_file}"
+            jq -r '
+              .workflow_runs[]
+              | select(.event == "push" and .head_branch == "main")
+              | .id
+            ' "${runs_file}" >> "${candidate_ids_file}"
+          else
+            jq -r --arg branch "${REF_NAME}" '
+              .workflow_runs[]
+              | select(.event == "push" and .head_branch == $branch)
+              | .id
+            ' "${runs_file}" >> "${candidate_ids_file}"
+          fi
+
+          while IFS= read -r run_id; do
+            [ -n "${run_id}" ] || continue
+            artifact_id="$(
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" +                --jq '.artifacts[] | select(.name == "validation-state" and (.expired | not)) | .id' +                2>/dev/null | head -n 1 || true
+            )"
+            if [ -n "${artifact_id}" ]; then
+              if gh run download "${run_id}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --name validation-state \
+                --dir previous-validation >/dev/null 2>&1 && \
+                 [ -f previous-validation/validation-state.json ]; then
+                echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+                exit 0
+              fi
+              rm -f previous-validation/validation-state.json
+            fi
+          done < "${candidate_ids_file}"
+
+      - name: Classify cumulative changes
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+          CORE_SHA: ${{ needs.resolve-upstream.outputs.core_sha }}
+          MANAGEMENT_SHA: ${{ needs.resolve-upstream.outputs.management_sha }}
+          PRO_MANAGEMENT_RELEASE_TAG: ${{ needs.resolve-upstream.outputs.pro_management_release_tag }}
+          PRO_MANAGEMENT_ASSET_DIGEST: ${{ needs.resolve-upstream.outputs.pro_management_asset_digest }}
+        run: |
+          set -euo pipefail
+          state_file="previous-validation/validation-state.json"
+          paths_file="${RUNNER_TEMP}/validation-changed-paths.txt"
+          : > "${paths_file}"
+          force_all=false
+          core_upstream_changed=false
+          management_upstream_changed=false
+          image_input_changed=false
+
+          if [ ! -f "${state_file}" ]; then
+            force_all=true
+          elif ! jq -e '
+            (.head_sha | type == "string")
+            and (.core_sha | type == "string")
+            and (.management_sha | type == "string")
+            and (.pro_management_release_tag | type == "string")
+            and (.pro_management_asset_digest | type == "string")
+          ' "${state_file}" >/dev/null; then
+            force_all=true
+          else
+            previous_core_sha="$(jq -r '.core_sha' "${state_file}")"
+            previous_management_sha="$(jq -r '.management_sha' "${state_file}")"
+            previous_pro_management_release_tag="$(jq -r '.pro_management_release_tag' "${state_file}")"
+            previous_pro_management_asset_digest="$(jq -r '.pro_management_asset_digest' "${state_file}")"
+            [ "${previous_core_sha}" = "${CORE_SHA}" ] || core_upstream_changed=true
+            [ "${previous_management_sha}" = "${MANAGEMENT_SHA}" ] || management_upstream_changed=true
+            if [ "${previous_pro_management_release_tag}" != "${PRO_MANAGEMENT_RELEASE_TAG}" ] || +               [ "${previous_pro_management_asset_digest}" != "${PRO_MANAGEMENT_ASSET_DIGEST}" ]; then
+              image_input_changed=true
+            fi
+          fi
+
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+              force_all=true
+            else
+              git diff --name-only --diff-filter=ACDMRTUXB "${BASE_SHA}...${HEAD_SHA}" > "${paths_file}"
+            fi
+          elif [ "${EVENT_NAME}" = "push" ] && [ "${force_all}" = "false" ]; then
+            previous_head_sha="$(jq -r '.head_sha' "${state_file}")"
+            if git cat-file -e "${previous_head_sha}^{commit}" 2>/dev/null && +               git merge-base --is-ancestor "${previous_head_sha}" "${HEAD_SHA}"; then
+              git diff --name-only --diff-filter=ACDMRTUXB +                "${previous_head_sha}..${HEAD_SHA}" > "${paths_file}"
+            else
+              force_all=true
+            fi
+          else
+            force_all=true
+          fi
+
+          classifier_args=(
+            scripts/validation/classify_validation_changes.py
+            --paths-file "${paths_file}"
+          )
+          [ "${force_all}" = "false" ] || classifier_args+=(--force-all)
+          [ "${core_upstream_changed}" = "false" ] || classifier_args+=(--core-upstream-changed)
+          [ "${management_upstream_changed}" = "false" ] || classifier_args+=(--management-upstream-changed)
+          [ "${image_input_changed}" = "false" ] || classifier_args+=(--image-input-changed)
+          decision="$(python3 "${classifier_args[@]}")"
+
+          echo "core=$(jq -r '.core' <<<"${decision}")" >> "${GITHUB_OUTPUT}"
+          echo "management=$(jq -r '.management' <<<"${decision}")" >> "${GITHUB_OUTPUT}"
+          echo "source_image=$(jq -r '.source_image' <<<"${decision}")" >> "${GITHUB_OUTPUT}"
+          echo "reason=$(jq -r '.reason' <<<"${decision}")" >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "## Validation routing"
+            echo
+            echo "- Reason: $(jq -r '.reason' <<<"${decision}")"
+            echo "- Core: $(jq -r '.core' <<<"${decision}")"
+            echo "- Management: $(jq -r '.management' <<<"${decision}")"
+            echo "- Source image: $(jq -r '.source_image' <<<"${decision}")"
+            echo
+            echo "Changed paths:"
+            sed 's/^/- `/; s/$/`/' "${paths_file}"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
   repo-tests:
     runs-on: ubuntu-latest
@@ -88,7 +265,10 @@ jobs:
         run: bash scripts/validation/repo.sh
 
   core-baseline:
-    needs: resolve-upstream
+    needs:
+      - resolve-upstream
+      - classify-changes
+    if: needs.classify-changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -105,11 +285,33 @@ jobs:
           ref: ${{ needs.resolve-upstream.outputs.core_sha }}
           path: upstream-core
 
-      - name: Set up Go
+      - name: Configure explicit Go cache paths
+        run: |
+          echo "GOMODCACHE=${RUNNER_TEMP}/go-mod-cache" >> "${GITHUB_ENV}"
+          echo "GOCACHE=${RUNNER_TEMP}/go-build-cache" >> "${GITHUB_ENV}"
+
+      - name: Set up Go without implicit cache
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: upstream-core/go.mod
-          cache-dependency-path: upstream-core/go.sum
+          cache: false
+
+      - name: Restore Go module cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/go-mod-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-go-mod-${{ hashFiles('upstream-core/go.sum', 'customizations-repo/cliproxyapi-pro-core/patches/apply_upstream_patches.py') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-go-mod-
+
+      - name: Restore rotating Go build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/go-build-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-go-build-${{ hashFiles('upstream-core/go.mod') }}-${{ needs.resolve-upstream.outputs.core_sha }}-${{ hashFiles('customizations-repo/cliproxyapi-pro-core/patches/**', 'customizations-repo/cliproxyapi-pro-core/embeddedusage/**', 'customizations-repo/scripts/validation/core.sh', 'customizations-repo/scripts/validation/compare_go_test_results.py') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-go-build-${{ hashFiles('upstream-core/go.mod') }}-${{ needs.resolve-upstream.outputs.core_sha }}-
+            ${{ runner.os }}-${{ runner.arch }}-go-build-${{ hashFiles('upstream-core/go.mod') }}-
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -125,13 +327,25 @@ jobs:
 
       - name: Validate Core customization
         env:
+          VALIDATION_ARTIFACT_DIR: ${{ runner.temp }}/core-validation-artifacts
           VALIDATION_RACE: "1"
           VALIDATION_STATICCHECK: "1"
         run: bash customizations-repo/scripts/validation/core.sh upstream-core
 
+      - name: Upload Core validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: core-validation-diagnostics
+          path: ${{ runner.temp }}/core-validation-artifacts
+          if-no-files-found: ignore
+          retention-days: 7
+
   source-image-build:
-    needs: resolve-upstream
-    if: github.event_name != 'workflow_dispatch'
+    needs:
+      - resolve-upstream
+      - classify-changes
+    if: needs.classify-changes.outputs.source_image == 'true' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -139,25 +353,41 @@ jobs:
       - name: Checkout customizations
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Build source Dockerfile
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Compute deterministic source date
+        id: source-date
         env:
-          CORE_TAG: ${{ needs.resolve-upstream.outputs.core_tag }}
-          CORE_SHA: ${{ needs.resolve-upstream.outputs.core_sha }}
           CORE_SOURCE_DATE_EPOCH: ${{ needs.resolve-upstream.outputs.core_source_date_epoch }}
         run: |
           customization_source_date_epoch="$(git show -s --format=%ct HEAD)"
           source_date_epoch="$(printf '%s\n' "${CORE_SOURCE_DATE_EPOCH}" "${customization_source_date_epoch}" | sort -n | tail -n 1)"
-          docker build \
-            --build-arg "CLIPROXY_VERSION=${CORE_TAG}" \
-            --build-arg "CLIPROXY_COMMIT=${CORE_SHA}" \
-            --build-arg "CLIPROXY_BUILD_VERSION=${CORE_TAG}-pro-review" \
-            --build-arg "SOURCE_DATE_EPOCH=${source_date_epoch}" \
-            --tag cli-proxy-api-pro:review \
-            --file cliproxyapi-pro-core/Dockerfile \
-            .
+          echo "value=${source_date_epoch}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build source Dockerfile with shared layer cache
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: cliproxyapi-pro-core/Dockerfile
+          load: true
+          push: false
+          tags: cli-proxy-api-pro:review
+          build-args: |
+            CLIPROXY_VERSION=${{ needs.resolve-upstream.outputs.core_tag }}
+            CLIPROXY_COMMIT=${{ needs.resolve-upstream.outputs.core_sha }}
+            CLIPROXY_BUILD_VERSION=${{ needs.resolve-upstream.outputs.core_tag }}-pro-review
+            PRO_MANAGEMENT_VERSION=${{ needs.resolve-upstream.outputs.pro_management_release_tag }}
+            PRO_MANAGEMENT_DIGEST=${{ needs.resolve-upstream.outputs.pro_management_asset_digest }}
+            SOURCE_DATE_EPOCH=${{ steps.source-date.outputs.value }}
+          cache-from: type=gha,scope=validate-source-image
+          cache-to: type=gha,scope=validate-source-image,mode=max
 
   management-baseline:
-    needs: resolve-upstream
+    needs:
+      - resolve-upstream
+      - classify-changes
+    if: needs.classify-changes.outputs.management == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -191,3 +421,99 @@ jobs:
         env:
           VERSION: ${{ needs.resolve-upstream.outputs.management_tag }}-pro-review
         run: bash customizations-repo/scripts/validation/management.sh upstream-management
+
+  validation-summary:
+    needs:
+      - resolve-upstream
+      - classify-changes
+      - repo-tests
+      - core-baseline
+      - management-baseline
+      - source-image-build
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Enforce required validation results
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RESOLVE_RESULT: ${{ needs.resolve-upstream.result }}
+          CLASSIFY_RESULT: ${{ needs.classify-changes.result }}
+          REPO_RESULT: ${{ needs.repo-tests.result }}
+          CORE_REQUIRED: ${{ needs.classify-changes.outputs.core }}
+          CORE_RESULT: ${{ needs.core-baseline.result }}
+          MANAGEMENT_REQUIRED: ${{ needs.classify-changes.outputs.management }}
+          MANAGEMENT_RESULT: ${{ needs.management-baseline.result }}
+          IMAGE_REQUIRED: ${{ needs.classify-changes.outputs.source_image }}
+          IMAGE_RESULT: ${{ needs.source-image-build.result }}
+        run: |
+          set -euo pipefail
+          require_result() {
+            local name="$1"
+            local required="$2"
+            local result="$3"
+            if [ "${required}" = "true" ]; then
+              if [ "${result}" != "success" ]; then
+                echo "${name} was required but finished with ${result}" >&2
+                return 1
+              fi
+            elif [ "${result}" != "skipped" ]; then
+              echo "${name} was not required but finished with ${result}" >&2
+              return 1
+            fi
+          }
+
+          test "${RESOLVE_RESULT}" = "success"
+          test "${CLASSIFY_RESULT}" = "success"
+          test "${REPO_RESULT}" = "success"
+          require_result "Core validation" "${CORE_REQUIRED}" "${CORE_RESULT}"
+          require_result "Management validation" "${MANAGEMENT_REQUIRED}" "${MANAGEMENT_RESULT}"
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            test "${IMAGE_RESULT}" = "skipped"
+          else
+            require_result "Source image validation" "${IMAGE_REQUIRED}" "${IMAGE_RESULT}"
+          fi
+
+  record-validation-state:
+    needs:
+      - resolve-upstream
+      - classify-changes
+      - validation-summary
+    if: needs.validation-summary.result == 'success' && github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Write validated input state
+        env:
+          HEAD_SHA: ${{ github.sha }}
+          CORE_SHA: ${{ needs.resolve-upstream.outputs.core_sha }}
+          MANAGEMENT_SHA: ${{ needs.resolve-upstream.outputs.management_sha }}
+          PRO_MANAGEMENT_RELEASE_TAG: ${{ needs.resolve-upstream.outputs.pro_management_release_tag }}
+          PRO_MANAGEMENT_ASSET_DIGEST: ${{ needs.resolve-upstream.outputs.pro_management_asset_digest }}
+        run: |
+          mkdir -p validation-state
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          state = {
+              "head_sha": os.environ["HEAD_SHA"],
+              "core_sha": os.environ["CORE_SHA"],
+              "management_sha": os.environ["MANAGEMENT_SHA"],
+              "pro_management_release_tag": os.environ["PRO_MANAGEMENT_RELEASE_TAG"],
+              "pro_management_asset_digest": os.environ["PRO_MANAGEMENT_ASSET_DIGEST"],
+          }
+          Path("validation-state/validation-state.json").write_text(
+              json.dumps(state, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload validation state
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: validation-state
+          path: validation-state/validation-state.json
+          if-no-files-found: error
+          retention-days: 30

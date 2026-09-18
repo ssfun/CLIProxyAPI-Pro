@@ -1,0 +1,70 @@
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+class ValidateWorkflowTests(unittest.TestCase):
+    def test_core_candidate_runs_before_conditional_clean_baseline(self) -> None:
+        script = (ROOT / "scripts" / "validation" / "core.sh").read_text()
+        candidate = script.index('run_timed "candidate tests"')
+        condition = script.index('if [[ "${candidate_status}" -eq 0 ]]')
+        baseline = script.index('run_timed "clean upstream baseline tests"')
+        self.assertLess(candidate, condition)
+        self.assertLess(condition, baseline)
+        self.assertIn("worktree add --detach", script)
+        self.assertIn("Clean upstream baseline could not be executed reliably", script)
+
+    def test_validate_routes_cumulative_changes_and_records_state(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+        self.assertIn("fetch-depth: 0", workflow)
+        self.assertIn('${BASE_SHA}...${HEAD_SHA}', workflow)
+        self.assertIn('${previous_head_sha}..${HEAD_SHA}', workflow)
+        self.assertIn("validation-summary:", workflow)
+        self.assertIn("record-validation-state:", workflow)
+        self.assertIn("name: validation-state", workflow)
+        self.assertIn(
+            "cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}",
+            workflow,
+        )
+
+    def test_validate_uses_separate_rotating_go_caches(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+        self.assertIn("cache: false", workflow)
+        self.assertIn("Restore Go module cache", workflow)
+        self.assertIn("Restore rotating Go build cache", workflow)
+        self.assertIn("GOMODCACHE=${RUNNER_TEMP}/go-mod-cache", workflow)
+        self.assertIn("GOCACHE=${RUNNER_TEMP}/go-build-cache", workflow)
+        self.assertIn("${{ runner.temp }}/go-mod-cache", workflow)
+        self.assertIn("${{ runner.temp }}/go-build-cache", workflow)
+
+    def test_source_image_uses_buildx_cache_and_pinned_management_asset(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+        dockerfile = (ROOT / "cliproxyapi-pro-core" / "Dockerfile").read_text()
+        self.assertIn("docker/setup-buildx-action@", workflow)
+        self.assertIn("docker/build-push-action@", workflow)
+        self.assertIn("cache-from: type=gha,scope=validate-source-image", workflow)
+        self.assertIn("cache-to: type=gha,scope=validate-source-image,mode=max", workflow)
+        self.assertIn("PRO_MANAGEMENT_VERSION=", workflow)
+        self.assertIn("PRO_MANAGEMENT_DIGEST=", workflow)
+        self.assertIn("releases/${management_release_endpoint}", dockerfile)
+        self.assertIn("sha256sum -c -", dockerfile)
+        self.assertGreater(
+            dockerfile.index('ARG SOURCE_DATE_EPOCH=""'),
+            dockerfile.index("RUN python3 /tmp/patches/apply_upstream_patches.py"),
+        )
+
+    def test_core_diagnostics_are_uploaded_even_on_failure(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+        release_workflow = (
+            ROOT / ".github" / "workflows" / "release-core.yml"
+        ).read_text()
+        self.assertIn("VALIDATION_ARTIFACT_DIR:", workflow)
+        self.assertIn("name: core-validation-diagnostics", workflow)
+        self.assertIn("if: always()", workflow)
+        self.assertIn("name: core-release-validation-diagnostics", release_workflow)
+
+
+if __name__ == "__main__":
+    unittest.main()

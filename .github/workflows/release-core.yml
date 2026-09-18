@@ -191,12 +191,22 @@ jobs:
       - name: Validate Core customization against release models data
         env:
           MODELS_SHA: ${{ needs.check-version.outputs.models_sha }}
+          VALIDATION_ARTIFACT_DIR: ${{ runner.temp }}/core-validation-artifacts
         run: |
           set -euo pipefail
           test "$(git -C upstream-models rev-parse HEAD)" = "${MODELS_SHA}"
           bash customizations-repo/scripts/validation/core.sh \
             upstream-core \
             upstream-models/models.json
+
+      - name: Upload Core release validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: core-release-validation-diagnostics
+          path: ${{ runner.temp }}/core-validation-artifacts
+          if-no-files-found: ignore
+          retention-days: 7
 
   validate-management:
     needs: check-version

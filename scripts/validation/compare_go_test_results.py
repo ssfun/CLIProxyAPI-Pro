@@ -49,6 +49,18 @@ def format_failure(key: Failure) -> str:
 def compare(baseline_path: Path, candidate_path: Path) -> int:
     baseline, _ = read_failures(baseline_path)
     candidate, candidate_output = read_failures(candidate_path)
+    baseline_command_failures = sorted(
+        failure for failure in baseline if failure[0].startswith("[command:")
+    )
+    if baseline_command_failures:
+        print(
+            "Clean upstream baseline could not be executed reliably; "
+            "refusing to treat its command failures as tolerated upstream failures."
+        )
+        for failure in baseline_command_failures:
+            print(f"  - {format_failure(failure)}")
+        return 2
+
     new_failures = sorted(candidate - baseline)
 
     print(

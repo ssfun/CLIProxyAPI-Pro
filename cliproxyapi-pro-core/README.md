@@ -302,6 +302,7 @@ docker build -t cliproxyapi-pro -f cliproxyapi-pro-core/Dockerfile .
 ```bash
 docker build \
   --build-arg CLIPROXY_VERSION=vX.Y.Z \
+  --build-arg PRO_MANAGEMENT_VERSION=vX.Y.Z-pro \
   --build-arg CLIPROXY_BUILD_VERSION=vX.Y.Z-pro \
   -t cliproxyapi-pro:vX.Y.Z-pro \
   ./cliproxyapi-pro-core
@@ -315,6 +316,8 @@ docker build \
 - `CLIPROXY_VERSION` — upstream release tag。为空时 Dockerfile 自动解析 latest release。
 - `CLIPROXY_COMMIT` — 可选 upstream commit SHA；设置后按该提交下载源码，同时保留 `CLIPROXY_VERSION` 作为版本标识。
 - `CLIPROXY_BUILD_VERSION` — 可选 runtime 版本号。为空时使用 `CLIPROXY_VERSION` 解析到的 upstream 版本。
+- `PRO_MANAGEMENT_VERSION` — 可选 Pro release tag；设置后从该版本下载 `management.html`，避免 `latest` 在缓存期间漂移。
+- `PRO_MANAGEMENT_DIGEST` — 可选 `sha256:<hex>` 摘要；设置后校验下载的 `management.html`。
 - `PRO_MANAGEMENT_REPO` — Source Docker 构建用于取得镜像内 Pro management 的仓库，默认 `ssfun/CLIProxyAPI-Pro`。
 - `SOURCE_DATE_EPOCH` — 可选 Unix 时间戳，用于写入确定的构建时间；与不可变 upstream commit 一起设置可获得确定的 source binary。
 - `GITHUB_TOKEN` — 可选 GitHub API token。
