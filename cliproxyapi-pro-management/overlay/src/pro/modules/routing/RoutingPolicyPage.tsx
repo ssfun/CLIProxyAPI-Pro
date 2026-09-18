@@ -2,13 +2,22 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } fr
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/Table';
 import {
   IconCheck,
   IconRefreshCw,
   IconSearch,
-  IconShield,
   IconX,
 } from '@/components/ui/icons';
 import { IconCopy } from '@/pro/icons';
@@ -27,10 +36,9 @@ import { buildInspectionFocusLocationState } from '@/pro/shared/inspectionNaviga
 import {
   DEFAULT_PRO_PAGE_SIZE,
   PRO_PAGE_SIZE_OPTIONS,
-  normalizeProPageSize,
-  resolveProPaginationCopy,
   type ProPageSize,
 } from '@/pro/shared/pagination';
+import { ProPagination } from '@/pro/shared/ProPagination';
 import { startPolling } from '@/pro/shared/polling';
 import { ProFeatureTabs } from '@/pro/shared/ProFeatureTabs';
 import { ProDetailDialog } from '@/pro/shared/ProSurface';
@@ -179,7 +187,6 @@ export function RoutingPolicyPage() {
 
   const requestGate = useRef(createLatestRequestGate());
   const { activeSurface, openSurface, closeSurface } = useProSurfaceState<'runtime-detail'>();
-  const paginationCopy = resolveProPaginationCopy(i18n.resolvedLanguage ?? i18n.language);
 
   const setSelectedAccount = useCallback((account: SchedulingBoardAccount | null) => {
     if (account) {
@@ -365,9 +372,16 @@ export function RoutingPolicyPage() {
     setPage(1);
   }, []);
 
+  const resetFilters = useCallback(() => {
+    setKeyword('');
+    setProviderFilter('all');
+    setScopeFilter('all');
+    setPage(1);
+  }, []);
+
   return (
     <div className={styles.container}>
-      <section className={styles.panel}>
+      <Card>
         <div className={styles.sectionHeaderWithAction}>
           <div>
             <h1>{t('routing_policy.title')}</h1>
@@ -507,7 +521,7 @@ export function RoutingPolicyPage() {
             </div>
           </div>
         </div>
-      </section>
+      </Card>
 
       {(runtimeError || connectionStatus !== 'connected') && (
         <div role="status" className={styles.staleNotice}>
@@ -529,7 +543,7 @@ export function RoutingPolicyPage() {
         />
 
         <div className={styles.toolbar}>
-          <div className={styles.searchWrap}>
+          <div className={styles.search}>
             <Input
               type="search"
               value={keyword}
@@ -543,7 +557,7 @@ export function RoutingPolicyPage() {
             />
           </div>
 
-          <div className={styles.selectWrap}>
+          <div className={styles.filterSelect}>
             <Select
               value={providerFilter}
               options={providerOptions}
@@ -556,7 +570,7 @@ export function RoutingPolicyPage() {
             />
           </div>
 
-          <div className={styles.selectWrap}>
+          <div className={styles.filterSelect}>
             <Select
               value={scopeFilter}
               options={scopeOptions}
@@ -574,12 +588,7 @@ export function RoutingPolicyPage() {
               variant="secondary"
               size="sm"
               className={styles.resetButton}
-              onClick={() => {
-                setKeyword('');
-                setProviderFilter('all');
-                setScopeFilter('all');
-                setPage(1);
-              }}
+              onClick={resetFilters}
             >
               <IconX size={14} /> {t('routing_policy.runtime.filter_reset')}
             </Button>
@@ -587,7 +596,7 @@ export function RoutingPolicyPage() {
         </div>
       </div>
 
-      <section className={styles.panel}>
+      <Card>
         {loading && !data ? (
           <div className={styles.loadingState}>
             <IconRefreshCw size={24} className={styles.spinningIcon} />
@@ -598,224 +607,171 @@ export function RoutingPolicyPage() {
             <p>{t('routing_policy.runtime.disconnected_notice')}</p>
           </div>
         ) : (data?.accounts?.length ?? 0) === 0 ? (
-          <div className={styles.healthyState}>
-            <div className={styles.healthyIconWrap}>
-              <IconShield size={36} />
-            </div>
-            <h3>{t('routing_policy.runtime.healthy_title')}</h3>
-            <p>{t('routing_policy.runtime.healthy_desc')}</p>
-          </div>
+          <EmptyState
+            title={t('routing_policy.runtime.healthy_title')}
+            description={t('routing_policy.runtime.healthy_desc')}
+          />
         ) : filteredAccounts.length === 0 ? (
-          <div className={styles.filterEmptyState}>
-            <div className={styles.filterEmptyIconWrap}>
-              <IconSearch size={32} />
-            </div>
-            <h3>{t('routing_policy.runtime.filter_empty')}</h3>
-            <p>{t('routing_policy.runtime.filter_empty_hint')}</p>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setKeyword('');
-                setProviderFilter('all');
-                setScopeFilter('all');
-                setPage(1);
-              }}
-            >
-              {t('routing_policy.runtime.filter_reset')}
-            </Button>
-          </div>
+          <EmptyState
+            title={t('routing_policy.runtime.filter_empty')}
+            description={t('routing_policy.runtime.filter_empty_hint')}
+            action={
+              <Button variant="secondary" size="sm" onClick={resetFilters}>
+                {t('routing_policy.runtime.filter_reset')}
+              </Button>
+            }
+          />
         ) : (
           <>
-            <div className={`${styles.tableScroller} ${styles.runtimeTableScroller}`}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th style={{ width: '120px' }}>{t('routing_policy.runtime.provider')}</th>
-                    <th style={{ width: '280px' }}>{t('routing_policy.runtime.account')}</th>
-                    <th style={{ width: '150px' }}>{t('routing_policy.runtime.source')}</th>
-                    <th style={{ width: '200px' }}>{t('routing_policy.runtime.scope')}</th>
-                    <th style={{ width: '150px' }}>{t('routing_policy.runtime.resume')}</th>
-                    <th style={{ width: '180px' }}>{t('routing_policy.runtime.expected_recovery')}</th>
-                    <th style={{ width: '140px' }} className={styles.runtimeActionHeader}>
-                      {t('routing_policy.runtime.actions')}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pagedAccounts.map((account) => {
-                    const remaining = formatRemainingTime(account.remainingSeconds, account.retryAt, account.resume, t);
-                    const hasCountdown = account.retryAt && account.retryAt > 0;
-                    return (
-                      <tr key={`${account.authIndex}:${account.authId}`}>
-                        <td>
-                          <span className={styles.providerTag}>{account.provider}</span>
-                        </td>
-                        <td>
-                          <div className={styles.accountCell}>
-                            <div className={styles.accountRow}>
-                              <button
-                                type="button"
-                                className={styles.accountButton}
-                                onClick={() => setSelectedAccount(account)}
-                                title={t('routing_policy.runtime.details_click_hint')}
-                              >
-                                <strong>{account.fileName || account.authIndex}</strong>
-                              </button>
-                              <button
-                                type="button"
-                                className={styles.copyButton}
-                                onClick={(e) => handleCopyAuthId(account.authId, e)}
-                                title={
-                                  copiedAuthId === account.authId
-                                    ? t('routing_policy.runtime.copied')
-                                    : t('routing_policy.runtime.copy_auth_id')
-                                }
-                                aria-label={t('routing_policy.runtime.copy_auth_id')}
-                              >
-                                {copiedAuthId === account.authId ? <IconCheck size={13} /> : <IconCopy size={13} />}
-                              </button>
-                            </div>
-                            <div className={styles.authIdText} title={account.authId}>
-                              <code>{account.authId}</code>
-                            </div>
-                          </div>
-                        </td>
-                        <td>
-                          <div className={styles.sourceTagGroup}>
-                            {account.sources.map((src) => (
-                              <span
-                                key={src}
-                                className={src === 'inspection' ? styles.sourceTagInspection : styles.sourceTagUpstream}
-                              >
-                                {t(`routing_policy.sources.${src}`, { defaultValue: src })}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                        <td>
-                          {account.scope === 'credential' ? (
-                            <span className={styles.scopeTagCredential}>{t('routing_policy.scopes.credential')}</span>
-                          ) : account.models && account.models.length > 0 ? (
-                            <div className={styles.modelChipGroup}>
-                              {account.models.slice(0, 2).map((model) => (
-                                <code key={model} className={styles.modelChip} title={model}>
-                                  {model}
-                                </code>
-                              ))}
-                              {account.models.length > 2 && (
-                                <span
-                                  className={styles.moreModelsBadge}
-                                  title={account.models.slice(2).join(', ')}
-                                >
-                                  {t('routing_policy.runtime.models_more', { count: account.models.length - 2 })}
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className={styles.scopeTagCredential}>{t('routing_policy.scopes.model')}</span>
-                          )}
-                        </td>
-                        <td>
-                          <span
-                            className={`${styles.resumeTag} ${
-                              styles[`resumeTag_${schedulingBoardResumeTone(account.resume)}`]
-                            }`}
-                          >
-                            {t(`routing_policy.resume.${account.resume}`, { defaultValue: account.resume })}
-                          </span>
-                        </td>
-                        <td>
-                          <div className={styles.recoveryCell}>
-                            <strong className={styles.recoveryCountdown}>{remaining}</strong>
-                            {hasCountdown ? (
-                              <small className={styles.recoveryTimestamp}>
-                                {formatTimestamp(account.retryAt, i18n.language, '-')}
-                              </small>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className={styles.runtimeActionCell}>
-                          {account.inspection ? (
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => openInspection(account)}
-                              title={t('routing_policy.runtime.open_inspection')}
-                            >
-                              {t('routing_policy.runtime.open_inspection')}
-                            </Button>
-                          ) : (
-                            <Button
-                              variant="secondary"
-                              size="sm"
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead style={{ width: 120 }}>{t('routing_policy.runtime.provider')}</TableHead>
+                  <TableHead style={{ width: 280 }}>{t('routing_policy.runtime.account')}</TableHead>
+                  <TableHead style={{ width: 150 }}>{t('routing_policy.runtime.source')}</TableHead>
+                  <TableHead style={{ width: 200 }}>{t('routing_policy.runtime.scope')}</TableHead>
+                  <TableHead style={{ width: 150 }}>{t('routing_policy.runtime.resume')}</TableHead>
+                  <TableHead style={{ width: 180 }}>{t('routing_policy.runtime.expected_recovery')}</TableHead>
+                  <TableHead style={{ width: 140 }} alignRight>
+                    {t('routing_policy.runtime.actions')}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pagedAccounts.map((account) => {
+                  const remaining = formatRemainingTime(account.remainingSeconds, account.retryAt, account.resume, t);
+                  const hasCountdown = account.retryAt && account.retryAt > 0;
+                  return (
+                    <TableRow key={`${account.authIndex}:${account.authId}`}>
+                      <TableCell>
+                        <span className={styles.providerTag}>{account.provider}</span>
+                      </TableCell>
+                      <TableCell>
+                        <div className={styles.accountCell}>
+                          <div className={styles.accountRow}>
+                            <button
+                              type="button"
+                              className={styles.accountButton}
                               onClick={() => setSelectedAccount(account)}
-                              title={t('routing_policy.runtime.view_details')}
+                              title={t('routing_policy.runtime.details_click_hint')}
                             >
-                              {t('routing_policy.runtime.view_details')}
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                              <strong>{account.fileName || account.authIndex}</strong>
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.copyButton}
+                              onClick={(e) => handleCopyAuthId(account.authId, e)}
+                              title={
+                                copiedAuthId === account.authId
+                                  ? t('routing_policy.runtime.copied')
+                                  : t('routing_policy.runtime.copy_auth_id')
+                              }
+                              aria-label={t('routing_policy.runtime.copy_auth_id')}
+                            >
+                              {copiedAuthId === account.authId ? <IconCheck size={13} /> : <IconCopy size={13} />}
+                            </button>
+                          </div>
+                          <div className={styles.authIdText} title={account.authId}>
+                            <code>{account.authId}</code>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className={styles.sourceTagGroup}>
+                          {account.sources.map((src) => (
+                            <span
+                              key={src}
+                              className={src === 'inspection' ? styles.sourceTagInspection : styles.sourceTagUpstream}
+                            >
+                              {t(`routing_policy.sources.${src}`, { defaultValue: src })}
+                            </span>
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {account.scope === 'credential' ? (
+                          <span className={styles.scopeTagCredential}>{t('routing_policy.scopes.credential')}</span>
+                        ) : account.models && account.models.length > 0 ? (
+                          <div className={styles.modelChipGroup}>
+                            {account.models.slice(0, 2).map((model) => (
+                              <code key={model} className={styles.modelChip} title={model}>
+                                {model}
+                              </code>
+                            ))}
+                            {account.models.length > 2 && (
+                              <span
+                                className={styles.moreModelsBadge}
+                                title={account.models.slice(2).join(', ')}
+                              >
+                                {t('routing_policy.runtime.models_more', { count: account.models.length - 2 })}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className={styles.scopeTagCredential}>{t('routing_policy.scopes.model')}</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={`${styles.resumeTag} ${
+                            styles[`resumeTag_${schedulingBoardResumeTone(account.resume)}`]
+                          }`}
+                        >
+                          {t(`routing_policy.resume.${account.resume}`, { defaultValue: account.resume })}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className={styles.recoveryCell}>
+                          <strong className={styles.recoveryCountdown}>{remaining}</strong>
+                          {hasCountdown ? (
+                            <small className={styles.recoveryTimestamp}>
+                              {formatTimestamp(account.retryAt, i18n.language, '-')}
+                            </small>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell alignRight>
+                        {account.inspection ? (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => openInspection(account)}
+                            title={t('routing_policy.runtime.open_inspection')}
+                          >
+                            {t('routing_policy.runtime.open_inspection')}
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setSelectedAccount(account)}
+                            title={t('routing_policy.runtime.view_details')}
+                          >
+                            {t('routing_policy.runtime.view_details')}
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
 
-            <div className={styles.paginationBar}>
-              <div className={styles.paginationPageSizeControl}>
-                <span id="routing-board-page-size-label">
-                  {paginationCopy.pageSizeLabel}
-                </span>
-                <Select
-                  id="routing-board-page-size"
-                  value={String(pageSize)}
-                  options={PRO_PAGE_SIZE_OPTIONS.map((size) => ({
-                    value: String(size),
-                    label: paginationCopy.pageSizeValue(size),
-                  }))}
-                  onChange={(value) => {
-                    const nextSize = normalizeProPageSize(value);
-                    setPageSize(nextSize);
-                    setPage(1);
-                  }}
-                  ariaLabelledBy="routing-board-page-size-label"
-                  size="sm"
-                />
-              </div>
-              <div className={styles.paginationNavigation}>
-                <span className={styles.pageInfo}>
-                  {t('routing_policy.runtime.pagination_info', {
-                    current: page,
-                    total: totalPages,
-                    count: filteredAccounts.length,
-                    defaultValue: `Page ${page} / ${totalPages} (${filteredAccounts.length} total)`,
-                  })}
-                </span>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page <= 1}
-                  aria-label={t('common.previous_page', { defaultValue: 'Previous page' })}
-                >
-                  &lt;
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page >= totalPages}
-                  aria-label={t('common.next_page', { defaultValue: 'Next page' })}
-                >
-                  &gt;
-                </Button>
-              </div>
-            </div>
+            <ProPagination
+              pageSizeOptions={PRO_PAGE_SIZE_OPTIONS}
+              page={page}
+              pageSize={pageSize}
+              total={filteredAccounts.length}
+              onPageChange={setPage}
+              onPageSizeChange={(nextSize) => {
+                setPageSize(nextSize);
+                setPage(1);
+              }}
+              idPrefix="routing-board"
+            />
           </>
         )}
-      </section>
+      </Card>
 
       <ProDetailDialog
         open={activeSurface === 'runtime-detail'}

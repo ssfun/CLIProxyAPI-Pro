@@ -1,0 +1,46 @@
+@use "@/styles/variables.scss" as *;
+@use "@/styles/mixins" as *;
+
+.paginationBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: $spacing-md;
+  margin-top: $spacing-lg;
+  padding-top: $spacing-md;
+  border-top: 1px solid var(--border-color);
+}
+
+.pageSizeControl {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.pageSizeSelectTrigger {
+  height: 32px !important;
+  font-size: 12px !important;
+}
+
+.navigation {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.pageInfo {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@include mobile {
+  .paginationBar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

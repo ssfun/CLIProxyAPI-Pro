@@ -11,13 +11,6 @@
   padding-bottom: #{$spacing-xl};
 }
 
-.panel {
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  background: var(--bg-primary);
-  padding: $spacing-lg;
-}
-
 .sectionHeaderWithAction {
   display: flex;
   align-items: flex-start;
@@ -70,13 +63,11 @@
 }
 
 @keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
+
+/* ---------- 概览指标网格 ---------- */
 
 .summaryGrid {
   display: grid;
@@ -126,41 +117,31 @@
   border-color: color-mix(in srgb, var(--primary-color) 45%, var(--border-color));
   background: color-mix(in srgb, var(--primary-color) 6%, var(--bg-secondary));
 
-  strong {
-    color: var(--primary-color);
-  }
+  strong { color: var(--primary-color); }
 }
 
 .cardQuota {
   border-color: color-mix(in srgb, var(--warning-color, #f59e0b) 35%, var(--border-color));
 
-  strong {
-    color: var(--warning-color, #d97706);
-  }
+  strong { color: var(--warning-color, #d97706); }
 }
 
 .cardAuth {
   border-color: color-mix(in srgb, var(--danger-color, #ef4444) 35%, var(--border-color));
 
-  strong {
-    color: var(--danger-color, #dc2626);
-  }
+  strong { color: var(--danger-color, #dc2626); }
 }
 
 .cardRecheck {
   border-color: color-mix(in srgb, #3b82f6 35%, var(--border-color));
 
-  strong {
-    color: #2563eb;
-  }
+  strong { color: #2563eb; }
 }
 
 .cardOverlap {
   border-color: color-mix(in srgb, #8b5cf6 35%, var(--border-color));
 
-  strong {
-    color: #7c3aed;
-  }
+  strong { color: #7c3aed; }
 }
 
 .cardExcluded {
@@ -172,6 +153,8 @@
     border-color: var(--border-color);
   }
 }
+
+/* ---------- 恢复时序面板 ---------- */
 
 .timelineBanner {
   display: grid;
@@ -211,13 +194,8 @@
   flex-shrink: 0;
 }
 
-.timelineDotInfo {
-  background: #3b82f6;
-}
-
-.timelineDotWarn {
-  background: #f59e0b;
-}
+.timelineDotInfo { background: #3b82f6; }
+.timelineDotWarn { background: #f59e0b; }
 
 .timelineBody {
   display: flex;
@@ -255,6 +233,8 @@
   font-size: 13px;
 }
 
+/* ---------- 搜索与筛选工具栏 ---------- */
+
 .filterSection {
   display: flex;
   flex-direction: column;
@@ -268,9 +248,9 @@
   gap: $spacing-sm;
 }
 
-.searchWrap {
-  flex: 1 1 260px;
-  min-width: 220px;
+.search {
+  flex: 1 1 240px;
+  min-width: 200px;
 
   :global(.form-group) {
     margin-bottom: 0;
@@ -284,9 +264,9 @@
   }
 }
 
-.selectWrap {
+.filterSelect {
   flex: 0 0 auto;
-  min-width: 150px;
+  min-width: 140px;
 }
 
 .selectTrigger {
@@ -302,58 +282,7 @@
   white-space: nowrap;
 }
 
-.tableScroller {
-  width: 100%;
-  overflow-x: auto;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-}
-
-.runtimeTableScroller {
-  overflow-y: visible;
-}
-
-.table {
-  width: 100%;
-  min-width: 1080px;
-  border-collapse: collapse;
-  color: var(--text-primary);
-  font-size: 13px;
-
-  th,
-  td {
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--border-color);
-    text-align: left;
-    vertical-align: middle;
-  }
-
-  th {
-    background: var(--bg-secondary);
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 700;
-    white-space: nowrap;
-    user-select: none;
-  }
-
-  tbody tr:last-child td {
-    border-bottom: 0;
-  }
-
-  tbody tr:hover td {
-    background: color-mix(in srgb, var(--text-primary) 3%, transparent);
-  }
-}
-
-.runtimeActionHeader {
-  text-align: right !important;
-}
-
-.runtimeActionCell {
-  text-align: right;
-  white-space: nowrap;
-}
+/* ---------- 表格单元格业务样式 ---------- */
 
 .accountCell {
   display: flex;
@@ -577,85 +506,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.emptyContainer {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 24px;
-  text-align: center;
-}
-
-.healthyState {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 24px;
-  text-align: center;
-
-  .healthyIconWrap {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    background: color-mix(in srgb, var(--success-color, #10b981) 15%, transparent);
-    color: var(--success-color, #10b981);
-    margin-bottom: $spacing-md;
-  }
-
-  h3 {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--text-primary);
-  }
-
-  p {
-    margin: 6px 0 0;
-    font-size: 13px;
-    color: var(--text-secondary);
-    max-width: 480px;
-    line-height: 1.5;
-  }
-}
-
-.filterEmptyState {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 24px;
-  text-align: center;
-
-  .filterEmptyIconWrap {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 54px;
-    height: 54px;
-    border-radius: 50%;
-    background: var(--bg-secondary);
-    color: var(--text-tertiary);
-    margin-bottom: $spacing-md;
-  }
-
-  h3 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 650;
-    color: var(--text-primary);
-  }
-
-  p {
-    margin: 6px 0 $spacing-md;
-    font-size: 13px;
-    color: var(--text-secondary);
-  }
-}
-
 .loadingState {
   display: flex;
   flex-direction: column;
@@ -667,36 +517,7 @@
   font-size: 14px;
 }
 
-.paginationBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: $spacing-md;
-  margin-top: $spacing-lg;
-  padding-top: $spacing-md;
-  border-top: 1px solid var(--border-color);
-}
-
-.paginationPageSizeControl {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.paginationNavigation {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-}
-
-.pageInfo {
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
+/* ---------- 详情抽屉/弹窗 ---------- */
 
 .detailContainer {
   display: flex;
@@ -770,6 +591,8 @@
   margin-top: $spacing-xs;
 }
 
+/* ---------- 响应式 ---------- */
+
 @media (max-width: 1080px) {
   .summaryGrid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -798,14 +621,9 @@
     flex-direction: column;
     align-items: stretch;
 
-    .searchWrap,
-    .selectWrap {
+    .search,
+    .filterSelect {
       width: 100%;
     }
-  }
-
-  .paginationBar {
-    flex-direction: column;
-    align-items: stretch;
   }
 }

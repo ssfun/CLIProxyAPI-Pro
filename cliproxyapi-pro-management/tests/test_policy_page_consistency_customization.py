@@ -142,9 +142,12 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
         self.assertIn('setProviderFilter', routing)
         self.assertIn('setScopeFilter', routing)
         self.assertIn('handleCopyAuthId', routing)
-        self.assertIn('resolveProPaginationCopy', routing)
         self.assertIn('PRO_PAGE_SIZE_OPTIONS', routing)
         self.assertIn('formatRemainingTime', routing)
+        self.assertIn('ProPagination', routing)
+        self.assertIn('<Table', routing)
+        self.assertIn('<EmptyState', routing)
+        self.assertIn('<Card', routing)
 
         self.assertIn('export const schedulingBoardResumeTone', service)
         self.assertIn('export const formatRemainingTime', service)
