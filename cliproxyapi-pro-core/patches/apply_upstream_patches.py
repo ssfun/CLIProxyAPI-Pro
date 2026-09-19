@@ -5520,12 +5520,12 @@ replace_once(
 )
 replace_once(
     auth_files,
-    '''		"unavailable":    auth.Unavailable,
-		"runtime_only":   runtimeOnly,
+    '''		"runtime_only":   runtimeOnly,
+		"source":         "memory",
 ''',
-    '''		"unavailable":    auth.Unavailable,
-		"last_error":     authFileLastError(auth),
+    '''		"last_error":     authFileLastError(auth),
 		"runtime_only":   runtimeOnly,
+		"source":         "memory",
 ''',
 )
 replace_once(
