@@ -1,4 +1,3 @@
-import { type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
@@ -20,7 +19,7 @@ export interface ProPaginationProps {
   pageSizeOptions?: ReadonlyArray<ProPageSize>;
   className?: string;
   idPrefix?: string;
-  renderInfo?: (params: { page: number; totalPages: number; total: number; from: number; to: number }) => ReactNode;
+  disabled?: boolean;
 }
 
 export function ProPagination({
@@ -32,69 +31,78 @@ export function ProPagination({
   pageSizeOptions = PRO_PAGE_SIZE_OPTIONS,
   className = '',
   idPrefix = 'pro-pagination',
-  renderInfo,
+  disabled = false,
 }: ProPaginationProps) {
   const { t, i18n } = useTranslation();
   const paginationCopy = resolveProPaginationCopy(i18n.resolvedLanguage ?? i18n.language);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const from = total > 0 ? (page - 1) * pageSize + 1 : 0;
-  const to = Math.min(total, page * pageSize);
+  const normalizedPage = Math.min(Math.max(1, page), totalPages);
+  const from = total > 0 ? (normalizedPage - 1) * pageSize + 1 : 0;
+  const to = Math.min(total, normalizedPage * pageSize);
+  const hasPrevious = normalizedPage > 1;
+  const hasNext = normalizedPage < totalPages;
 
-  const infoContent = renderInfo
-    ? renderInfo({ page, totalPages, total, from, to })
-    : t('monitoring.pagination_info', {
-        from,
-        to,
-        total,
-        page,
-        totalPages,
-        current: page,
-        count: total,
-        defaultValue: `${page} / ${totalPages} (${total})`,
-      });
+  if (total <= 0) return null;
 
   return (
     <div className={`${styles.paginationBar} ${className}`.trim()}>
-      <div className={styles.pageSizeControl}>
-        <span id={`${idPrefix}-size-label`}>{paginationCopy.pageSizeLabel}</span>
+      <div className={styles.paginationPageSizeControl}>
+        <span id={`${idPrefix}-page-size-label`}>
+          {t('monitoring.pagination_page_size', { defaultValue: paginationCopy.pageSizeLabel })}
+        </span>
         <Select
-          id={`${idPrefix}-size`}
+          id={`${idPrefix}-page-size`}
           value={String(pageSize)}
           options={pageSizeOptions.map((size) => ({
             value: String(size),
-            label: paginationCopy.pageSizeValue(size),
+            label: t('monitoring.pagination_page_size_value', {
+              count: size,
+              defaultValue: paginationCopy.pageSizeValue(size),
+            }),
           }))}
           onChange={(value) => {
-            const nextSize = normalizeProPageSize(value);
-            onPageSizeChange(nextSize);
+            const nextPageSize = normalizeProPageSize(value);
+            if (nextPageSize === pageSize) return;
+            onPageSizeChange(nextPageSize);
           }}
-          ariaLabelledBy={`${idPrefix}-size-label`}
-          triggerClassName={styles.pageSizeSelectTrigger}
-          size="sm"
+          ariaLabelledBy={`${idPrefix}-page-size-label`}
+          className={styles.paginationPageSizeSelect}
+          disabled={disabled}
         />
       </div>
 
-      <div className={styles.navigation}>
-        <span className={styles.pageInfo}>{infoContent}</span>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => onPageChange(Math.max(1, page - 1))}
-          disabled={page <= 1}
-          aria-label={t('common.previous_page', { defaultValue: 'Previous page' })}
-        >
-          &lt;
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-          disabled={page >= totalPages}
-          aria-label={t('common.next_page', { defaultValue: 'Next page' })}
-        >
-          &gt;
-        </Button>
-      </div>
+      {totalPages > 1 ? (
+        <div className={styles.paginationNavigation}>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => onPageChange(Math.max(1, normalizedPage - 1))}
+            disabled={disabled || !hasPrevious}
+            aria-label={t('monitoring.previous_page')}
+          >
+            {t('monitoring.previous_page')}
+          </Button>
+          <div className={styles.pageInfo}>
+            {t('monitoring.pagination_info', {
+              from,
+              to,
+              total,
+              page: normalizedPage,
+              totalPages,
+              defaultValue: `${from}-${to} / ${total}`,
+            })}
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => onPageChange(Math.min(totalPages, normalizedPage + 1))}
+            disabled={disabled || !hasNext}
+            aria-label={t('monitoring.next_page')}
+          >
+            {t('monitoring.next_page')}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

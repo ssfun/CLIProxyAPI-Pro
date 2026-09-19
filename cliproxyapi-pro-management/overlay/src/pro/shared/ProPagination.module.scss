@@ -2,45 +2,69 @@
 @use "@/styles/mixins" as *;
 
 .paginationBar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: $spacing-md;
-  margin-top: $spacing-lg;
-  padding-top: $spacing-md;
+  gap: 16px;
+  margin-top: 20px;
+  padding-top: 16px;
   border-top: 1px solid var(--border-color);
 }
 
-.pageSizeControl {
+.paginationPageSizeControl,
+.paginationNavigation {
   display: flex;
   align-items: center;
-  gap: $spacing-sm;
+}
+
+.paginationPageSizeControl {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  gap: 10px;
   color: var(--text-secondary);
   font-size: 13px;
-}
-
-.pageSizeSelectTrigger {
-  height: 32px !important;
-  font-size: 12px !important;
-}
-
-.navigation {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-}
-
-.pageInfo {
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
+  font-weight: 600;
   white-space: nowrap;
 }
 
-@include mobile {
+.paginationPageSizeSelect {
+  width: 128px;
+}
+
+.paginationNavigation {
+  grid-column: 2;
+  grid-row: 1;
+  justify-content: center;
+  gap: 16px;
+}
+
+.pageInfo {
+  font-family: $font-mono;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
   .paginationBar {
-    flex-direction: column;
-    align-items: stretch;
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .paginationNavigation {
+    flex: 0 0 auto;
+    order: 1;
+    flex-wrap: nowrap;
+  }
+
+  .paginationPageSizeControl {
+    flex: 0 0 auto;
+    order: 2;
   }
 }

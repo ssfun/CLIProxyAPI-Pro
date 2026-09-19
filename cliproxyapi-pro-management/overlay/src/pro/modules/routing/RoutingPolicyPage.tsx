@@ -542,52 +542,44 @@ export function RoutingPolicyPage() {
           }))}
         />
 
-        <div className={styles.toolbar}>
-          <div className={styles.search}>
-            <Input
-              type="search"
-              value={keyword}
-              onChange={(e) => {
-                setKeyword(e.target.value);
-                setPage(1);
-              }}
-              placeholder={t('routing_policy.runtime.search_placeholder')}
-              aria-label={t('routing_policy.runtime.search_aria_label')}
-              rightElement={<IconSearch size={16} />}
-            />
-          </div>
+        <div className={styles.filterGrid}>
+          <Input
+            type="search"
+            value={keyword}
+            onChange={(e) => {
+              setKeyword(e.target.value);
+              setPage(1);
+            }}
+            placeholder={t('routing_policy.runtime.search_placeholder')}
+            aria-label={t('routing_policy.runtime.search_aria_label')}
+            className={styles.toolbarHeaderSearchInput}
+            rightElement={<IconSearch size={16} />}
+          />
 
-          <div className={styles.filterSelect}>
-            <Select
-              value={providerFilter}
-              options={providerOptions}
-              onChange={(value) => {
-                setProviderFilter(value);
-                setPage(1);
-              }}
-              triggerClassName={styles.selectTrigger}
-              ariaLabel={t('routing_policy.runtime.all_providers')}
-            />
-          </div>
+          <Select
+            value={providerFilter}
+            options={providerOptions}
+            onChange={(value) => {
+              setProviderFilter(value);
+              setPage(1);
+            }}
+            ariaLabel={t('routing_policy.runtime.all_providers')}
+          />
 
-          <div className={styles.filterSelect}>
-            <Select
-              value={scopeFilter}
-              options={scopeOptions}
-              onChange={(value) => {
-                setScopeFilter(value);
-                setPage(1);
-              }}
-              triggerClassName={styles.selectTrigger}
-              ariaLabel={t('routing_policy.runtime.all_scopes')}
-            />
-          </div>
+          <Select
+            value={scopeFilter}
+            options={scopeOptions}
+            onChange={(value) => {
+              setScopeFilter(value);
+              setPage(1);
+            }}
+            ariaLabel={t('routing_policy.runtime.all_scopes')}
+          />
 
           {hasActiveFilter && (
             <Button
               variant="secondary"
-              size="sm"
-              className={styles.resetButton}
+              className={styles.clearButton}
               onClick={resetFilters}
             >
               <IconX size={14} /> {t('routing_policy.runtime.filter_reset')}
