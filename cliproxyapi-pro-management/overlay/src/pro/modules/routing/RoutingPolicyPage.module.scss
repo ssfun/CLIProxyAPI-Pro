@@ -271,13 +271,45 @@
   white-space: nowrap;
 }
 
-/* ---------- 表格单元格业务样式 ---------- */
+/* ---------- 表格与响应式卡片 ---------- */
+
+.desktopTable {
+  display: block;
+  min-width: 0;
+}
+
+.routingTable {
+  min-width: 1040px;
+  width: 100%;
+  table-layout: fixed;
+
+  th,
+  td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+    padding: 12px 14px;
+  }
+}
+
+.colProvider { width: 110px; }
+.colAccount { width: 250px; }
+.colSource { width: 130px; }
+.colScope { width: 180px; }
+.colResume { width: 130px; }
+.colRecovery { width: 160px; }
+.colActions { width: 120px; }
+
+.mobileCards {
+  display: none;
+}
 
 .accountCell {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  max-width: 280px;
+  max-width: 240px;
 }
 
 .accountRow {
@@ -506,6 +538,80 @@
   font-size: 14px;
 }
 
+/* ---------- 移动端专属卡片 ---------- */
+
+.mobileCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+}
+
+.mobileCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mobileCardTitleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.mobileCardProviderRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mobileCardMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-primary);
+  border: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+}
+
+.mobileCardMetaItem {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+
+  small {
+    color: var(--text-tertiary);
+    font-size: 11px;
+    font-weight: 550;
+  }
+}
+
+.mobileCardRecovery {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+
+  strong {
+    font-size: 12px;
+    color: var(--text-primary);
+  }
+
+  small {
+    font-size: 10px;
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
 /* ---------- 详情抽屉/弹窗 ---------- */
 
 .detailContainer {
@@ -580,7 +686,7 @@
   margin-top: $spacing-xs;
 }
 
-/* ---------- 响应式 ---------- */
+/* ---------- 响应式断点 ---------- */
 
 @media (max-width: 1080px) {
   .summaryGrid {
@@ -598,6 +704,31 @@
   }
 }
 
+@media (max-width: 768px) {
+  .desktopTable {
+    display: none;
+  }
+
+  .mobileCards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .filterGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+
+    :global(.form-group):first-child {
+      grid-column: 1 / -1;
+    }
+
+    .clearButton {
+      grid-column: 1 / -1;
+    }
+  }
+}
+
 @include mobile {
   .summaryGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -610,11 +741,6 @@
   .headerActions {
     width: 100%;
     justify-content: space-between;
-  }
-
-  .filterGrid {
-    grid-template-columns: 1fr;
-    gap: 8px;
   }
 
   .clearButton {
