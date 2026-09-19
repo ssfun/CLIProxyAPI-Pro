@@ -66,6 +66,7 @@ sdk/api/handlers/gemini/gemini_handlers.go
 sdk/api/handlers/handlers.go
 sdk/api/handlers/handlers_context.go
 sdk/api/handlers/handlers_execution.go
+sdk/api/handlers/handlers_interceptors.go
 sdk/api/handlers/handlers_routing.go
 sdk/api/handlers/handlers_stream.go
 sdk/api/handlers/openai/openai_handlers.go

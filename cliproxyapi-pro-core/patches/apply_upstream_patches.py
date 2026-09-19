@@ -282,6 +282,7 @@ new_customization_paths = (
 	'internal/redisqueue/api_key_policy_usage_test.go',
 	'internal/redisqueue/persistence_queue_test.go',
 	'sdk/api/handlers/handlers_speed_test.go',
+	'sdk/api/handlers/handlers_stream_cancellation_test.go',
 	'sdk/api/handlers/api_key_policy_test.go',
 	'sdk/api/handlers/api_key_policy_context_test.go',
 	'sdk/auth/filestore_identity_test.go',
@@ -331,6 +332,7 @@ queue_go_source('internal/api/handlers/management/auth_file_metadata.go')
 queue_go_source('internal/api/server_model_policy.go')
 queue_go_source('sdk/api/handlers/api_key_policy_test.go')
 queue_go_source('sdk/api/handlers/api_key_policy_context_test.go')
+queue_go_source('sdk/api/handlers/handlers_stream_cancellation_test.go')
 queue_go_source('sdk/auth/filestore_identity_test.go')
 queue_go_source('internal/runtime/executor/api_key_policy_usage_test.go')
 queue_go_source('internal/runtime/executor/helps/quota_settlement_test.go')
@@ -3266,6 +3268,25 @@ replace_once(
 \tresp, errCount := host.CountPluginExecutor(ctx, executorPluginID, req, opts)
 ''',
     'ctx, interceptErr = admitAPIKeyQuota(ctx)\n\tif interceptErr != nil {\n\t\tlifecycle.completeError(ctx, interceptErr)\n\t\treturn nil, nil, interceptErr\n\t}\n\tresp, errCount := host.CountPluginExecutor',
+)
+
+handlers_interceptors_source = ROOT / 'sdk/api/handlers/handlers_interceptors.go'
+replace_once(
+    handlers_interceptors_source,
+    '''\t\tcase chunk, ok = <-chunks:
+\t\t}
+''',
+    '''\t\tcase chunk, ok = <-chunks:
+\t\t\t// Cancellation owns the terminal outcome when the upstream channel
+\t\t\t// becomes ready concurrently with ctx.Done().
+\t\t\tselect {
+\t\t\tcase <-ctx.Done():
+\t\t\t\treturn coreexecutor.StreamChunk{}, false, true
+\t\t\tdefault:
+\t\t\t}
+\t\t}
+''',
+    'Cancellation owns the terminal outcome',
 )
 
 handlers_stream_source = ROOT / 'sdk/api/handlers/handlers_stream.go'
@@ -7237,8 +7258,10 @@ format_go_writes([
 	'sdk/api/handlers/api_key_policy_context_test.go',
     'sdk/api/handlers/handlers_context.go',
     'sdk/api/handlers/handlers_execution.go',
+    'sdk/api/handlers/handlers_interceptors.go',
     'sdk/api/handlers/handlers_routing.go',
     'sdk/api/handlers/handlers_stream.go',
+    'sdk/api/handlers/handlers_stream_cancellation_test.go',
     'sdk/api/handlers/openai/openai_handlers.go',
     'sdk/api/handlers/claude/code_handlers.go',
     'sdk/api/handlers/gemini/gemini_handlers.go',

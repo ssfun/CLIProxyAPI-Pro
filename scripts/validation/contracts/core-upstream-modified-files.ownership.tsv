@@ -69,6 +69,7 @@ sdk/api/handlers/gemini/gemini_handlers.go	must-remain-host-patch	final-model-re
 sdk/api/handlers/handlers.go	must-remain-host-patch	api-key-policy	retain-policy-visible-model-and-speed-contract
 sdk/api/handlers/handlers_context.go	must-remain-host-patch	api-key-policy	retain-pre-routing-model-policy
 sdk/api/handlers/handlers_execution.go	must-remain-host-patch	api-key-policy	retain-provider-and-plugin-executor-enforcement
+sdk/api/handlers/handlers_interceptors.go	upstream-generic-fix	stream-cancellation	upstream-cancellation-wins-over-concurrent-channel-close
 sdk/api/handlers/handlers_routing.go	must-remain-host-patch	api-key-policy	retain-model-mapping-provider-filter-and-error-contract
 sdk/api/handlers/handlers_stream.go	must-remain-host-patch	api-key-policy	retain-stream-provider-enforcement
 sdk/api/handlers/openai/openai_handlers.go	must-remain-host-patch	final-model-response	retain-final-openai-model-filtering
