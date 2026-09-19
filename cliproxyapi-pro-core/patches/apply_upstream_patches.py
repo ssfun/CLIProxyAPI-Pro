@@ -3824,29 +3824,9 @@ replace_once(
 )
 queue_go_source('internal/translator/codex/openai/chat-completions/codex_fast_service_tier_test.go')
 
-codex_responses_request = ROOT / 'internal/translator/codex/openai/responses/codex_openai-responses_request.go'
-add_go_import(codex_responses_request, '\t"encoding/json"\n', '\t"strings"\n')
-replace_once(
-    codex_responses_request,
-    '''\tif serviceTier := gjson.GetBytes(rawJSON, "service_tier"); serviceTier.Exists() && serviceTier.String() != "priority" {
-\t\trawJSON = deleteCodexRequestFields(rawJSON, "service_tier")
-\t}
-''',
-    '''\tif serviceTier := gjson.GetBytes(rawJSON, "service_tier"); serviceTier.Exists() {
-\t\tswitch strings.ToLower(strings.TrimSpace(serviceTier.String())) {
-\t\tcase "fast":
-\t\t\trawJSON, _ = sjson.SetBytes(rawJSON, "service_tier", "priority")
-\t\tcase "priority":
-\t\t\tif serviceTier.String() != "priority" {
-\t\t\t\trawJSON, _ = sjson.SetBytes(rawJSON, "service_tier", "priority")
-\t\t\t}
-\t\tdefault:
-\t\t\trawJSON = deleteCodexRequestFields(rawJSON, "service_tier")
-\t\t}
-\t}
-''',
-    'case "fast":',
-)
+# Upstream v7.3.8 owns Responses service-tier normalization, including the
+# fast alias and ultrafast tier. Keep a regression test without rewriting the
+# upstream implementation so new tiers are not accidentally removed here.
 queue_go_source('internal/translator/codex/openai/responses/codex_fast_service_tier_test.go')
 
 usage_manager = ROOT / 'sdk/cliproxy/usage/manager.go'
@@ -3854,7 +3834,7 @@ replace_once(
     usage_manager,
     '''\t// ResponseServiceTier stores the final tier reported by the upstream response.
 \tResponseServiceTier string
-\t// Generate reports whether the client requested actual generation.
+\t// ResponseModel stores the model name reported by the upstream response, empty when unknown.
 ''',
     '''\t// ResponseServiceTier stores the final tier reported by the upstream response.
 \tResponseServiceTier string
@@ -3862,7 +3842,7 @@ replace_once(
 \tSpeed string
 \t// ResponseSpeed stores the final inference speed reported by the upstream response.
 \tResponseSpeed string
-\t// Generate reports whether the client requested actual generation.
+\t// ResponseModel stores the model name reported by the upstream response, empty when unknown.
 ''',
     'ResponseSpeed string',
 )
@@ -4154,12 +4134,14 @@ replace_once(
     usage_helpers,
     '''\t\tServiceTier:         r.serviceTier,
 \t\tResponseServiceTier: strings.TrimSpace(detail.ResponseServiceTier),
+\t\tResponseModel:       responseModel,
 \t\tGenerate:            usage.GenerateFlag(r.generate),
 ''',
     '''\t\tServiceTier:         r.serviceTier,
 \t\tResponseServiceTier: strings.TrimSpace(detail.ResponseServiceTier),
 \t\tSpeed:               r.speed,
 \t\tResponseSpeed:       strings.TrimSpace(detail.ResponseSpeed),
+\t\tResponseModel:       responseModel,
 \t\tGenerate:            usage.GenerateFlag(r.generate),
 ''',
     'ResponseSpeed:       strings.TrimSpace(detail.ResponseSpeed)',
@@ -4289,10 +4271,12 @@ replace_once(
     '''\t\tlines := bytes.Split(data, []byte("\\n"))
 \t\tvar streamUsage helps.StreamUsageBuffer
 \t\tfor i, line := range lines {
+\t\t\treporter.ObserveResponseModel(line)
 \t\t\tstreamUsage.ObserveClaudeStream(line)
 ''',
     '''\t\tlines := bytes.Split(data, []byte("\\n"))
 \t\tfor i, line := range lines {
+\t\t\treporter.ObserveResponseModel(line)
 \t\t\tresponseUsageBuffer.ObserveClaudeStream(line)
 ''',
     'responseUsageBuffer.ObserveClaudeStream(',
@@ -4346,11 +4330,13 @@ replace_once(
     claude_execute,
     '''\t} else {
 \t\tcommitClaudeContinuity(diagnosticsState, claudeMessageIDFromResponse(data), helps.HeaderValueCaseInsensitive(httpResp.Header, "request-id"))
+\t\treporter.ObserveResponseModel(data)
 \t\treporter.Publish(ctx, helps.ParseClaudeUsage(data))
 \t\tvar errRestore error
 ''',
     '''\t} else {
 \t\tcommitClaudeContinuity(diagnosticsState, claudeMessageIDFromResponse(data), helps.HeaderValueCaseInsensitive(httpResp.Header, "request-id"))
+\t\treporter.ObserveResponseModel(data)
 \t\tvar errRestore error
 ''',
 )
@@ -4415,12 +4401,14 @@ openai_compat_execute = ROOT / 'internal/runtime/executor/openai_compat_executor
 replace_once(
     openai_compat_execute,
     '''\thelps.AppendAPIResponseChunk(ctx, e.cfg, body)
+\treporter.ObserveResponseModel(body)
 \treporter.Publish(ctx, helps.ParseOpenAIUsage(body))
 \t// Ensure we at least record the request even if upstream doesn't return usage
 \treporter.EnsurePublished(ctx)
 \t// Translate response back to source format when needed
 ''',
     '''\thelps.AppendAPIResponseChunk(ctx, e.cfg, body)
+\treporter.ObserveResponseModel(body)
 \t// Translate response back to source format before publishing success. A
 \t// translator panic is an upstream-attempt failure and must win the one-shot
 \t// terminal usage publication while retaining the parsed token detail.
@@ -5898,6 +5886,7 @@ replace_once(
 replace_once(
     redisqueue_plugin,
     '''\tresponseServiceTier := strings.TrimSpace(record.ResponseServiceTier)
+\tresponseModel := strings.TrimSpace(record.ResponseModel)
 \tclientRequestMetadata := internallogging.GetClientRequestMetadata(ctx)
 ''',
     '''\tresponseServiceTier := strings.TrimSpace(record.ResponseServiceTier)
@@ -5906,6 +5895,7 @@ replace_once(
 \t\tspeed = coreusage.SpeedFromContext(ctx)
 \t}
 \tresponseSpeed := strings.TrimSpace(record.ResponseSpeed)
+\tresponseModel := strings.TrimSpace(record.ResponseModel)
 \tclientRequestMetadata := internallogging.GetClientRequestMetadata(ctx)
 ''',
     'responseSpeed := strings.TrimSpace(record.ResponseSpeed)',
@@ -5969,12 +5959,14 @@ replace_once(
     redisqueue_plugin,
     '''\t\tServiceTier:         serviceTier,
 \t\tResponseServiceTier: responseServiceTier,
+\t\tResponseModel:       responseModel,
 \t})
 ''',
     '''\t\tServiceTier:         serviceTier,
 \t\tResponseServiceTier: responseServiceTier,
 \t\tSpeed:               speed,
 \t\tResponseSpeed:       responseSpeed,
+\t\tResponseModel:       responseModel,
 \t})
 ''',
     'ResponseSpeed:       responseSpeed',
@@ -5983,12 +5975,14 @@ replace_once(
     redisqueue_plugin,
     '''\tServiceTier         string                   `json:"service_tier"`
 \tResponseServiceTier string                   `json:"response_service_tier,omitempty"`
+\tResponseModel       string                   `json:"response_model,omitempty"`
 }
 ''',
     '''\tServiceTier         string                   `json:"service_tier"`
 \tResponseServiceTier string                   `json:"response_service_tier,omitempty"`
 \tSpeed               string                   `json:"speed,omitempty"`
 \tResponseSpeed       string                   `json:"response_speed,omitempty"`
+\tResponseModel       string                   `json:"response_model,omitempty"`
 }
 ''',
     '`json:"response_speed,omitempty"`',
@@ -7234,7 +7228,6 @@ format_go_writes([
     'internal/translator/codex/openai/chat-completions/codex_fast_service_tier_test.go',
     'internal/translator/codex/openai/chat-completions/codex_openai_request.go',
     'internal/translator/codex/openai/responses/codex_fast_service_tier_test.go',
-    'internal/translator/codex/openai/responses/codex_openai-responses_request.go',
     'sdk/auth/codex_device.go',
     'sdk/auth/filestore.go',
 	'sdk/auth/filestore_identity.go',
