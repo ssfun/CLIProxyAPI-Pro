@@ -269,16 +269,24 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  build-image-candidate:
+  build-image-platform:
     needs:
       - check-version
       - build-core-linux
       - validate-management
     if: needs.check-version.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
 
-    outputs:
-      digest: ${{ steps.build-image.outputs.digest }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            asset_arch: amd64
+            runner: ubuntu-26.04
+          - arch: arm64
+            asset_arch: aarch64
+            runner: ubuntu-26.04-arm
 
     permissions:
       contents: read
@@ -290,17 +298,11 @@ jobs:
           path: customizations-repo
           fetch-depth: 1
 
-      - name: Download Linux amd64 core asset
+      - name: Download platform core asset
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: core-release-assets-linux-amd64
-          path: docker-assets/linux-amd64
-
-      - name: Download Linux arm64 core asset
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: core-release-assets-linux-arm64
-          path: docker-assets/linux-arm64
+          name: core-release-assets-linux-${{ matrix.arch }}
+          path: docker-assets/core
 
       - name: Download built Pro management panel
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -311,44 +313,33 @@ jobs:
       - name: Prepare Docker runtime context
         env:
           RELEASE_TAG: ${{ needs.check-version.outputs.release_tag }}
+          TARGET_ARCH: ${{ matrix.arch }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
         run: |
           set -euo pipefail
 
           context_dir="docker-runtime-context"
           rm -rf "${context_dir}"
-          mkdir -p \
-            "${context_dir}/binaries/linux/amd64" \
-            "${context_dir}/binaries/linux/arm64"
+          mkdir -p "${context_dir}/binaries/linux/${TARGET_ARCH}"
 
-          amd64_archive="docker-assets/linux-amd64/CLIProxyAPI_${RELEASE_TAG#v}_linux_amd64.tar.gz"
-          arm64_archive="docker-assets/linux-arm64/CLIProxyAPI_${RELEASE_TAG#v}_linux_aarch64.tar.gz"
-          test -f "${amd64_archive}"
-          test -f "${arm64_archive}"
+          archive="docker-assets/core/CLIProxyAPI_${RELEASE_TAG#v}_linux_${ASSET_ARCH}.tar.gz"
+          test -f "${archive}"
 
           tmp_dir="$(mktemp -d)"
           trap 'rm -rf "${tmp_dir}"' EXIT
 
-          mkdir -p "${tmp_dir}/amd64" "${tmp_dir}/arm64"
-          tar -xzf "${amd64_archive}" -C "${tmp_dir}/amd64"
-          tar -xzf "${arm64_archive}" -C "${tmp_dir}/arm64"
+          tar -xzf "${archive}" -C "${tmp_dir}"
 
-          cp "${tmp_dir}/amd64/cli-proxy-api" "${context_dir}/binaries/linux/amd64/CLIProxyAPI"
-          cp "${tmp_dir}/arm64/cli-proxy-api" "${context_dir}/binaries/linux/arm64/CLIProxyAPI"
-          cp "${tmp_dir}/amd64/config.example.yaml" "${context_dir}/config.example.yaml"
+          cp "${tmp_dir}/cli-proxy-api" "${context_dir}/binaries/linux/${TARGET_ARCH}/CLIProxyAPI"
+          cp "${tmp_dir}/config.example.yaml" "${context_dir}/config.example.yaml"
           cp docker-assets/management/management.html "${context_dir}/management.html"
           cp customizations-repo/cliproxyapi-pro-core/entrypoint.sh "${context_dir}/entrypoint.sh"
           cp customizations-repo/cliproxyapi-pro-core/Dockerfile.runtime "${context_dir}/Dockerfile.runtime"
 
-          chmod +x \
-            "${context_dir}/binaries/linux/amd64/CLIProxyAPI" \
-            "${context_dir}/binaries/linux/arm64/CLIProxyAPI"
+          chmod +x "${context_dir}/binaries/linux/${TARGET_ARCH}/CLIProxyAPI"
           ls -lh \
-            "${context_dir}/binaries/linux/amd64/CLIProxyAPI" \
-            "${context_dir}/binaries/linux/arm64/CLIProxyAPI" \
+            "${context_dir}/binaries/linux/${TARGET_ARCH}/CLIProxyAPI" \
             "${context_dir}/management.html"
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -365,11 +356,93 @@ jobs:
         with:
           context: ./docker-runtime-context
           file: ./docker-runtime-context/Dockerfile.runtime
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/cliproxyapi-pro:candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          cache-from: type=gha,scope=release-runtime
-          cache-to: type=gha,scope=release-runtime,mode=min
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ secrets.DOCKER_USERNAME }}/cliproxyapi-pro,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=release-runtime-${{ matrix.arch }}
+          cache-to: type=gha,scope=release-runtime-${{ matrix.arch }},mode=min
+
+      - name: Export platform image digest
+        env:
+          IMAGE_DIGEST: ${{ steps.build-image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          mkdir -p "${RUNNER_TEMP}/image-digests"
+          touch "${RUNNER_TEMP}/image-digests/${IMAGE_DIGEST#sha256:}"
+
+      - name: Upload platform image digest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/image-digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  build-image-candidate:
+    needs:
+      - check-version
+      - build-image-platform
+    if: needs.check-version.outputs.should_release == 'true' && needs.build-image-platform.result == 'success'
+    runs-on: ubuntu-26.04
+
+    outputs:
+      digest: ${{ steps.merge-image.outputs.digest }}
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download platform image digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: image-digest-*
+          path: image-digests
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Merge run-scoped Docker image candidate
+        id: merge-image
+        env:
+          IMAGE_REPOSITORY: ${{ secrets.DOCKER_USERNAME }}/cliproxyapi-pro
+          CANDIDATE_TAG: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+
+          image_refs=()
+          while IFS= read -r digest_file; do
+            digest="sha256:$(basename "${digest_file}")"
+            [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+            image_refs+=("${IMAGE_REPOSITORY}@${digest}")
+          done < <(find image-digests -maxdepth 1 -type f -print | sort)
+
+          test "${#image_refs[@]}" -eq 2
+          candidate_image="${IMAGE_REPOSITORY}:${CANDIDATE_TAG}"
+          docker buildx imagetools create \
+            --tag "${candidate_image}" \
+            "${image_refs[@]}"
+
+          manifest_file="$(mktemp)"
+          docker buildx imagetools inspect "${candidate_image}" --raw > "${manifest_file}"
+          jq -e '
+            [
+              .manifests[].platform
+              | select(.os == "linux" and (.architecture == "amd64" or .architecture == "arm64"))
+              | "\(.os)/\(.architecture)"
+            ]
+            | sort == ["linux/amd64", "linux/arm64"]
+          ' "${manifest_file}"
+
+          candidate_digest="$(docker buildx imagetools inspect "${candidate_image}" | awk '$1 == "Digest:" && digest == "" { digest=$2 } END { print digest }')"
+          [[ "${candidate_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=${candidate_digest}" >> "${GITHUB_OUTPUT}"
 
   build-core-other:
     needs:

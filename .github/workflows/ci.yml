@@ -317,7 +317,8 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-go-mod-
 
       - name: Restore rotating Go build cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache_go_build
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/go-build-cache
           key: ${{ runner.os }}-${{ runner.arch }}-go-build-${{ hashFiles('upstream-core/go.mod') }}-${{ needs.resolve-upstream.outputs.core_sha }}-${{ hashFiles('customizations-repo/cliproxyapi-pro-core/patches/**', 'customizations-repo/cliproxyapi-pro-core/embeddedusage/**', 'customizations-repo/scripts/validation/core.sh', 'customizations-repo/scripts/validation/compare_go_test_results.py') }}
@@ -326,7 +327,8 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-go-build-${{ hashFiles('upstream-core/go.mod') }}-
 
       - name: Restore Staticcheck analysis cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache_staticcheck
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/staticcheck-cache
           key: ${{ runner.os }}-${{ runner.arch }}-staticcheck-v0.7.0-${{ hashFiles('upstream-core/go.mod') }}-${{ needs.resolve-upstream.outputs.core_sha }}-${{ hashFiles('customizations-repo/cliproxyapi-pro-core/patches/**', 'customizations-repo/scripts/validation/core.sh') }}
@@ -347,6 +349,7 @@ jobs:
           echo "${GOBIN}" >> "${GITHUB_PATH}"
 
       - name: Validate Core customization
+        id: validate_core
         env:
           VALIDATION_ARTIFACT_DIR: ${{ runner.temp }}/core-validation-artifacts
           VALIDATION_RACE: "1"
@@ -361,6 +364,44 @@ jobs:
           path: ${{ runner.temp }}/core-validation-artifacts
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Save Go build cache after validation
+        if: >-
+          ${{
+            !cancelled() &&
+            github.event_name == 'push' &&
+            github.ref == 'refs/heads/main' &&
+            steps.cache_go_build.outcome == 'success' &&
+            steps.cache_go_build.outputs.cache-hit != 'true' &&
+            (
+              steps.validate_core.outcome == 'success' ||
+              steps.validate_core.outcome == 'failure'
+            )
+          }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/go-build-cache
+          key: ${{ steps.cache_go_build.outputs.cache-primary-key }}
+
+      - name: Save Staticcheck analysis cache after validation
+        if: >-
+          ${{
+            !cancelled() &&
+            github.event_name == 'push' &&
+            github.ref == 'refs/heads/main' &&
+            steps.cache_staticcheck.outcome == 'success' &&
+            steps.cache_staticcheck.outputs.cache-hit != 'true' &&
+            (
+              steps.validate_core.outcome == 'success' ||
+              steps.validate_core.outcome == 'failure'
+            )
+          }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/staticcheck-cache
+          key: ${{ steps.cache_staticcheck.outputs.cache-primary-key }}
 
   source-image-build:
     needs:

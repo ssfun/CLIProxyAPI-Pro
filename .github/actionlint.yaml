@@ -1,4 +1,6 @@
 self-hosted-runner:
   labels:
     - macos-15-intel
+    - ubuntu-26.04
+    - ubuntu-26.04-arm
     - windows-11-arm

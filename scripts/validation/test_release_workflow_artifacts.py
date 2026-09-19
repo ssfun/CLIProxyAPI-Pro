@@ -168,17 +168,34 @@ class ReleaseWorkflowArtifactTests(unittest.TestCase):
 
     def test_runtime_image_is_built_early_without_publishing_official_tags(self) -> None:
         workflow = (WORKFLOWS / "release-core.yml").read_text()
+        platform_start = workflow.index("  build-image-platform:\n")
         candidate_start = workflow.index("  build-image-candidate:\n")
         other_start = workflow.index("  build-core-other:\n")
+        platform_job = workflow[platform_start:candidate_start]
         candidate_job = workflow[candidate_start:other_start]
 
-        self.assertIn("- build-core-linux", candidate_job)
-        self.assertNotIn("- build-core-other", candidate_job)
+        self.assertIn("- build-core-linux", platform_job)
+        self.assertNotIn("- build-core-other", platform_job)
+        self.assertIn("runner: ubuntu-26.04", platform_job)
+        self.assertIn("runner: ubuntu-26.04-arm", platform_job)
+        self.assertIn("platforms: linux/${{ matrix.arch }}", platform_job)
+        self.assertNotIn("docker/setup-qemu-action@", platform_job)
+        self.assertIn("push-by-digest=true", platform_job)
+        self.assertIn("scope=release-runtime-${{ matrix.arch }}", platform_job)
+        self.assertIn("name: image-digest-${{ matrix.arch }}", platform_job)
+
+        self.assertIn("- build-image-platform", candidate_job)
+        self.assertIn("runs-on: ubuntu-26.04", candidate_job)
         self.assertIn("candidate-${{ github.run_id }}-${{ github.run_attempt }}", candidate_job)
-        self.assertIn("cache-from: type=gha,scope=release-runtime", candidate_job)
-        self.assertIn("cache-to: type=gha,scope=release-runtime,mode=min", candidate_job)
+        self.assertIn("docker buildx imagetools create", candidate_job)
+        self.assertIn('sort == ["linux/amd64", "linux/arm64"]', candidate_job)
+        self.assertIn('echo "digest=${candidate_digest}"', candidate_job)
         self.assertNotIn("cliproxyapi-pro:latest", candidate_job)
-        self.assertNotIn("needs.check-version.outputs.release_tag }}", candidate_job.split("tags:", 1)[1])
+        self.assertNotIn("needs.check-version.outputs.release_tag }}", candidate_job)
+
+        actionlint_config = (ROOT / ".github" / "actionlint.yaml").read_text()
+        self.assertIn("- ubuntu-26.04", actionlint_config)
+        self.assertIn("- ubuntu-26.04-arm", actionlint_config)
 
     def test_publish_jobs_share_a_mutex_and_stale_run_guard(self) -> None:
         core_workflow = (WORKFLOWS / "release-core.yml").read_text()
