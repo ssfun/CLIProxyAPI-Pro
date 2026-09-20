@@ -906,3 +906,25 @@
 
 :global([data-theme='dark']) .modelAuditdifferent,
 :global([data-theme='dark']) .realtimeTable .realtimeModelCell .modelAuditdifferent { color: #60a5fa; }
+
+.realtimeApiKeyIdentity {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+
+  > span {
+    flex: 0 1 auto;
+    white-space: nowrap;
+  }
+}
+
+.realtimeTable .realtimeApiKeyIdentity > small {
+  flex: 0 0 auto;
+  max-width: calc(100% - 1em - 4px);
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}

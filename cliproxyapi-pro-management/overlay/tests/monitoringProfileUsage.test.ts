@@ -89,7 +89,7 @@ describe('monitoring API key and Profile usage navigation', () => {
     expect(monitoringPage).toContain('<MonitoringApiKeyCell apiKey={row.clientApiKey} profileSnapshot={profileSnapshot} />');
     expect(apiKeyCell).toContain('styles.realtimeApiKeyCell');
     expect(monitoringPage).toContain("resolveUsageProfileSnapshot(row.profileName, row.profileId, '')");
-    expect(apiKeyCell).toContain('{profileSnapshot ? <small title={profileSnapshot}>{profileSnapshot}</small> : null}');
+    expect(apiKeyCell).toContain('{profileSnapshot ? <small title={`Profile · ${profileSnapshot}`}>Profile · {profileSnapshot}</small> : null}');
     expect(monitoringPage).not.toContain("t('monitoring.api_key_profile'");
     expect(monitoringPage).toContain('profileId: selectedProfile');
     expect(preferences).toContain('apiKey: 168');

@@ -6,13 +6,18 @@ export function MonitoringApiKeyCell({ apiKey, profileSnapshot }: {
   apiKey: MonitoringApiKeyIdentity;
   profileSnapshot: string;
 }) {
+  const name = apiKey.name?.trim();
   return (
     <div className={`${styles.primaryCell} ${styles.realtimeApiKeyCell}`}>
-      <span className={apiKey.name ? undefined : styles.monoCell} title={formatMonitoringApiKeyLabel(apiKey)}>
-        {apiKey.name || apiKey.masked}
-      </span>
-      {apiKey.name ? <small className={styles.monoCell} title={apiKey.masked}>{apiKey.masked}</small> : null}
-      {profileSnapshot ? <small title={profileSnapshot}>{profileSnapshot}</small> : null}
+      {name ? (
+        <div className={styles.realtimeApiKeyIdentity} title={formatMonitoringApiKeyLabel(apiKey)}>
+          <span>{name}</span>{' '}
+          <small className={styles.monoCell}>({apiKey.masked})</small>
+        </div>
+      ) : (
+        <span className={styles.monoCell} title={apiKey.masked}>{apiKey.masked}</span>
+      )}
+      {profileSnapshot ? <small title={`Profile · ${profileSnapshot}`}>Profile · {profileSnapshot}</small> : null}
     </div>
   );
 }
