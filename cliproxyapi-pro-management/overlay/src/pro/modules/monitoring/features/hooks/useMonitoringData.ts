@@ -138,6 +138,9 @@ export type MonitoringEventRow = {
   policyMode: string;
   requestedModel: string;
   effectiveModel: string;
+  upstreamModel?: string;
+  responseModel?: string;
+  modelMatchStatus?: string;
   authLabel: string;
   provider: string;
   executorType: string;
@@ -519,6 +522,9 @@ const buildEventRows = (
       policyMode: detail.policy_mode || '',
       requestedModel: detail.requested_model || '',
       effectiveModel: detail.effective_model || '',
+      upstreamModel: detail.upstream_model || '',
+      responseModel: detail.response_model || '',
+      modelMatchStatus: detail.model_match_status || 'unknown',
       authLabel: isDeletedCredential ? deletedCredentialLabel : authMeta?.label || sourceMasked,
       provider: resolvedProvider,
       executorType,
@@ -592,7 +598,9 @@ const buildEventRows = (
         detail.profile_name_snapshot,
         detail.policy_mode,
         detail.requested_model,
-        detail.effective_model
+        detail.effective_model,
+        detail.upstream_model,
+        detail.response_model
       ),
     });
   });

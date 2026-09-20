@@ -291,9 +291,15 @@ func TestUsageStreamPushesInsertedEventsWithoutPollingDelay(t *testing.T) {
 		}
 	}()
 
-	insertTestUsageEvents(t, store, testUsageEvent(0, false, 10))
+	event := testUsageEvent(0, false, 10)
+	event.UpstreamModel, event.ResponseModel, event.ModelMatchStatus = "gpt-6-astra", "gpt-5.6-luna", "mismatch"
+	insertTestUsageEvents(t, store, event)
 	select {
 	case payload := <-payloads:
+		detail := payload.APIs[event.Endpoint].Models[event.Model].Details[0]
+		if detail.UpstreamModel != event.UpstreamModel || detail.ResponseModel != event.ResponseModel || detail.ModelMatchStatus != "mismatch" {
+			t.Fatalf("SSE lost audit: %+v", detail)
+		}
 		if payload.LatestID != 1 || payload.TotalRequests != 1 {
 			t.Fatalf("stream payload = %+v, want inserted event", payload)
 		}
@@ -1439,6 +1445,9 @@ func TestUsageExportImportPreservesUpstreamDiagnostics(t *testing.T) {
 	event.ErrorMessage = "too many requests"
 	event.UpstreamRequestID = "upstream-req-1"
 	event.RetryAfter = "30"
+	event.UpstreamModel = "claude-opus-4-5"
+	event.ResponseModel = "claude-sonnet-4-5"
+	event.ModelMatchStatus = "mismatch"
 	event.SourceHash = "source-hash"
 	event.APIKeyHash = "api-key-hash"
 	insertTestUsageEvents(t, sourceStore, event)
@@ -1467,6 +1476,9 @@ func TestUsageExportImportPreservesUpstreamDiagnostics(t *testing.T) {
 		t.Fatalf("RecentEvents() len = %d, want 1", len(recent))
 	}
 	got := recent[0]
+	if got.UpstreamModel != event.UpstreamModel || got.ResponseModel != event.ResponseModel || got.ModelMatchStatus != "mismatch" {
+		t.Fatalf("model audit not restored: %+v", got)
+	}
 	if got.Provider != "antigravity" || got.ExecutorType != "AntigravityExecutor" || got.Alias != "claude-opus-4-5" {
 		t.Fatalf("provider metadata = provider:%q executor:%q alias:%q", got.Provider, got.ExecutorType, got.Alias)
 	}

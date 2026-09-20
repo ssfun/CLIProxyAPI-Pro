@@ -106,3 +106,12 @@ func (pluginExecutorEmptyStreamError) Error() string {
 	return "plugin executor stream closed before first payload"
 }
 func (pluginExecutorEmptyStreamError) StatusCode() int { return http.StatusBadGateway }
+
+// Non-streaming plugin responses are parsed before host translation. The
+// reporter's format was configured from prepared.outputFormat at dispatch.
+func observePluginResponseModel(reporter *helps.UsageReporter, payload []byte) {
+	if reporter == nil {
+		return
+	}
+	reporter.ObserveResponseModel(payload)
+}

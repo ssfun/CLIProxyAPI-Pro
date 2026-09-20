@@ -840,6 +840,9 @@ func TestOpenStoreMigratesAPIKeyPolicyColumnsBeforeIndexes(t *testing.T) {
 		`alter table usage_events drop column policy_mode`,
 		`alter table usage_events drop column requested_model`,
 		`alter table usage_events drop column effective_model`,
+		`alter table usage_events drop column upstream_model`,
+		`alter table usage_events drop column response_model`,
+		`alter table usage_events drop column model_match_status`,
 	} {
 		if _, err = legacy.db.Exec(statement); err != nil {
 			t.Fatalf("prepare legacy schema with %q: %v", statement, err)
@@ -873,7 +876,7 @@ func TestOpenStoreMigratesAPIKeyPolicyColumnsBeforeIndexes(t *testing.T) {
 	if err = rows.Close(); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"api_key_policy_id", "profile_id", "profile_name_snapshot", "policy_mode", "requested_model", "effective_model"} {
+	for _, name := range []string{"api_key_policy_id", "profile_id", "profile_name_snapshot", "policy_mode", "requested_model", "effective_model", "upstream_model", "response_model", "model_match_status"} {
 		if !columns[name] {
 			t.Errorf("usage_events column %q was not migrated", name)
 		}

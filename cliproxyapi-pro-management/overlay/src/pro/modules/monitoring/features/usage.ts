@@ -174,6 +174,9 @@ export interface UsageDetail {
   policy_mode?: string;
   requested_model?: string;
   effective_model?: string;
+  upstream_model?: string;
+  response_model?: string;
+  model_match_status?: string;
   provider?: string;
   executor_type?: string;
   alias?: string;
@@ -568,6 +571,9 @@ const buildUsageDetail = (
       : typeof detailRaw.effectiveModel === 'string'
         ? detailRaw.effectiveModel.trim()
         : undefined,
+    upstream_model: typeof detailRaw.upstream_model === 'string' ? detailRaw.upstream_model.trim() : undefined,
+    response_model: typeof detailRaw.response_model === 'string' ? detailRaw.response_model.trim() : undefined,
+    model_match_status: typeof detailRaw.model_match_status === 'string' ? detailRaw.model_match_status : undefined,
     provider: provider || undefined,
     executor_type: executorType || undefined,
     alias: alias || undefined,

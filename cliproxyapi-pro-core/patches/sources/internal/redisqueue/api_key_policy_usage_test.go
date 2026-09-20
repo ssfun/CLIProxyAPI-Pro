@@ -91,3 +91,17 @@ func TestUsageQueueRetryAttemptsKeepOneFrozenProfileAttributionEach(t *testing.T
 		}
 	})
 }
+
+func TestUsageQueuePreservesModelAudit(t *testing.T) {
+	withEnabledQueue(t, func() {
+		(&usageQueuePlugin{}).HandleUsage(apiKeyPolicyUsageContext(http.StatusOK), coreusage.Record{
+			Provider: "codex", Model: "billing-model", UpstreamModel: "gpt-6-astra", ResponseModel: "gpt-5.6-luna", ModelMatchStatus: "mismatch",
+		})
+		payload := popSinglePayload(t)
+		requireStringField(t, payload, "model", "billing-model")
+		requireStringField(t, payload, "requested_model", "smart")
+		requireStringField(t, payload, "upstream_model", "gpt-6-astra")
+		requireStringField(t, payload, "response_model", "gpt-5.6-luna")
+		requireStringField(t, payload, "model_match_status", "mismatch")
+	})
+}

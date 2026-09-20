@@ -4124,6 +4124,13 @@ replace_once(
     tracked_closure_execution,
     home_attempt_marker,
 )
+# Preserve the outbound model separately from accounting and response models.
+replace_once(
+    usage_manager,
+    '\tResponseModel string\n',
+    '\tResponseModel string\n\tUpstreamModel string\n\tModelMatchStatus string\n',
+    'ModelMatchStatus string',
+)
 usage_helpers = ROOT / 'internal/runtime/executor/helps/usage_helpers.go'
 replace_once(
     usage_helpers,
@@ -6008,6 +6015,119 @@ replace_once(
 ''',
     '`json:"response_speed,omitempty"`',
 )
+# Observe the model only at the final transport/protocol boundary.
+replace_once(
+    usage_helpers,
+    '\tcliproxyexecutor.MarkUpstreamAttempt(req.Context())\n\tt.reporter.StartResponseTTFT()',
+    '\tcliproxyexecutor.MarkUpstreamAttempt(req.Context())\n\tt.reporter.ObserveUpstreamHTTPRequest(req)\n\tt.reporter.StartResponseTTFT()',
+    't.reporter.ObserveUpstreamHTTPRequest(req)',
+)
+replace_once(
+    usage_helpers,
+    '\tresponseModelMu sync.RWMutex\n',
+    '\tresponseModelMu sync.RWMutex\n\tresponseModelFormat string\n',
+    'responseModelFormat string',
+)
+replace_once(
+    usage_helpers,
+    '\tserved, terminal := extractResponseModelEvent(payload, provider)',
+    '''\tr.responseModelMu.RLock()
+\tformat := r.responseModelFormat
+\tr.responseModelMu.RUnlock()
+\tif format != "" {
+\t\tprovider = format
+\t\t// A partial data line must not finalize a multi-line plugin SSE event.
+\t\tif !gjson.ValidBytes(jsonPayload(payload)) {
+\t\t\treturn
+\t\t}
+\t}
+\tserved, terminal := extractResponseModelEvent(payload, provider)''',
+    'format := r.responseModelFormat',
+)
+for relative_path in (
+    'internal/runtime/executor/codex_websockets_execute.go',
+    'internal/runtime/executor/codex_websockets_stream.go',
+):
+    replace_once(
+        ROOT / relative_path,
+        '\twsReqBody := buildCodexWebsocketRequestBody(upstreamBody)',
+        '\twsReqBody := buildCodexWebsocketRequestBody(upstreamBody)\n\treporter.ObserveUpstreamRequestModel(wsReqBody)',
+        'reporter.ObserveUpstreamRequestModel(wsReqBody)',
+    )
+replace_once(
+    ROOT / 'internal/runtime/executor/xai_websockets_executor.go',
+    '\twsReqBody := buildXAIWebsocketRequestBody(prepared.body)',
+    '\twsReqBody := buildXAIWebsocketRequestBody(prepared.body)\n\treporter.ObserveUpstreamRequestModel(wsReqBody)',
+    'reporter.ObserveUpstreamRequestModel(wsReqBody)',
+)
+aistudio_executor = ROOT / 'internal/runtime/executor/aistudio_executor.go'
+if 'reporter.SetUpstreamModel(baseModel)' not in read(aistudio_executor):
+    replace_all_exact(
+        aistudio_executor,
+        '\tendpoint := e.buildEndpoint(baseModel, body.action, opts.Alt)',
+        '\tendpoint := e.buildEndpoint(baseModel, body.action, opts.Alt)\n\treporter.SetUpstreamModel(baseModel)',
+        2,
+    )
+replace_once(
+    usage_helpers,
+    '\t\tResponseModel:       responseModel,',
+    '\t\tResponseModel:       responseModel,\n\t\tUpstreamModel:       r.auditUpstreamModel(model),\n\t\tModelMatchStatus:    modelMatchStatus(r.auditUpstreamModel(model), responseModel),',
+    'ModelMatchStatus:    modelMatchStatus',
+)
+replace_once(
+    redisqueue_plugin,
+    '\t\tResponseModel:       responseModel,',
+    '\t\tResponseModel:       responseModel,\n\t\tUpstreamModel:       strings.TrimSpace(record.UpstreamModel),\n\t\tModelMatchStatus:    record.ModelMatchStatus,',
+    'ModelMatchStatus:    record.ModelMatchStatus',
+)
+replace_once(
+    redisqueue_plugin,
+    '\tResponseModel       string                   `json:"response_model,omitempty"`',
+    '\tResponseModel       string                   `json:"response_model,omitempty"`\n\tUpstreamModel string `json:"upstream_model,omitempty"`\n\tModelMatchStatus string `json:"model_match_status,omitempty"`',
+    '`json:"model_match_status,omitempty"`',
+)
+# Plugin provider identity is independent of the negotiated wire protocol.
+plugin_adapter = ROOT / 'internal/pluginhost/adapters_executors.go'
+if 'reporter.SetResponseModelFormat(prepared.outputFormat.String())' not in read(plugin_adapter):
+    replace_all_exact(
+        plugin_adapter,
+        '\t\treporter.SetTranslatedReasoningEffort(prepared.req.Payload, prepared.inputFormat.String())',
+        '''\t\treporter.SetResponseModelFormat(prepared.outputFormat.String())
+\t\treporter.SetUpstreamModel(prepared.req.Model)
+\t\treporter.ObserveUpstreamRequestModel(prepared.req.Payload)
+\t\treporter.SetTranslatedReasoningEffort(prepared.req.Payload, prepared.inputFormat.String())''',
+        2,
+    )
+replace_once(
+    plugin_adapter,
+    '\tctx = pluginExecutorUsageContext(ctx, pluginResp.Headers)\n\tresp = coreexecutor.Response{',
+    '\tobservePluginResponseModel(reporter, pluginResp.Payload)\n\tctx = pluginExecutorUsageContext(ctx, pluginResp.Headers)\n\tresp = coreexecutor.Response{',
+    'observePluginResponseModel(reporter, pluginResp.Payload)',
+)
+replace_once(
+    plugin_adapter,
+    '\tvar streamUsage helps.StreamUsageBuffer',
+    '\tmodelObserver := helps.NewStreamResponseModelObserver(reporter)\n\tvar streamUsage helps.StreamUsageBuffer',
+    'modelObserver := helps.NewStreamResponseModelObserver(reporter)',
+)
+replace_once(
+    plugin_adapter,
+    '\t\tpublishOnce.Do(func() {',
+    '\t\tpublishOnce.Do(func() {\n\t\t\tmodelObserver.Finish()',
+    'modelObserver.Finish()',
+)
+replace_once(
+    plugin_adapter,
+    '\t\t\t\t\tsawPayload = true',
+    '''\t\t\t\t\tsawPayload = true
+\t\t\t\t\tif json.Valid(chunk.Payload) {
+\t\t\t\t\t\treporter.ObserveResponseModel(chunk.Payload)
+\t\t\t\t\t} else {
+\t\t\t\t\t\tmodelObserver.Feed(chunk.Payload)
+\t\t\t\t\t}''',
+    'modelObserver.Feed(chunk.Payload)',
+)
+
 redisqueue_plugin_text = read(redisqueue_plugin)
 attempt_field = '\tAttemptIndex *int64 `json:"attempt_index,omitempty"`\n'
 if '`json:"attempt_index,omitempty"`' not in redisqueue_plugin_text:
@@ -7122,6 +7242,7 @@ format_go_writes([
 	'internal/runtime/executor/helps/utls_client.go',
 	'internal/runtime/executor/helps/runtime_proxy_override_test.go',
 	'internal/runtime/executor/helps/quota_settlement_test.go',
+	'internal/runtime/executor/aistudio_executor.go',
 	'internal/runtime/executor/helps/usage_pro_extensions.go',
     'internal/runtime/executor/helps/response_observer_test.go',
     'internal/runtime/executor/helps/usage_helpers.go',

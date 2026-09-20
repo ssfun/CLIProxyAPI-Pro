@@ -37,6 +37,9 @@ type Event struct {
 	PolicyMode           string                   `json:"policy_mode,omitempty"`
 	RequestedModel       string                   `json:"requested_model,omitempty"`
 	EffectiveModel       string                   `json:"effective_model,omitempty"`
+	UpstreamModel        string                   `json:"upstream_model,omitempty"`
+	ResponseModel        string                   `json:"response_model,omitempty"`
+	ModelMatchStatus     string                   `json:"model_match_status,omitempty"`
 	ClientIP             string                   `json:"client_ip,omitempty"`
 	XForwardedFor        string                   `json:"x_forwarded_for,omitempty"`
 	UserAgent            string                   `json:"user_agent,omitempty"`
@@ -100,6 +103,9 @@ type Detail struct {
 	PolicyMode           string                   `json:"policy_mode,omitempty"`
 	RequestedModel       string                   `json:"requested_model,omitempty"`
 	EffectiveModel       string                   `json:"effective_model,omitempty"`
+	UpstreamModel        string                   `json:"upstream_model,omitempty"`
+	ResponseModel        string                   `json:"response_model,omitempty"`
+	ModelMatchStatus     string                   `json:"model_match_status,omitempty"`
 	ClientIP             string                   `json:"client_ip,omitempty"`
 	XForwardedFor        string                   `json:"x_forwarded_for,omitempty"`
 	UserAgent            string                   `json:"user_agent,omitempty"`
@@ -267,6 +273,9 @@ func NormalizeRaw(raw []byte) (Event, error) {
 		PolicyMode:           readString(record, "policy_mode"),
 		RequestedModel:       readString(record, "requested_model"),
 		EffectiveModel:       readString(record, "effective_model"),
+		UpstreamModel:        readString(record, "upstream_model"),
+		ResponseModel:        readString(record, "response_model"),
+		ModelMatchStatus:     readString(record, "model_match_status"),
 		ClientIP:             readString(record, "client_ip", "clientIp"),
 		XForwardedFor:        readString(record, "x_forwarded_for", "xForwardedFor"),
 		UserAgent:            readString(record, "user_agent", "userAgent"),
@@ -363,6 +372,9 @@ func BuildPayload(events []Event) Payload {
 			PolicyMode:           event.PolicyMode,
 			RequestedModel:       event.RequestedModel,
 			EffectiveModel:       event.EffectiveModel,
+			UpstreamModel:        event.UpstreamModel,
+			ResponseModel:        event.ResponseModel,
+			ModelMatchStatus:     event.ModelMatchStatus,
 			ClientIP:             event.ClientIP,
 			XForwardedFor:        event.XForwardedFor,
 			UserAgent:            event.UserAgent,

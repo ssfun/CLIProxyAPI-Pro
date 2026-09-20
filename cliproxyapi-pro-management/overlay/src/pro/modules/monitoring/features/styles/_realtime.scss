@@ -832,3 +832,35 @@
 .emptyBlockSmall {
   min-height: 80px;
 }
+
+.realtimeTable .realtimeModelCell .modelAuditmismatch { color: #d56a16; }
+.realtimeTable .realtimeModelCell .modelAuditvariant { color: #a77a18; }
+.realtimeTable .realtimeModelCell .modelAuditBadge {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 1px 5px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+.realtimeTable .realtimeModelCell > div > small { color: inherit; }
+
+.modelAuditDetailsButton {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modelAuditDetailsButton:hover { text-decoration: underline; }
+.modelAuditDetailsButton:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }

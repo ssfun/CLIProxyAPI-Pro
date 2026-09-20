@@ -533,6 +533,9 @@ func (s *Store) init() error {
 			policy_mode text,
 			requested_model text,
 			effective_model text,
+			upstream_model text,
+			response_model text,
+			model_match_status text,
 			client_ip text,
 			x_forwarded_for text,
 			user_agent text,
@@ -735,6 +738,9 @@ func (s *Store) init() error {
 		`alter table usage_events add column policy_mode text`,
 		`alter table usage_events add column requested_model text`,
 		`alter table usage_events add column effective_model text`,
+		`alter table usage_events add column upstream_model text`,
+		`alter table usage_events add column response_model text`,
+		`alter table usage_events add column model_match_status text`,
 		`alter table usage_summary add column generation integer not null default 1`,
 		`alter table usage_summary add column reset_at_ms integer not null default 0`,
 		`alter table quota_cache add column auth_index text not null default ''`,
@@ -935,12 +941,12 @@ func (s *Store) insertEvents(ctx context.Context, events []internalusage.Event) 
 
 	stmt, err := tx.PrepareContext(ctx, `insert or ignore into usage_events (
 		request_id, event_hash, timestamp_ms, timestamp, provider, executor_type, model, alias, endpoint, method, path,
-		auth_type, auth_index, source, source_hash, api_key_hash, api_key_policy_id, profile_id, profile_name_snapshot, policy_mode, requested_model, effective_model, client_ip, x_forwarded_for, user_agent,
+		auth_type, auth_index, source, source_hash, api_key_hash, api_key_policy_id, profile_id, profile_name_snapshot, policy_mode, requested_model, effective_model, upstream_model, response_model, model_match_status, client_ip, x_forwarded_for, user_agent,
 		input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_tokens, cache_read_tokens, cache_write_tokens, total_tokens,
 		accounting_version, accounting_quality, uncached_input_tokens, unclassified_tokens, token_breakdown_json,
 		latency_ms, ttft_ms, status_code, error_code, error_message, upstream_request_id, retry_after, attempt_index, stream, reasoning_effort, service_tier, effective_service_tier, speed, effective_speed,
 		estimated_cost, price_rule_id, cost_breakdown_json, failed, raw_json, created_at_ms
-	) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return InsertResult{}, err
 	}
@@ -972,7 +978,7 @@ func (s *Store) insertEvents(ctx context.Context, events []internalusage.Event) 
 		res, err := stmt.ExecContext(ctx,
 			nullString(event.RequestID), event.EventHash, event.TimestampMS, event.Timestamp,
 			nullString(event.Provider), nullString(event.ExecutorType), event.Model, nullString(event.Alias), nullString(event.Endpoint), nullString(event.Method), nullString(event.Path),
-			nullString(event.AuthType), nullString(event.AuthIndex), nullString(event.Source), nullString(event.SourceHash), nullString(event.APIKeyHash), nullString(event.APIKeyPolicyID), nullString(event.ProfileID), nullString(event.ProfileNameSnapshot), nullString(event.PolicyMode), nullString(event.RequestedModel), nullString(event.EffectiveModel), nullString(event.ClientIP), nullString(event.XForwardedFor), nullString(event.UserAgent),
+			nullString(event.AuthType), nullString(event.AuthIndex), nullString(event.Source), nullString(event.SourceHash), nullString(event.APIKeyHash), nullString(event.APIKeyPolicyID), nullString(event.ProfileID), nullString(event.ProfileNameSnapshot), nullString(event.PolicyMode), nullString(event.RequestedModel), nullString(event.EffectiveModel), nullString(event.UpstreamModel), nullString(event.ResponseModel), nullString(event.ModelMatchStatus), nullString(event.ClientIP), nullString(event.XForwardedFor), nullString(event.UserAgent),
 			event.InputTokens, event.OutputTokens, event.ReasoningTokens, event.CachedTokens, event.CacheTokens, event.CacheReadTokens, event.CacheWriteTokens, event.TotalTokens,
 			event.AccountingVersion, nullString(event.AccountingQuality), event.UncachedInputTokens, event.UnclassifiedTokens, nullString(breakdownJSON),
 			nullInt64(event.LatencyMS), nullInt64(event.TTFTMS), nullInt(event.StatusCode), nullString(event.ErrorCode), nullString(event.ErrorMessage), nullString(event.UpstreamRequestID), nullString(event.RetryAfter), nullInt64(event.AttemptIndex), boolToInt(event.Stream), nullString(event.ReasoningEffort), nullString(event.ServiceTier), nullString(event.EffectiveServiceTier), nullString(event.Speed), nullString(event.EffectiveSpeed),
@@ -1164,7 +1170,7 @@ func (s *Store) scanEvents(rows *sql.Rows) ([]internalusage.Event, error) {
 	events := make([]internalusage.Event, 0)
 	for rows.Next() {
 		var event internalusage.Event
-		var requestID, provider, executorType, alias, endpoint, method, path, authType, authIndex, source, sourceHash, apiKeyHash, apiKeyPolicyID, profileID, profileNameSnapshot, policyMode, requestedModel, effectiveModel, clientIP, xForwardedFor, userAgent, rawJSON sql.NullString
+		var requestID, provider, executorType, alias, endpoint, method, path, authType, authIndex, source, sourceHash, apiKeyHash, apiKeyPolicyID, profileID, profileNameSnapshot, policyMode, requestedModel, effectiveModel, upstreamModel, responseModel, modelMatchStatus, clientIP, xForwardedFor, userAgent, rawJSON sql.NullString
 		var latency, ttft, attemptIndex sql.NullInt64
 		var statusCode sql.NullInt64
 		var errorCode, errorMessage, upstreamRequestID, retryAfter, reasoningEffort, serviceTier, effectiveServiceTier, speed, effectiveSpeed, costBreakdown, accountingQuality, tokenBreakdownJSON sql.NullString
@@ -1173,7 +1179,7 @@ func (s *Store) scanEvents(rows *sql.Rows) ([]internalusage.Event, error) {
 		var stream, failed int
 		if err := rows.Scan(
 			&event.ID, &requestID, &event.EventHash, &event.TimestampMS, &event.Timestamp, &provider, &executorType, &event.Model,
-			&alias, &endpoint, &method, &path, &authType, &authIndex, &source, &sourceHash, &apiKeyHash, &apiKeyPolicyID, &profileID, &profileNameSnapshot, &policyMode, &requestedModel, &effectiveModel, &clientIP, &xForwardedFor, &userAgent,
+			&alias, &endpoint, &method, &path, &authType, &authIndex, &source, &sourceHash, &apiKeyHash, &apiKeyPolicyID, &profileID, &profileNameSnapshot, &policyMode, &requestedModel, &effectiveModel, &upstreamModel, &responseModel, &modelMatchStatus, &clientIP, &xForwardedFor, &userAgent,
 			&event.InputTokens, &event.OutputTokens, &event.ReasoningTokens, &event.CachedTokens, &event.CacheTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.TotalTokens,
 			&event.AccountingVersion, &accountingQuality, &event.UncachedInputTokens, &event.UnclassifiedTokens, &tokenBreakdownJSON,
 			&latency, &ttft, &statusCode, &errorCode, &errorMessage, &upstreamRequestID, &retryAfter, &attemptIndex, &stream, &reasoningEffort, &serviceTier, &effectiveServiceTier, &speed, &effectiveSpeed,
@@ -1199,6 +1205,9 @@ func (s *Store) scanEvents(rows *sql.Rows) ([]internalusage.Event, error) {
 		event.PolicyMode = policyMode.String
 		event.RequestedModel = requestedModel.String
 		event.EffectiveModel = effectiveModel.String
+		event.UpstreamModel = upstreamModel.String
+		event.ResponseModel = responseModel.String
+		event.ModelMatchStatus = modelMatchStatus.String
 		event.ClientIP = clientIP.String
 		event.XForwardedFor = xForwardedFor.String
 		event.UserAgent = userAgent.String
@@ -1255,7 +1264,7 @@ func (s *Store) recentEventsFrom(ctx context.Context, queryer sqlQueryer, limit 
 	}
 	rows, err := queryer.QueryContext(ctx, `select
 		id, request_id, event_hash, timestamp_ms, timestamp, provider, executor_type, model, alias, endpoint, method, path,
-		auth_type, auth_index, source, source_hash, api_key_hash, api_key_policy_id, profile_id, profile_name_snapshot, policy_mode, requested_model, effective_model, client_ip, x_forwarded_for, user_agent,
+		auth_type, auth_index, source, source_hash, api_key_hash, api_key_policy_id, profile_id, profile_name_snapshot, policy_mode, requested_model, effective_model, upstream_model, response_model, model_match_status, client_ip, x_forwarded_for, user_agent,
 		input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_tokens, cache_read_tokens, cache_write_tokens, total_tokens,
 		accounting_version, accounting_quality, uncached_input_tokens, unclassified_tokens, token_breakdown_json,
 		latency_ms, ttft_ms, status_code, error_code, error_message, upstream_request_id, retry_after, attempt_index, stream, reasoning_effort, service_tier, effective_service_tier, speed, effective_speed,
@@ -1276,7 +1285,7 @@ func (s *Store) EventsAfter(ctx context.Context, afterID int64, limit int) ([]in
 	}
 	rows, err := s.executor(ctx).QueryContext(ctx, `select
 		id, request_id, event_hash, timestamp_ms, timestamp, provider, executor_type, model, alias, endpoint, method, path,
-		auth_type, auth_index, source, source_hash, api_key_hash, api_key_policy_id, profile_id, profile_name_snapshot, policy_mode, requested_model, effective_model, client_ip, x_forwarded_for, user_agent,
+		auth_type, auth_index, source, source_hash, api_key_hash, api_key_policy_id, profile_id, profile_name_snapshot, policy_mode, requested_model, effective_model, upstream_model, response_model, model_match_status, client_ip, x_forwarded_for, user_agent,
 		input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_tokens, cache_read_tokens, cache_write_tokens, total_tokens,
 		accounting_version, accounting_quality, uncached_input_tokens, unclassified_tokens, token_breakdown_json,
 		latency_ms, ttft_ms, status_code, error_code, error_message, upstream_request_id, retry_after, attempt_index, stream, reasoning_effort, service_tier, effective_service_tier, speed, effective_speed,
@@ -1370,7 +1379,7 @@ func appendUsageEventQueryFilters(options UsageEventQueryOptions, includeCursor 
 			coalesce(api_key_hash, '') || char(10) || coalesce(api_key_policy_id, '') || char(10) ||
 			coalesce(profile_id, '') || char(10) || coalesce(profile_name_snapshot, '') || char(10) ||
 			coalesce(policy_mode, '') || char(10) || coalesce(requested_model, '') || char(10) ||
-			coalesce(effective_model, '') || char(10) || coalesce(client_ip, '') || char(10) ||
+			coalesce(effective_model, '') || char(10) || coalesce(upstream_model, '') || char(10) || coalesce(response_model, '') || char(10) || coalesce(client_ip, '') || char(10) ||
 			coalesce(x_forwarded_for, '') || char(10) || coalesce(user_agent, '') || char(10) ||
 			coalesce(error_code, '') || char(10) ||
 			coalesce(error_message, '') || char(10) || coalesce(upstream_request_id, '')
@@ -1434,7 +1443,7 @@ func (s *Store) QueryEvents(ctx context.Context, options UsageEventQueryOptions)
 	queryWheres, queryArgs := appendUsageEventQueryFilters(options, true)
 	query := `select
 		id, request_id, event_hash, timestamp_ms, timestamp, provider, executor_type, model, alias, endpoint, method, path,
-		auth_type, auth_index, source, source_hash, api_key_hash, api_key_policy_id, profile_id, profile_name_snapshot, policy_mode, requested_model, effective_model, client_ip, x_forwarded_for, user_agent,
+		auth_type, auth_index, source, source_hash, api_key_hash, api_key_policy_id, profile_id, profile_name_snapshot, policy_mode, requested_model, effective_model, upstream_model, response_model, model_match_status, client_ip, x_forwarded_for, user_agent,
 		input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_tokens, cache_read_tokens, cache_write_tokens, total_tokens,
 		accounting_version, accounting_quality, uncached_input_tokens, unclassified_tokens, token_breakdown_json,
 		latency_ms, ttft_ms, status_code, error_code, error_message, upstream_request_id, retry_after, attempt_index, stream, reasoning_effort, service_tier, effective_service_tier, speed, effective_speed,

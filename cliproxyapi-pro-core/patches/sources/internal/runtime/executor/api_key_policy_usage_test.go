@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,10 +12,12 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pro/apikeypolicy"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
+	"github.com/tidwall/gjson"
 )
 
 type executorPolicyUsageCapture struct {
@@ -263,4 +266,36 @@ func assertNoExecutorPolicyUsage(t *testing.T, records <-chan executorPolicyUsag
 		t.Fatalf("duplicate usage = %#v", duplicate.record)
 	case <-time.After(50 * time.Millisecond):
 	}
+}
+
+type modelAuditWireTransport func(*http.Request) (*http.Response, error)
+
+func (f modelAuditWireTransport) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+func TestModelAuditAntigravityUsesFinalWireModel(t *testing.T) {
+	ctx := context.Background()
+	e := &AntigravityExecutor{cfg: &config.Config{}}
+	reporter := helps.NewExecutorUsageReporter(ctx, e, "gemini-3-pro", nil)
+	payload := []byte(`{"model":"intermediate-model","request":{"contents":[]}}`)
+	reporter.SetTranslatedReasoningEffort(payload, "antigravity")
+	auth := &cliproxyauth.Auth{ID: "audit-auth", Metadata: map[string]any{"project_id": "test-project"}}
+	req, err := e.buildRequest(ctx, auth, "test-token", "gemini-3-pro", payload, false, "", "https://example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := reporter.TrackHTTPClient(&http.Client{Transport: modelAuditWireTransport(func(req *http.Request) (*http.Response, error) {
+		actual, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wire := gjson.GetBytes(actual, "model").String()
+		if wire != "gemini-3-pro" || reporter.UpstreamModel() != wire {
+			t.Fatalf("wire=%q recorded=%q", wire, reporter.UpstreamModel())
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`)), Request: req}, nil
+	})})
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
 }

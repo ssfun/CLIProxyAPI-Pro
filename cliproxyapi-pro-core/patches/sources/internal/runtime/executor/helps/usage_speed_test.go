@@ -3,6 +3,9 @@ package helps
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,5 +136,102 @@ func TestStreamUsageBufferPublishFailurePreservesObservedUsage(t *testing.T) {
 			t.Fatalf("received duplicate usage record: %+v", duplicate)
 		}
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestUsageReporterModelAuditUsesOutboundPayloadAndKeepsAccountingModel(t *testing.T) {
+	for _, tc := range []struct{ response, status string }{
+		{"gpt-6-astra", "match"}, {"gpt-6-astra-2026-09-01", "variant"},
+		{"gpt-5.6-luna", "mismatch"}, {"", "unknown"},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			reporter := NewUsageReporter(context.Background(), "codex", "accounting-model", nil)
+			reporter.ObserveUpstreamRequestModel([]byte(`{"model":"gpt-6-astra","reasoning":{"effort":"high"}}`))
+			reporter.SetResponseModel(tc.response)
+			record := reporter.buildRecord(usage.Detail{TotalTokens: 3}, false)
+			if record.Model != "accounting-model" || record.UpstreamModel != "gpt-6-astra" || record.ResponseModel != tc.response || record.ModelMatchStatus != tc.status {
+				t.Fatalf("model audit = %+v", record)
+			}
+			side := reporter.buildRecordForModel("image-tool", usage.Detail{}, false, usage.Failure{})
+			if side.UpstreamModel != "" || side.ResponseModel != "" || side.ModelMatchStatus != "unknown" {
+				t.Fatalf("side model inherited audit: %+v", side)
+			}
+		})
+	}
+}
+
+func TestUsageReporterModelAuditTerminalResponseAndRetryIsolation(t *testing.T) {
+	first := NewUsageReporter(context.Background(), "codex", "gpt-6-astra", nil)
+	first.ObserveUpstreamRequestModel([]byte(`{"model":"gpt-6-astra"}`))
+	first.ObserveResponseModel([]byte(`data: {"type":"response.created","response":{"model":"gpt-6-astra"}}`))
+	first.ObserveResponseModel([]byte(`data: {"type":"response.completed","response":{"model":"gpt-5.6-luna"}}`))
+	first.ObserveResponseModel([]byte(`data: {"type":"response.created","response":{"model":"gpt-6-astra"}}`))
+	if got := first.buildRecord(usage.Detail{}, false); got.ResponseModel != "gpt-5.6-luna" || got.ModelMatchStatus != "mismatch" {
+		t.Fatalf("terminal audit = %+v", got)
+	}
+	retry := NewUsageReporter(context.Background(), "codex", "gpt-6-astra", nil)
+	if got := retry.buildRecord(usage.Detail{}, true); got.ResponseModel != "" || got.ModelMatchStatus != "unknown" {
+		t.Fatalf("retry inherited response: %+v", got)
+	}
+}
+
+func TestModelAuditIgnoresIntermediateTranslation(t *testing.T) {
+	r := NewUsageReporter(context.Background(), "antigravity", "client-alias", nil)
+	r.SetTranslatedReasoningEffort([]byte(`{"model":"intermediate-model"}`), "antigravity")
+	r.SetResponseModel("served-model")
+	if got := r.buildRecord(usage.Detail{}, false); got.UpstreamModel != "" || got.ModelMatchStatus != "unknown" {
+		t.Fatalf("inferred outbound model: %+v", got)
+	}
+}
+
+type modelAuditTransport func(*http.Request) (*http.Response, error)
+
+func (f modelAuditTransport) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestModelAuditReadsFinalRequestWithoutConsumingBody(t *testing.T) {
+	for _, tc := range []struct{ name, url, body, want string }{
+		{"JSON body", "https://example.test/v1/responses", `{"model":"final-model"}`, "final-model"},
+		{"URL takes precedence", "https://example.test/v1beta/models/gemini-real:generateContent", `{"model":"ignored-model"}`, "gemini-real"},
+		{"Vertex URL", "https://example.test/v1/projects/p/locations/l/publishers/google/models/gemini-real:streamGenerateContent", `{"model":"ignored-model"}`, "gemini-real"},
+		{"large body", "https://example.test/v1/responses", `{"model":"final-model","input":"` + strings.Repeat("x", 128*1024) + `"}`, "final-model"},
+		{"model beyond bound", "https://example.test/v1/responses", `{"input":"` + strings.Repeat("x", 128*1024) + `","model":"late-model"}`, ""},
+		{"partial string", "https://example.test/v1/responses", `{"model":"` + strings.Repeat("x", 128*1024) + `"}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := NewUsageReporter(context.Background(), "test-provider", "accounting-model", nil)
+			r.SetTranslatedReasoningEffort([]byte(`{"model":"intermediate"}`), "openai")
+			req, err := http.NewRequest(http.MethodPost, tc.url, strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := r.TrackHTTPClient(&http.Client{Transport: modelAuditTransport(func(req *http.Request) (*http.Response, error) {
+				body, err := io.ReadAll(req.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(body) != tc.body {
+					t.Fatal("audit consumed or modified request body")
+				}
+				if r.UpstreamModel() != tc.want {
+					t.Fatalf("model at transport = %q, want %q", r.UpstreamModel(), tc.want)
+				}
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`)), Request: req}, nil
+			})})
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+		})
+	}
+}
+
+func TestModelAuditNonReplayableBodyIsNotConsumed(t *testing.T) {
+	r := NewUsageReporter(context.Background(), "test", "alias", nil)
+	req, _ := http.NewRequest(http.MethodPost, "https://example.test/responses", io.NopCloser(strings.NewReader(`{"model":"actual"}`)))
+	r.ObserveUpstreamHTTPRequest(req)
+	remaining, _ := io.ReadAll(req.Body)
+	if string(remaining) != `{"model":"actual"}` || r.UpstreamModel() != "" {
+		t.Fatal("unreplayable body was consumed or inferred")
 	}
 }

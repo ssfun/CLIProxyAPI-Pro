@@ -318,3 +318,24 @@ func TestBuildPayloadIncludesUpstreamUsageMetadata(t *testing.T) {
 		t.Fatalf("detail client metadata = %q/%q/%q", detail.ClientIP, detail.XForwardedFor, detail.UserAgent)
 	}
 }
+
+func TestModelAuditSurvivesPayloadAndDoesNotChangeIdentity(t *testing.T) {
+	raw := `{"timestamp":"2026-09-20T00:00:00Z","model":"billing-model","requested_model":"smart","upstream_model":"gpt-6-astra","response_model":"gpt-5.6-luna","model_match_status":"mismatch"}`
+	event, err := NormalizeRaw([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.UpstreamModel != "gpt-6-astra" || event.ResponseModel != "gpt-5.6-luna" || event.ModelMatchStatus != "mismatch" {
+		t.Fatalf("audit missing: %+v", event)
+	}
+	payload := BuildPayload([]Event{event})
+	detail := payload.APIs["-"].Models["billing-model"].Details[0]
+	if detail.UpstreamModel != event.UpstreamModel || detail.ResponseModel != event.ResponseModel || detail.ModelMatchStatus != event.ModelMatchStatus {
+		t.Fatalf("payload lost audit: %+v", detail)
+	}
+	legacy := event
+	legacy.UpstreamModel, legacy.ResponseModel, legacy.ModelMatchStatus = "", "", ""
+	if buildEventHash(legacy) != buildEventHash(event) {
+		t.Fatal("audit changed event deduplication identity")
+	}
+}

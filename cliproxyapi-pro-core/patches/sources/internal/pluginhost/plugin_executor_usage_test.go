@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pro/apikeypolicy"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
@@ -105,7 +106,7 @@ func TestPluginExecutorPublishesParsedNonStreamTokens(t *testing.T) {
 		&fakeExecutor{
 			identifier: "plugin-provider",
 			execute: func(context.Context, pluginapi.ExecutorRequest) (pluginapi.ExecutorResponse, error) {
-				return pluginapi.ExecutorResponse{Payload: []byte(`{"usage":{"prompt_tokens":5,"completion_tokens":7,"total_tokens":12}}`)}, nil
+				return pluginapi.ExecutorResponse{Payload: []byte(`{"model":"served-model","usage":{"prompt_tokens":5,"completion_tokens":7,"total_tokens":12}}`)}, nil
 			},
 		},
 		[]sdktranslator.Format{sdktranslator.FormatOpenAI},
@@ -118,6 +119,9 @@ func TestPluginExecutorPublishesParsedNonStreamTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := waitForPluginExecutorUsage(t, recorder.records)
+	if record.UpstreamModel != "plugin-model" || record.ResponseModel != "served-model" || record.ModelMatchStatus != "mismatch" {
+		t.Fatalf("adapter lost raw model audit: %+v", record)
+	}
 	if record.Detail.InputTokens != 5 || record.Detail.OutputTokens != 7 || record.Detail.TotalTokens != 12 {
 		t.Fatalf("parsed usage = %#v", record.Detail)
 	}
@@ -128,7 +132,7 @@ func TestPluginExecutorPublishesParsedStreamTokens(t *testing.T) {
 	coreusage.RegisterNamedPlugin("plugin-executor-stream-token-usage-test", recorder)
 	defer coreusage.UnregisterNamedPlugin("plugin-executor-stream-token-usage-test", recorder)
 	chunks := make(chan pluginapi.ExecutorStreamChunk, 1)
-	chunks <- pluginapi.ExecutorStreamChunk{Payload: []byte("event: response.completed\n" + `data: {"usage":{"prompt_tokens":4,"completion_tokens":6,"total_tokens":10}}`)}
+	chunks <- pluginapi.ExecutorStreamChunk{Payload: []byte("event: response.completed\n" + `data: {"model":"served-model","usage":{"prompt_tokens":4,"completion_tokens":6,"total_tokens":10}}`)}
 	close(chunks)
 	host := newHostWithRecords(normalizeTestCapabilityRecord(capabilityRecord{id: "stream-token-usage-executor"}))
 	adapter := newCurrentExecutorAdapterForTest(
@@ -152,6 +156,9 @@ func TestPluginExecutorPublishesParsedStreamTokens(t *testing.T) {
 	for range result.Chunks {
 	}
 	record := waitForPluginExecutorUsage(t, recorder.records)
+	if record.UpstreamModel != "plugin-model" || record.ResponseModel != "served-model" || record.ModelMatchStatus != "mismatch" {
+		t.Fatalf("adapter lost raw model audit: %+v", record)
+	}
 	if record.Detail.InputTokens != 4 || record.Detail.OutputTokens != 6 || record.Detail.TotalTokens != 10 {
 		t.Fatalf("parsed stream usage = %#v", record.Detail)
 	}
@@ -411,5 +418,99 @@ func assertNoPluginExecutorUsage(t *testing.T, records <-chan coreusage.Record) 
 	case record := <-records:
 		t.Fatalf("unexpected usage record: %#v", record)
 	case <-time.After(25 * time.Millisecond):
+	}
+}
+
+func TestPluginRawResponseModelObservedBeforeTranslation(t *testing.T) {
+	for _, tc := range []struct{ provider, format, payload, want string }{
+		{"gemini", "openai-response", `{"model":"served-model","usage":{"total_tokens":1}}`, "served-model"},
+		{"gemini", "openai-response", `{"type":"response.completed","response":{"model":"served-model"}}`, "served-model"},
+		{"codex", "claude", `{"type":"message","model":"claude-served"}`, "claude-served"},
+		{"claude", "gemini", `{"modelVersion":"gemini-served"}`, "gemini-served"},
+		{"claude", "antigravity", `{"response":{"modelVersion":"gemini-served"}}`, "gemini-served"},
+	} {
+		reporter := helps.NewUsageReporter(context.Background(), tc.provider, "requested", nil)
+		reporter.SetResponseModelFormat(tc.format)
+		observePluginResponseModel(reporter, []byte(tc.payload))
+		if reporter.ResponseModel() != tc.want {
+			t.Fatalf("%s/%s model=%q, want %q", tc.provider, tc.format, reporter.ResponseModel(), tc.want)
+		}
+	}
+}
+
+type modelAuditPluginRecorder struct {
+	records  chan coreusage.Record
+	provider string
+}
+
+func (r *modelAuditPluginRecorder) HandleUsage(_ context.Context, record coreusage.Record) {
+	if record.Provider == r.provider {
+		r.records <- record
+	}
+}
+
+func TestPluginModelAuditUsesNegotiatedProtocolAndCompleteSSEEvents(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider string
+		format         sdktranslator.Format
+		chunks         []string
+		want           string
+		terminal       error
+	}{
+		{name: "fragmented multiline terminal", provider: "gemini", format: sdktranslator.FormatOpenAIResponse, chunks: []string{
+			"data: {\"type\":\"response.created\",\"response\":{\"model\":\"early\"}}\r\n\r\n",
+			"event: response.completed\r\ndata: {\"type\":\"response.completed\",\r\ndata: ",
+			"\"response\":{\"model\":\"served-model\"}}\r\n\r\n",
+		}, want: "served-model"},
+		{name: "flush terminal at EOF", provider: "gemini", format: sdktranslator.FormatOpenAIResponse, chunks: []string{
+			"data: {\"type\":\"response.completed\",\ndata: \"response\":{\"model\":\"served-model\"}}",
+		}, want: "served-model"},
+		{name: "flush on failure", provider: "gemini", format: sdktranslator.FormatOpenAIResponse, chunks: []string{
+			"data: {\"type\":\"response.completed\",\ndata: \"response\":{\"model\":\"served-model\"}}",
+		}, want: "served-model", terminal: pluginExecutorStatusError{status: 502}},
+		{name: "raw JSON chunks", provider: "codex", format: sdktranslator.FormatClaude, chunks: []string{
+			`{"type":"message_start","message":{"model":"served-model","usage":{"input_tokens":1}}}`,
+			`{"type":"message_delta","usage":{"output_tokens":2}}`, `{"type":"message_stop"}`,
+		}, want: "served-model"},
+		{name: "partial Claude message must not finalize early", provider: "codex", format: sdktranslator.FormatClaude, chunks: []string{
+			"data: {\"type\":\"message\",\ndata: \"model\":\"served-model\",\"usage\":{\"input_tokens\":1}}\n\n",
+		}, want: "served-model"},
+		{name: "oversized frame recovery", provider: "gemini", format: sdktranslator.FormatOpenAIResponse, chunks: []string{
+			"data: {\"ignored\":\"" + strings.Repeat("x", 70*1024) + "\"}\n\n",
+			"data: {\"type\":\"response.completed\",\"response\":{\"model\":\"served-model\"}}\n\n",
+		}, want: "served-model"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := &modelAuditPluginRecorder{provider: tc.provider, records: make(chan coreusage.Record, 4)}
+			coreusage.RegisterNamedPlugin("model-audit-stream", recorder)
+			defer coreusage.UnregisterNamedPlugin("model-audit-stream", recorder)
+			chunks := make(chan pluginapi.ExecutorStreamChunk, len(tc.chunks)+1)
+			for _, payload := range tc.chunks {
+				chunks <- pluginapi.ExecutorStreamChunk{Payload: []byte(payload)}
+			}
+			if tc.terminal != nil {
+				chunks <- pluginapi.ExecutorStreamChunk{Err: tc.terminal}
+			}
+			close(chunks)
+			host := newHostWithRecords(normalizeTestCapabilityRecord(capabilityRecord{id: "model-audit-stream"}))
+			adapter := newCurrentExecutorAdapterForTest(host, "model-audit-stream", &fakeExecutor{
+				identifier: tc.provider,
+				executeStream: func(context.Context, pluginapi.ExecutorRequest) (pluginapi.ExecutorStreamResponse, error) {
+					return pluginapi.ExecutorStreamResponse{Chunks: chunks}, nil
+				},
+			}, []sdktranslator.Format{tc.format}, []sdktranslator.Format{tc.format})
+			adapter.provider = tc.provider
+			result, err := adapter.ExecuteStream(context.Background(), &coreauth.Auth{ID: "audit-auth"}, coreexecutor.Request{Model: "requested", Format: tc.format, Payload: []byte(`{"model":"requested"}`)}, coreexecutor.Options{SourceFormat: tc.format, ResponseFormat: tc.format})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range result.Chunks {
+			}
+			got := waitForPluginExecutorUsage(t, recorder.records)
+			if got.Provider != tc.provider || got.Model != "requested" || got.UpstreamModel != "requested" || got.ResponseModel != tc.want || got.ModelMatchStatus != "mismatch" || got.Failed != (tc.terminal != nil) {
+				t.Fatalf("model audit=%+v", got)
+			}
+			assertNoPluginExecutorUsage(t, recorder.records)
+		})
 	}
 }

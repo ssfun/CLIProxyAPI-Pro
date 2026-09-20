@@ -1,3 +1,4 @@
+import { modelAuditItems } from './modelAudit';
 import type { TFunction } from 'i18next';
 import { maskSensitiveText } from '@/utils/format';
 import type { MonitoringEventRow } from './hooks/useMonitoringData';
@@ -323,6 +324,7 @@ export const buildRealtimeDiagnosticClipboardText = (
     [t('monitoring.cost_detail_requested_tier'), row.serviceTier || '-'],
     [t('monitoring.cost_detail_actual_tier'), row.effectiveServiceTier || '-'],
   ];
+  fields.push(...modelAuditItems(row, t).map(({ label, value }): [string, string] => [label, value]));
   return fields.map(([label, value]) => `${label}: ${maskSensitiveText(String(value ?? '-'))}`).join('\n');
 };
 

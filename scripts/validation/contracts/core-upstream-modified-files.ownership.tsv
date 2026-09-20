@@ -41,6 +41,7 @@ internal/pluginhost/snapshot.go	generic-host-hook	plugin-quota	upstream-quota-ca
 internal/pluginstore/auth.go	upstream-generic-fix	plugin-store-auth	upstream-private-github-release-auth
 internal/redisqueue/plugin.go	must-remain-host-patch	observability	retain-usage-enrichment-and-monitoring-controls
 internal/redisqueue/queue.go	must-remain-host-patch	observability	independent-bounded-persistence-sink-and-drop-metrics
+internal/runtime/executor/aistudio_executor.go	generic-host-hook	model-audit	retain-final-url-model-at-websocket-relay-boundary
 internal/runtime/executor/antigravity_executor.go	must-remain-host-patch	final-outbound-transport	retain-runtime-proxy-generation-in-antigravity-cache
 internal/runtime/executor/claude_executor_auth.go	upstream-generic-fix	claude-auth-concurrency	upstream-lock-setup-token-metadata-reads
 internal/runtime/executor/claude_executor_execute.go	upstream-generic-fix	usage-accounting	upstream-preserve-claude-failed-usage

@@ -1,3 +1,5 @@
+import { RealtimeModelCell } from './features/components/RealtimeModelCell';
+import { resolveModelAudit } from './features/modelAudit';
 import { MonitoringApiKeyCell } from './features/components/MonitoringApiKeyCell';
 import { buildConfiguredApiKeyMap, buildMonitoringApiKeyNames, formatMonitoringApiKeyLabel } from './features/apiKeyIdentity';
 import { useMonitoringAnalytics } from './features/hooks/useMonitoringAnalytics';
@@ -173,8 +175,10 @@ const getRealtimeLogColumnContentTexts = (key: RealtimeLogColumnKey, row: Realti
         row.accountPlan === '-' ? row.provider : `${row.provider} · ${row.accountPlan}`,
         row.account || row.authLabel || row.accountMasked || '-',
       ];
-    case 'model':
-      return [row.model, row.modelAlias && row.modelAlias !== row.model ? row.modelAlias : buildRealtimeMetaText(row)];
+    case 'model': {
+      const audit = resolveModelAudit(row);
+      return [audit.requested, audit.sent, audit.response, audit.legacyModel, buildRealtimeMetaText(row)];
+    }
     case 'reasoningEffort':
       return [row.reasoningEffort.trim() || '-'];
     case 'stream':
@@ -862,17 +866,7 @@ export function MonitoringCenterPage() {
       label: t('monitoring.column_model'),
       colClassName: styles.realtimeModelCol,
       width: REALTIME_LOG_COLUMN_DEFAULT_WIDTHS.model,
-      render: (row) => (
-        <div className={styles.primaryCell}>
-          <span className={styles.monoCell}>{row.model}</span>
-          <small className={styles.monoCell}>
-            {row.modelAlias && row.modelAlias !== row.model ? row.modelAlias : buildRealtimeMetaText(row)}
-          </small>
-          {row.modelAlias && row.modelAlias !== row.model ? (
-            <small className={styles.monoCell}>{buildRealtimeMetaText(row)}</small>
-          ) : null}
-        </div>
-      ),
+      render: (row) => <RealtimeModelCell row={row} t={t} onDetails={() => setSelectedRealtimeErrorRow(row)} />,
     },
     reasoningEffort: {
       key: 'reasoningEffort',
