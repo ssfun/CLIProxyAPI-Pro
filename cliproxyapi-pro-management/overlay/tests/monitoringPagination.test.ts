@@ -7,8 +7,8 @@ import {
 } from '../src/pro/shared/pagination';
 
 describe('monitoring pagination', () => {
-  test('defaults to 20 rows and exposes only the supported sizes', () => {
-    expect(DEFAULT_PRO_PAGE_SIZE).toBe(20);
+  test('defaults to 50 rows and exposes only the supported sizes', () => {
+    expect(DEFAULT_PRO_PAGE_SIZE).toBe(50);
     expect(PRO_PAGE_SIZE_OPTIONS).toEqual([20, 50, 100, 500]);
   });
 

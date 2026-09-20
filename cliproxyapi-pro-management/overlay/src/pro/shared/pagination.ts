@@ -2,7 +2,7 @@ export const PRO_PAGE_SIZE_OPTIONS = [20, 50, 100, 500] as const;
 
 export type ProPageSize = (typeof PRO_PAGE_SIZE_OPTIONS)[number];
 
-export const DEFAULT_PRO_PAGE_SIZE: ProPageSize = 20;
+export const DEFAULT_PRO_PAGE_SIZE: ProPageSize = 50;
 
 type ProPaginationCopy = {
   pageSizeLabel: string;
