@@ -72,7 +72,8 @@ describe('monitoring API key and Profile usage navigation', () => {
     const preferences = readFileSync(resolve(import.meta.dir, '../src/pro/modules/monitoring/features/realtimeLogPreferences.ts'), 'utf8');
     const baseStyles = readFileSync(resolve(import.meta.dir, '../src/pro/modules/monitoring/features/styles/_base.scss'), 'utf8');
     expect(policyPage).toContain("navigate('/monitoring#request-events'");
-    expect(policyPage).toContain('apiKeyPolicyApi.usageTarget(binding.keyRef)');
+    expect(policyPage).toContain('const currentBinding = await refreshAPIKeyBinding(binding)');
+    expect(policyPage).toContain('apiKeyPolicyApi.usageTarget(currentBinding.keyRef)');
     expect(policyClient).toContain("'/api-key-policy-usage-target'");
     expect(policyPage).toContain('apiKeyHash,');
     expect(policyPage).not.toContain('/monitoring?api_key_policy_id=');

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { Transpiler } from 'bun';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { apiKeyPolicyConflictKeyRef, apiKeyPolicyErrorCode } from '../src/pro/modules/apiKeyPolicy/apiKeyPolicy';
+import { apiKeyPolicyConflictKeyRef, apiKeyPolicyErrorCode, findCurrentAPIKeyBinding } from '../src/pro/modules/apiKeyPolicy/apiKeyPolicy';
 
 // Run the actual save and reload callbacks together, with the HTTP conflict
 // response and subsequent binding list controlled independently.
@@ -41,6 +41,8 @@ function harness() {
   let notifications = 0;
   let draftReplacements = 0;
   const context = () => ({
+    findCurrentAPIKeyBinding,
+    refreshAPIKeyBinding: async (binding: typeof oldBinding) => binding,
     useCallback: (fn: unknown) => fn,
     workspaceTarget: target, workspaceBinding: target.binding, snapshot, draft,
     saveRevisionRef, workspaceSessionRef, savingRef,
