@@ -211,3 +211,67 @@
     padding: 12px;
   }
 }
+
+// Opt-in compact layout for dense request diagnostics. Other detail panels retain
+// the default card layout.
+.compact {
+  container-type: inline-size;
+  gap: 12px;
+
+  .summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 12px 16px;
+    background: var(--detail-tone-soft);
+  }
+
+  .summaryText {
+    flex: 1 1 240px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .groupGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .group dl {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px 20px;
+    padding: 12px 14px;
+  }
+
+  .item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    padding: 0;
+    border: 0;
+  }
+
+  .itemWide {
+    grid-column: 1 / -1;
+  }
+
+  .item dd {
+    font-weight: 500;
+    text-align: left;
+    line-height: 1.55;
+  }
+}
+
+@container (max-width: 560px) {
+  .compact .group dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 16px;
+  }
+}
+
+@container (max-width: 320px) {
+  .compact .group dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

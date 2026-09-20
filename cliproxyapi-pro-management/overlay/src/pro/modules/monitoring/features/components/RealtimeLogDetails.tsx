@@ -40,21 +40,21 @@ export function RealtimeRequestDetailsPanel({
   const requestItems = [
     { label: translateRealtimeErrorText('client_ip', t, language), value: row.clientIP || '-' },
     { label: translateRealtimeErrorText('x_forwarded_for', t, language), value: row.xForwardedFor || '-' },
-    { label: translateRealtimeErrorText('user_agent', t, language), value: row.userAgent || '-' },
     { label: translateRealtimeErrorText('http_status', t, language), value: row.statusCode !== null ? String(row.statusCode) : '-' },
     { label: translateRealtimeErrorText('error_code', t, language), value: row.errorCode || '-' },
     { label: translateRealtimeErrorText('upstream_request_id', t, language), value: row.upstreamRequestId || '-' },
     { label: translateRealtimeErrorText('retry_after', t, language), value: row.retryAfter || '-' },
     { label: translateRealtimeErrorText('attempt_index', t, language), value: row.attemptIndex !== null ? String(row.attemptIndex) : '-' },
+    { label: translateRealtimeErrorText('user_agent', t, language), value: row.userAgent || '-', wide: true, mono: false },
   ].filter((item) => item.value !== '-');
   const usageItems = [
     { label: translateRealtimeErrorText('accounting_version', t, language), value: row.accountingVersion !== null ? String(row.accountingVersion) : '-' },
     { label: translateRealtimeErrorText('accounting_quality', t, language), value: row.accountingQuality || '-' },
-    { label: translateRealtimeErrorText('token_breakdown', t, language), value: formatRealtimeTokenBreakdown(row.tokenBreakdown) || '-' },
     { label: t('monitoring.cost_detail_requested_tier'), value: row.serviceTier || '-' },
     { label: t('monitoring.cost_detail_actual_tier'), value: row.effectiveServiceTier || '-' },
     { label: t('monitoring.cost_detail_requested_speed'), value: row.speed || '-' },
     { label: t('monitoring.cost_detail_actual_speed'), value: row.effectiveSpeed || '-' },
+    { label: translateRealtimeErrorText('token_breakdown', t, language), value: formatRealtimeTokenBreakdown(row.tokenBreakdown) || '-', wide: true },
   ].filter((item) => item.value !== '-');
   const tone: ProInformationDetailsTone = row.failed ? 'danger' : 'good';
 
@@ -62,6 +62,7 @@ export function RealtimeRequestDetailsPanel({
     <ProInformationDetails
       className={styles.informationDetailsTheme}
       tone={tone}
+      layout="compact"
       status={(
         <div className={styles.realtimeErrorOverviewTop}>
           <StatusBadge tone={row.failed ? 'bad' : 'good'}>{statusText}</StatusBadge>

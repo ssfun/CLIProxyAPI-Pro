@@ -7,6 +7,7 @@ export interface ProInformationDetailItem {
   label: ReactNode;
   value: ReactNode;
   mono?: boolean;
+  wide?: boolean;
 }
 
 export interface ProInformationDetailGroup {
@@ -17,6 +18,7 @@ export interface ProInformationDetailGroup {
 interface ProInformationDetailsProps {
   className?: string;
   tone?: ProInformationDetailsTone;
+  layout?: 'default' | 'compact';
   status: ReactNode;
   context?: ReactNode;
   summary: ReactNode;
@@ -28,6 +30,7 @@ interface ProInformationDetailsProps {
 export function ProInformationDetails({
   className,
   tone = 'neutral',
+  layout = 'default',
   status,
   context,
   summary,
@@ -36,7 +39,7 @@ export function ProInformationDetails({
   detail,
 }: ProInformationDetailsProps) {
   const visibleGroups = groups.filter((group) => group.items.length > 0);
-  const rootClassName = [styles.details, styles[tone], className].filter(Boolean).join(' ');
+  const rootClassName = [styles.details, styles[tone], layout === 'compact' ? styles.compact : '', className].filter(Boolean).join(' ');
 
   return (
     <div className={rootClassName}>
@@ -55,7 +58,7 @@ export function ProInformationDetails({
               <h3>{group.title}</h3>
               <dl>
                 {group.items.map((item, itemIndex) => (
-                  <div key={itemIndex} className={styles.item}>
+                  <div key={itemIndex} className={[styles.item, item.wide ? styles.itemWide : ''].filter(Boolean).join(' ')}>
                     <dt>{item.label}</dt>
                     <dd className={item.mono === false ? undefined : styles.monoValue}>{item.value}</dd>
                   </div>
