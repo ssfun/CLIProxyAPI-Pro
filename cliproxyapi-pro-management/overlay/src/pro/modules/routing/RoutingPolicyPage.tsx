@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import {
+  createContext,
+  useContext,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type PropsWithChildren,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
@@ -14,13 +24,9 @@ import {
   TableHead,
   TableCell,
 } from '@/components/ui/Table';
-import {
-  IconCheck,
-  IconRefreshCw,
-  IconSearch,
-  IconX,
-} from '@/components/ui/icons';
+import { IconCheck, IconRefreshCw, IconSearch, IconX } from '@/components/ui/icons';
 import { IconCopy } from '@/pro/icons';
+import { copyToClipboard } from '@/utils/clipboard';
 import {
   formatRemainingTime,
   formatTimeOnly,
@@ -31,6 +37,7 @@ import {
   type SchedulingBoardAccount,
   type SchedulingBoardResponse,
 } from '@/pro/modules/routing/routingPolicy';
+import { useRoutingAccountPlans } from './useRoutingAccountPlans';
 import { createLatestRequestGate } from '@/pro/modules/routing/latestRequestGate';
 import { buildInspectionFocusLocationState } from '@/pro/shared/inspectionNavigation';
 import {
@@ -42,7 +49,10 @@ import { ProPagination } from '@/pro/shared/ProPagination';
 import { startPolling } from '@/pro/shared/polling';
 import { ProFeatureTabs } from '@/pro/shared/ProFeatureTabs';
 import { ProDetailDialog } from '@/pro/shared/ProSurface';
-import { ProInformationDetails, type ProInformationDetailsTone } from '@/pro/shared/ProInformationDetails';
+import {
+  ProInformationDetails,
+  type ProInformationDetailsTone,
+} from '@/pro/shared/ProInformationDetails';
 import { useProSurfaceState } from '@/pro/shared/useProSurfaceState';
 import { useAuthStore, useNotificationStore } from '@/stores';
 import styles from './RoutingPolicyPage.module.scss';
@@ -50,14 +60,232 @@ import styles from './RoutingPolicyPage.module.scss';
 type SchedulingBoardView = 'all' | 'quota' | 'authTransient' | 'recheck' | 'overlap';
 
 const VIEW_KEYS: SchedulingBoardView[] = ['all', 'quota', 'authTransient', 'recheck', 'overlap'];
+function BoardSources({ account }: { account: SchedulingBoardAccount }) {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.sourceTagGroup}>
+      {account.sources.map((source) => (
+        <span
+          key={source}
+          className={
+            source === 'inspection' ? styles.sourceTagInspection : styles.sourceTagUpstream
+          }
+        >
+          {t(`routing_policy.sources.${source}`, { defaultValue: source })}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function BoardScope({ account }: { account: SchedulingBoardAccount }) {
+  const { t } = useTranslation();
+  if (account.scope === 'credential' || !account.models?.length) {
+    return (
+      <span className={styles.scopeTagCredential}>
+        {t(
+          account.scope === 'credential'
+            ? 'routing_policy.runtime.all_models'
+            : 'routing_policy.scopes.model'
+        )}
+      </span>
+    );
+  }
+  return (
+    <div className={styles.modelChipGroup}>
+      {account.models.slice(0, 2).map((model) => (
+        <code key={model} className={styles.modelChip} title={model}>
+          {model}
+        </code>
+      ))}
+      {account.models.length > 2 ? (
+        <span className={styles.moreModelsBadge} title={account.models.slice(2).join(', ')}>
+          {t('routing_policy.runtime.models_more', {
+            count: account.models.length - 2,
+          })}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function BoardResume({ account }: { account: SchedulingBoardAccount }) {
+  const { t } = useTranslation();
+  return (
+    <span
+      className={`${styles.resumeTag} ${styles[`resumeTag_${schedulingBoardResumeTone(account.resume)}`]}`}
+    >
+      {t(`routing_policy.resume.${account.resume}`, {
+        defaultValue: account.resume,
+      })}
+    </span>
+  );
+}
+
+const BoardTimeContext = createContext(0);
+
+function BoardClock({ children }: PropsWithChildren) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <BoardTimeContext.Provider value={now}>{children}</BoardTimeContext.Provider>;
+}
+
+function BoardCountdown({ at, resume }: { at: number; resume: string }) {
+  const { t } = useTranslation();
+  const now = useContext(BoardTimeContext);
+  return <>{formatRemainingTime(at, resume, t, '-', now)}</>;
+}
+
+function BoardIdentity({
+  account,
+  copied,
+  planLabel,
+  onSelect,
+  onCopy,
+}: {
+  account: SchedulingBoardAccount;
+  copied: boolean;
+  planLabel: string;
+  onSelect: () => void;
+  onCopy: (event: MouseEvent) => void;
+}) {
+  const { t } = useTranslation();
+  const name = account.fileName || account.authIndex || account.authId;
+  return (
+    <div className={styles.accountCell}>
+      <div className={styles.accountRow}>
+        <button type="button" className={styles.accountButton} onClick={onSelect} title={name}>
+          {name}
+        </button>
+        <button
+          type="button"
+          className={styles.copyButton}
+          onClick={onCopy}
+          title={t(
+            copied ? 'routing_policy.runtime.copied' : 'routing_policy.runtime.copy_auth_id'
+          )}
+          aria-label={t('routing_policy.runtime.copy_auth_id')}
+        >
+          {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
+        </button>
+      </div>
+      <div className={styles.accountMeta}>
+        <span className={styles.providerName}>
+          {t(`routing_policy.providers.${account.provider}`, { defaultValue: account.provider })}
+        </span>
+        <span
+          className={styles.planBadge}
+          title={`${t('routing_policy.runtime.plan')}: ${planLabel}`}
+        >
+          {planLabel}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function BoardActions({
+  account,
+  onSelect,
+  onInspect,
+}: {
+  account: SchedulingBoardAccount;
+  onSelect: () => void;
+  onInspect: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.rowActions}>
+      <Button variant="ghost" size="sm" onClick={onSelect}>
+        {t('routing_policy.runtime.details_short')}
+      </Button>
+      {account.inspection ? (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onInspect}
+          title={t('routing_policy.runtime.open_inspection')}
+        >
+          {t('routing_policy.runtime.inspection_short')}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function BoardRestriction({ account }: { account: SchedulingBoardAccount }) {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.restrictionCell}>
+      <BoardSources account={account} />
+      <div className={styles.scopeLine}>
+        <span className={styles.metaLabel}>{t('routing_policy.runtime.affected_scope')}</span>
+        <BoardScope account={account} />
+      </div>
+    </div>
+  );
+}
+
+function BoardAccountTimes({ account }: { account: SchedulingBoardAccount }) {
+  const { t, i18n } = useTranslation();
+  const actionDetails = account.details.filter((detail) => detail.retryAt === account.nextActionAt);
+  const actionKind =
+    actionDetails.length && actionDetails.every((detail) => detail.resume === 'recheck-quota')
+      ? 'recheck_short'
+      : actionDetails.length && actionDetails.every((detail) => detail.resume === 'probe-request')
+        ? 'probe_short'
+        : 'action_short';
+  const events = [
+    { at: account.nextActionAt, label: actionKind, resume: 'action' },
+    { at: account.nextTransitionAt, label: 'transition_short', resume: 'auto-expire' },
+  ].filter((event) => event.at && event.at > 0);
+  return (
+    <div className={styles.recoveryCell}>
+      {events.length ? (
+        events.map(({ at, label, resume }) => (
+          <div className={styles.recoveryEvent} key={label}>
+            <span className={styles.eventLabel}>{t(`routing_policy.runtime.${label}`)}</span>
+            <div className={styles.eventValue}>
+              <time
+                dateTime={new Date(at!).toISOString()}
+                title={formatTimestamp(at, i18n.language, '-')}
+              >
+                {formatTimestamp(at, i18n.language, '-', true)}
+              </time>
+              <span className={styles.eventCountdown}>
+                <BoardCountdown at={at!} resume={resume} />
+              </span>
+            </div>
+          </div>
+        ))
+      ) : (
+        <span className={styles.noSchedule}>{t('routing_policy.runtime.not_scheduled')}</span>
+      )}
+    </div>
+  );
+}
+
+function BoardRecovery({ account }: { account: SchedulingBoardAccount }) {
+  return (
+    <div className={styles.recoveryGroup}>
+      <BoardResume account={account} />
+      <BoardAccountTimes account={account} />
+    </div>
+  );
+}
 
 function SchedulingBoardDetailPanel({
   account,
+  planLabel,
   t,
   language,
   onOpenInspection,
 }: {
   account: SchedulingBoardAccount;
+  planLabel: string;
   t: ReturnType<typeof useTranslation>['t'];
   language: string;
   onOpenInspection?: (account: SchedulingBoardAccount) => void;
@@ -70,17 +298,34 @@ function SchedulingBoardDetailPanel({
     <div className={styles.detailContainer}>
       <ProInformationDetails
         tone={tone}
-        status={t(`routing_policy.resume.${account.resume}`, { defaultValue: account.resume })}
-        context={t(`routing_policy.buckets.${account.bucket}`, { defaultValue: account.bucket })}
+        status={t(`routing_policy.resume.${account.resume}`, {
+          defaultValue: account.resume,
+        })}
+        context={t(`routing_policy.buckets.${account.bucket}`, {
+          defaultValue: account.bucket,
+        })}
         summary={accountName}
         groups={[
           {
             title: t('routing_policy.runtime.account'),
             items: [
-              { label: t('routing_policy.runtime.provider'), value: account.provider || '-' },
-              { label: t('routing_policy.runtime.account'), value: accountName },
-              { label: t('routing_policy.runtime.auth_index'), value: account.authIndex || '-' },
-              { label: t('routing_policy.runtime.auth_id'), value: account.authId || '-' },
+              {
+                label: t('routing_policy.runtime.provider'),
+                value: account.provider || '-',
+              },
+              { label: t('routing_policy.runtime.plan'), value: planLabel },
+              {
+                label: t('routing_policy.runtime.account'),
+                value: accountName,
+              },
+              {
+                label: t('routing_policy.runtime.auth_index'),
+                value: account.authIndex || '-',
+              },
+              {
+                label: t('routing_policy.runtime.auth_id'),
+                value: account.authId || '-',
+              },
             ],
           },
           {
@@ -88,7 +333,9 @@ function SchedulingBoardDetailPanel({
             items: [
               {
                 label: t('routing_policy.runtime.scope'),
-                value: t(`routing_policy.scopes.${account.scope}`, { defaultValue: account.scope }),
+                value: t(`routing_policy.scopes.${account.scope}`, {
+                  defaultValue: account.scope,
+                }),
               },
               {
                 label: t('routing_policy.runtime.models'),
@@ -96,31 +343,49 @@ function SchedulingBoardDetailPanel({
               },
               {
                 label: t('routing_policy.runtime.resume'),
-                value: t(`routing_policy.resume.${account.resume}`, { defaultValue: account.resume }),
+                value: t(`routing_policy.resume.${account.resume}`, {
+                  defaultValue: account.resume,
+                }),
               },
               {
                 label: t('routing_policy.runtime.next_action_at'),
-                value: formatTimestamp(account.nextActionAt, language, t('routing_policy.runtime.not_scheduled')),
+                value: formatTimestamp(
+                  account.nextActionAt,
+                  language,
+                  t('routing_policy.runtime.not_scheduled')
+                ),
               },
               {
                 label: t('routing_policy.runtime.next_transition_at'),
-                value: formatTimestamp(account.nextTransitionAt, language, t('routing_policy.runtime.not_scheduled')),
+                value: formatTimestamp(
+                  account.nextTransitionAt,
+                  language,
+                  t('routing_policy.runtime.not_scheduled')
+                ),
               },
             ],
           },
         ]}
         detailLabel={t('routing_policy.runtime.reason_details')}
-        detail={(
+        detail={
           <div className={styles.detailList}>
             {account.details.map((detail, index) => {
               const isInspection = detail.source === 'inspection';
-              const remaining = detail.retryAt ? formatRemainingTime(undefined, detail.retryAt, detail.resume, t) : '';
               return (
-                <div key={`${detail.source}-${detail.model || 'all'}-${index}`} className={styles.detailItemCard}>
+                <div
+                  key={`${detail.source}-${detail.model || 'all'}-${index}`}
+                  className={styles.detailItemCard}
+                >
                   <div className={styles.detailItemHeader}>
                     <div className={styles.detailBadges}>
-                      <span className={isInspection ? styles.sourceTagInspection : styles.sourceTagUpstream}>
-                        {t(`routing_policy.sources.${detail.source}`, { defaultValue: detail.source })}
+                      <span
+                        className={
+                          isInspection ? styles.sourceTagInspection : styles.sourceTagUpstream
+                        }
+                      >
+                        {t(`routing_policy.sources.${detail.source}`, {
+                          defaultValue: detail.source,
+                        })}
                       </span>
                       {detail.httpStatus ? (
                         <span className={styles.detailHttpStatus}>HTTP {detail.httpStatus}</span>
@@ -136,16 +401,30 @@ function SchedulingBoardDetailPanel({
                         styles[`resumeTag_${schedulingBoardResumeTone(detail.resume)}`]
                       }`}
                     >
-                      {t(`routing_policy.resume.${detail.resume}`, { defaultValue: detail.resume })}
+                      {t(`routing_policy.resume.${detail.resume}`, {
+                        defaultValue: detail.resume,
+                      })}
                     </span>
                   </div>
                   <div className={styles.detailItemReason}>
-                    {t(`routing_policy.reasons.${detail.reason}`, { defaultValue: detail.reason || '-' })}
+                    {t(`routing_policy.reasons.${detail.reason}`, {
+                      defaultValue: detail.reason || '-',
+                    })}
                   </div>
                   <div className={styles.detailItemFooter}>
                     <span>
-                      {t('routing_policy.runtime.retry_at')}: {formatTimestamp(detail.retryAt, language, t('routing_policy.runtime.not_scheduled'))}
-                      {remaining && remaining !== '-' ? ` · ${remaining}` : ''}
+                      {t('routing_policy.runtime.retry_at')}:{' '}
+                      {formatTimestamp(
+                        detail.retryAt,
+                        language,
+                        t('routing_policy.runtime.not_scheduled')
+                      )}
+                      {detail.retryAt ? (
+                        <>
+                          {' '}
+                          · <BoardCountdown at={detail.retryAt} resume={detail.resume} />
+                        </>
+                      ) : null}
                     </span>
                   </div>
                 </div>
@@ -159,7 +438,7 @@ function SchedulingBoardDetailPanel({
               </div>
             ) : null}
           </div>
-        )}
+        }
       />
     </div>
   );
@@ -173,6 +452,7 @@ export function RoutingPolicyPage() {
 
   const [activeView, setActiveView] = useState<SchedulingBoardView>('all');
   const [data, setData] = useState<SchedulingBoardResponse | null>(null);
+  const { plans, reloadPlans } = useRoutingAccountPlans(data?.accounts);
   const [loading, setLoading] = useState(true);
   const [runtimeError, setRuntimeError] = useState('');
   const [selectedAuthId, setSelectedAuthId] = useState<string | null>(null);
@@ -188,52 +468,65 @@ export function RoutingPolicyPage() {
   const requestGate = useRef(createLatestRequestGate());
   const { activeSurface, openSurface, closeSurface } = useProSurfaceState<'runtime-detail'>();
 
-  const setSelectedAccount = useCallback((account: SchedulingBoardAccount | null) => {
-    if (account) {
-      setSelectedAuthId(account.authId);
-      openSurface('runtime-detail');
-    } else if (activeSurface === 'runtime-detail') {
-      closeSurface();
-    }
-  }, [activeSurface, closeSurface, openSurface]);
+  const setSelectedAccount = useCallback(
+    (account: SchedulingBoardAccount | null) => {
+      if (account) {
+        setSelectedAuthId(account.authId);
+        openSurface('runtime-detail');
+      } else if (activeSurface === 'runtime-detail') {
+        closeSurface();
+      }
+    },
+    [activeSurface, closeSurface, openSurface]
+  );
 
   const applyResponse = useCallback((response: SchedulingBoardResponse) => {
     setData(response);
     setRuntimeError('');
   }, []);
 
-  const loadBoard = useCallback(async ({ notify = false, showLoading = false } = {}) => {
-    if (connectionStatus !== 'connected') {
-      setData(null);
-      setLoading(false);
-      return;
-    }
-    const request = requestGate.current.begin();
-    if (showLoading) setLoading(true);
-    try {
-      const response = await routingPolicyApi.get(request.signal);
-      if (request.isCurrent()) {
-        applyResponse(response);
-        if (notify) {
-          showNotification(t('routing_policy.runtime.refresh_success', { defaultValue: '数据已刷新' }), 'success');
+  const loadBoard = useCallback(
+    async ({ notify = false, showLoading = false } = {}) => {
+      if (connectionStatus !== 'connected') {
+        setData(null);
+        setRuntimeError('');
+        setLoading(false);
+        return;
+      }
+      const request = requestGate.current.begin();
+      if (showLoading) setLoading(true);
+      try {
+        const response = await routingPolicyApi.get(request.signal);
+        if (request.isCurrent()) {
+          applyResponse(response);
+          if (notify) {
+            showNotification(
+              t('routing_policy.runtime.refresh_success', {
+                defaultValue: '数据已刷新',
+              }),
+              'success'
+            );
+          }
         }
+      } catch (error) {
+        if (request.isCurrent()) {
+          setRuntimeError(error instanceof Error ? error.message : String(error || ''));
+          if (notify) showNotification(t('routing_policy.load_failed'), 'error');
+        }
+      } finally {
+        if (request.isCurrent()) setLoading(false);
+        request.finish();
       }
-    } catch (error) {
-      if (request.isCurrent()) {
-        setRuntimeError(error instanceof Error ? error.message : String(error || ''));
-        if (notify) showNotification(t('routing_policy.load_failed'), 'error');
-      }
-    } finally {
-      if (request.isCurrent() && showLoading) setLoading(false);
-      request.finish();
-    }
-  }, [applyResponse, connectionStatus, showNotification, t]);
+    },
+    [applyResponse, connectionStatus, showNotification, t]
+  );
 
   useEffect(() => {
     const gate = requestGate.current;
     gate.invalidate();
     if (connectionStatus !== 'connected') {
       setData(null);
+      setRuntimeError('');
       setLoading(false);
       return undefined;
     }
@@ -250,19 +543,44 @@ export function RoutingPolicyPage() {
       new Set((data?.accounts ?? []).map((account) => account.provider).filter(Boolean))
     ).sort();
     return [
-      { value: 'all', label: t('routing_policy.runtime.all_providers', { defaultValue: 'All providers' }) },
+      {
+        value: 'all',
+        label: t('routing_policy.runtime.all_providers', {
+          defaultValue: 'All providers',
+        }),
+      },
       ...providers.map((provider) => ({
         value: provider,
-        label: t(`routing_policy.providers.${provider}`, { defaultValue: provider }),
+        label: t(`routing_policy.providers.${provider}`, {
+          defaultValue: provider,
+        }),
       })),
     ];
   }, [data?.accounts, t]);
 
-  const scopeOptions = useMemo(() => [
-    { value: 'all', label: t('routing_policy.runtime.all_scopes', { defaultValue: 'All scopes' }) },
-    { value: 'credential', label: t('routing_policy.scopes.credential', { defaultValue: 'Whole account' }) },
-    { value: 'model', label: t('routing_policy.scopes.model', { defaultValue: 'Selected models' }) },
-  ], [t]);
+  const scopeOptions = useMemo(
+    () => [
+      {
+        value: 'all',
+        label: t('routing_policy.runtime.all_scopes', {
+          defaultValue: 'All scopes',
+        }),
+      },
+      {
+        value: 'credential',
+        label: t('routing_policy.scopes.credential', {
+          defaultValue: 'Whole account',
+        }),
+      },
+      {
+        value: 'model',
+        label: t('routing_policy.scopes.model', {
+          defaultValue: 'Selected models',
+        }),
+      },
+    ],
+    [t]
+  );
 
   const filteredAccounts = useMemo(() => {
     let rows = data?.accounts ?? [];
@@ -313,49 +631,23 @@ export function RoutingPolicyPage() {
     [data?.accounts, selectedAuthId]
   );
 
-  useEffect(() => {
-    if (activeSurface !== 'runtime-detail' || !selectedAuthId || !data || selectedAccount) return;
-    closeSurface();
-  }, [activeSurface, closeSurface, data, selectedAccount, selectedAuthId]);
-
-  const openInspection = useCallback((account: SchedulingBoardAccount) => {
-    closeSurface();
-    navigate('/account-inspection', {
-      state: buildInspectionFocusLocationState({
-        authId: account.authId,
-        authIndex: account.authIndex,
-        fileName: account.fileName,
-      }),
-    });
-  }, [closeSurface, navigate]);
+  const openInspection = useCallback(
+    (account: SchedulingBoardAccount) => {
+      closeSurface();
+      navigate('/account-inspection', {
+        state: buildInspectionFocusLocationState({
+          authId: account.authId,
+          authIndex: account.authIndex,
+          fileName: account.fileName,
+        }),
+      });
+    },
+    [closeSurface, navigate]
+  );
 
   const handleCopyAuthId = useCallback((authId: string, event: MouseEvent) => {
     event.stopPropagation();
-    const copyViaClipboard = async () => {
-      try {
-        if (navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(authId);
-          return true;
-        }
-      } catch {
-        // fallback to execCommand below
-      }
-      try {
-        const textarea = document.createElement('textarea');
-        textarea.value = authId;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        const ok = document.execCommand('copy');
-        document.body.removeChild(textarea);
-        return ok;
-      } catch {
-        return false;
-      }
-    };
-
-    void copyViaClipboard().then((ok) => {
+    void copyToClipboard(authId).then((ok) => {
       if (ok) {
         setCopiedAuthId(authId);
         setTimeout(() => {
@@ -365,7 +657,9 @@ export function RoutingPolicyPage() {
     });
   }, []);
 
-  const hasActiveFilter = Boolean(keyword.trim() || providerFilter !== 'all' || scopeFilter !== 'all');
+  const hasActiveFilter = Boolean(
+    keyword.trim() || providerFilter !== 'all' || scopeFilter !== 'all'
+  );
 
   const switchView = useCallback((view: SchedulingBoardView) => {
     setActiveView(view);
@@ -380,8 +674,8 @@ export function RoutingPolicyPage() {
   }, []);
 
   return (
-    <div className={styles.container}>
-      <Card>
+    <BoardClock>
+      <div className={styles.container}>
         <div className={styles.sectionHeaderWithAction}>
           <div>
             <h1>{t('routing_policy.title')}</h1>
@@ -389,525 +683,317 @@ export function RoutingPolicyPage() {
           </div>
           <div className={styles.headerActions}>
             {data?.generatedAt ? (
-              <span className={styles.syncStatus} title={formatTimestamp(data.generatedAt, i18n.language, '-')}>
-                <span className={styles.syncDot} />
-                {t('routing_policy.runtime.live_syncing')}: {formatTimeOnly(data.generatedAt, i18n.language, '-')}
+              <span
+                className={styles.syncStatus}
+                title={formatTimestamp(data.generatedAt, i18n.language, '-')}
+              >
+                <span className={`${styles.syncDot} ${runtimeError ? styles.syncDotStale : ''}`} />
+                {t('routing_policy.runtime.last_updated', {
+                  time: formatTimeOnly(data.generatedAt, i18n.language, '-'),
+                })}
               </span>
             ) : null}
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => void loadBoard({ notify: true, showLoading: true })}
-              disabled={loading}
+              className={styles.refreshButton}
+              onClick={() => {
+                void loadBoard({ notify: true, showLoading: true });
+                void reloadPlans();
+              }}
+              disabled={loading || connectionStatus !== 'connected'}
             >
-              <IconRefreshCw size={15} className={loading ? styles.spinningIcon : undefined} /> {t('common.refresh')}
+              <IconRefreshCw size={15} className={loading ? styles.spinningIcon : undefined} />
+              {t('common.refresh')}
             </Button>
           </div>
         </div>
 
-        <div className={styles.summaryGrid}>
-          <button
-            type="button"
-            className={`${styles.summaryCard} ${styles.cardBlocked} ${activeView === 'all' ? styles.cardActive : ''}`}
-            onClick={() => switchView('all')}
-            aria-pressed={activeView === 'all'}
-          >
-            <small>{t('routing_policy.summary.blocked')}</small>
-            <strong>{data?.summary?.blocked ?? 0}</strong>
-          </button>
-          <button
-            type="button"
-            className={`${styles.summaryCard} ${styles.cardQuota} ${activeView === 'quota' ? styles.cardActive : ''}`}
-            onClick={() => switchView('quota')}
-            aria-pressed={activeView === 'quota'}
-          >
-            <small>{t('routing_policy.summary.quota')}</small>
-            <strong>{data?.summary?.quota ?? 0}</strong>
-          </button>
-          <button
-            type="button"
-            className={`${styles.summaryCard} ${styles.cardAuth} ${activeView === 'authTransient' ? styles.cardActive : ''}`}
-            onClick={() => switchView('authTransient')}
-            aria-pressed={activeView === 'authTransient'}
-          >
-            <small>{t('routing_policy.summary.authTransient')}</small>
-            <strong>{data?.summary?.authTransient ?? 0}</strong>
-          </button>
-          <button
-            type="button"
-            className={`${styles.summaryCard} ${styles.cardRecheck} ${activeView === 'recheck' ? styles.cardActive : ''}`}
-            onClick={() => switchView('recheck')}
-            aria-pressed={activeView === 'recheck'}
-          >
-            <small>{t('routing_policy.summary.recheck')}</small>
-            <strong>{data?.summary?.recheck ?? 0}</strong>
-          </button>
-          <button
-            type="button"
-            className={`${styles.summaryCard} ${styles.cardOverlap} ${activeView === 'overlap' ? styles.cardActive : ''}`}
-            onClick={() => switchView('overlap')}
-            aria-pressed={activeView === 'overlap'}
-          >
-            <small>{t('routing_policy.summary.overlap')}</small>
-            <strong>{data?.summary?.overlap ?? 0}</strong>
-          </button>
-          <div className={`${styles.summaryCard} ${styles.cardExcluded}`} title={t('routing_policy.summary.excluded_hint')}>
-            <small>{t('routing_policy.summary.excluded')}</small>
-            <strong>{data?.summary?.excluded ?? 0}</strong>
+        <Card className={styles.overviewCard}>
+          <div className={styles.overviewLabel} title={t('routing_policy.summary.global_hint')}>
+            {t('routing_policy.summary.overview_label')}
           </div>
-        </div>
-
-        <div className={styles.timelineBanner}>
-          <div className={styles.timelineItem}>
-            <div className={styles.timelineHeader}>
-              <span className={styles.timelineDot} />
-              <small>{t('routing_policy.summary.next_auto_recovery')}</small>
+          <div className={styles.overviewGrid}>
+            <div className={styles.overviewMetric}>
+              <small>{t('routing_policy.summary.blocked')}</small>
+              <strong>{data?.summary.blocked ?? '—'}</strong>
             </div>
-            <div className={styles.timelineBody}>
-              {data?.summary.nextRetryAt ? (
-                <>
-                  <span className={styles.timelineCountdown}>
-                    {formatRemainingTime(undefined, data.summary.nextRetryAt, 'auto-expire', t)}
+            <div className={styles.overviewMetric}>
+              <small title={t('routing_policy.summary.excluded_hint')}>
+                {t('routing_policy.summary.excluded')}
+              </small>
+              <strong>{data?.summary.excluded ?? '—'}</strong>
+            </div>
+            {(
+              [
+                { key: 'nextActionAt', label: 'next_recheck_probe', resume: 'action' },
+                { key: 'nextTransitionAt', label: 'next_status_transition', resume: 'auto-expire' },
+              ] as const
+            ).map(({ key, label, resume }) => (
+              <div key={key} className={styles.overviewEvent}>
+                <small>{t(`routing_policy.summary.${label}`)}</small>
+                <strong>
+                  {data?.summary[key] ? (
+                    <BoardCountdown at={data.summary[key]} resume={resume} />
+                  ) : data ? (
+                    t('routing_policy.runtime.not_scheduled')
+                  ) : (
+                    '—'
+                  )}
+                </strong>
+                {data?.summary[key] ? (
+                  <span title={formatTimestamp(data.summary[key], i18n.language, '-')}>
+                    {formatTimestamp(data.summary[key], i18n.language, '-')}
                   </span>
-                  <span className={styles.timelineTime}>
-                    {formatTimestamp(data.summary.nextRetryAt, i18n.language, '-')}
-                  </span>
-                </>
-              ) : (
-                <span className={styles.timelineEmpty}>{t('routing_policy.summary.no_retry')}</span>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {(runtimeError || connectionStatus !== 'connected') && (
+          <div role="status" className={styles.staleNotice}>
+            <strong>{t('routing_policy.runtime.stale')}</strong>
+            {runtimeError ? (
+              <span>{runtimeError}</span>
+            ) : (
+              <span>{t('routing_policy.runtime.disconnected_notice')}</span>
+            )}
+          </div>
+        )}
+
+        <Card className={styles.boardCard}>
+          <div className={styles.filterSection}>
+            <ProFeatureTabs
+              ariaLabel={t('routing_policy.title')}
+              activeKey={activeView}
+              onChange={(key) => switchView(key as SchedulingBoardView)}
+              items={VIEW_KEYS.map((view) => ({
+                key: view,
+                label: t(`routing_policy.views.${view}`),
+                badge:
+                  view === 'all'
+                    ? data?.summary.blocked
+                    : data?.summary?.[view === 'authTransient' ? 'authTransient' : view],
+              }))}
+            />
+
+            <div className={styles.filterGrid}>
+              <Input
+                type="search"
+                value={keyword}
+                onChange={(e) => {
+                  setKeyword(e.target.value);
+                  setPage(1);
+                }}
+                placeholder={t('routing_policy.runtime.search_placeholder')}
+                aria-label={t('routing_policy.runtime.search_aria_label')}
+                className={styles.toolbarHeaderSearchInput}
+                rightElement={<IconSearch size={16} />}
+              />
+
+              <Select
+                value={providerFilter}
+                options={providerOptions}
+                onChange={(value) => {
+                  setProviderFilter(value);
+                  setPage(1);
+                }}
+                ariaLabel={t('routing_policy.runtime.all_providers')}
+              />
+
+              <Select
+                value={scopeFilter}
+                options={scopeOptions}
+                onChange={(value) => {
+                  setScopeFilter(value);
+                  setPage(1);
+                }}
+                ariaLabel={t('routing_policy.runtime.all_scopes')}
+              />
+
+              {hasActiveFilter && (
+                <Button variant="secondary" className={styles.clearButton} onClick={resetFilters}>
+                  <IconX size={14} /> {t('routing_policy.runtime.filter_reset')}
+                </Button>
               )}
             </div>
           </div>
 
-          <div className={styles.timelineItem}>
-            <div className={styles.timelineHeader}>
-              <span className={`${styles.timelineDot} ${styles.timelineDotInfo}`} />
-              <small>{t('routing_policy.summary.next_recheck_probe')}</small>
+          {loading && !data ? (
+            <div className={styles.loadingState}>
+              <IconRefreshCw size={24} className={styles.spinningIcon} />
+              <p>{t('common.loading')}</p>
             </div>
-            <div className={styles.timelineBody}>
-              {data?.summary.nextActionAt ? (
-                <>
-                  <span className={styles.timelineCountdown}>
-                    {formatRemainingTime(undefined, data.summary.nextActionAt, 'recheck-quota', t)}
-                  </span>
-                  <span className={styles.timelineTime}>
-                    {formatTimestamp(data.summary.nextActionAt, i18n.language, '-')}
-                  </span>
-                </>
-              ) : (
-                <span className={styles.timelineEmpty}>{t('routing_policy.summary.no_action')}</span>
-              )}
+          ) : connectionStatus !== 'connected' ? (
+            <div className={styles.loadingState}>
+              <p>{t('routing_policy.runtime.disconnected_notice')}</p>
             </div>
-          </div>
-
-          <div className={styles.timelineItem}>
-            <div className={styles.timelineHeader}>
-              <span className={`${styles.timelineDot} ${styles.timelineDotWarn}`} />
-              <small>{t('routing_policy.summary.next_status_transition')}</small>
-            </div>
-            <div className={styles.timelineBody}>
-              {data?.summary.nextTransitionAt ? (
-                <>
-                  <span className={styles.timelineCountdown}>
-                    {formatRemainingTime(undefined, data.summary.nextTransitionAt, 'auto-expire', t)}
-                  </span>
-                  <span className={styles.timelineTime}>
-                    {formatTimestamp(data.summary.nextTransitionAt, i18n.language, '-')}
-                  </span>
-                </>
-              ) : (
-                <span className={styles.timelineEmpty}>{t('routing_policy.summary.no_transition')}</span>
-              )}
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      {(runtimeError || connectionStatus !== 'connected') && (
-        <div role="status" className={styles.staleNotice}>
-          <strong>{t('routing_policy.runtime.stale')}</strong>
-          {runtimeError ? <span>{runtimeError}</span> : <span>{t('routing_policy.runtime.disconnected_notice')}</span>}
-        </div>
-      )}
-
-      <div className={styles.filterSection}>
-        <ProFeatureTabs
-          ariaLabel={t('routing_policy.title')}
-          activeKey={activeView}
-          onChange={(key) => switchView(key as SchedulingBoardView)}
-          items={VIEW_KEYS.map((view) => ({
-            key: view,
-            label: t(`routing_policy.views.${view}`),
-            badge: view === 'all' ? data?.summary.blocked : data?.summary?.[view === 'authTransient' ? 'authTransient' : view],
-          }))}
-        />
-
-        <div className={styles.filterGrid}>
-          <Input
-            type="search"
-            value={keyword}
-            onChange={(e) => {
-              setKeyword(e.target.value);
-              setPage(1);
-            }}
-            placeholder={t('routing_policy.runtime.search_placeholder')}
-            aria-label={t('routing_policy.runtime.search_aria_label')}
-            className={styles.toolbarHeaderSearchInput}
-            rightElement={<IconSearch size={16} />}
-          />
-
-          <Select
-            value={providerFilter}
-            options={providerOptions}
-            onChange={(value) => {
-              setProviderFilter(value);
-              setPage(1);
-            }}
-            ariaLabel={t('routing_policy.runtime.all_providers')}
-          />
-
-          <Select
-            value={scopeFilter}
-            options={scopeOptions}
-            onChange={(value) => {
-              setScopeFilter(value);
-              setPage(1);
-            }}
-            ariaLabel={t('routing_policy.runtime.all_scopes')}
-          />
-
-          {hasActiveFilter && (
-            <Button
-              variant="secondary"
-              className={styles.clearButton}
-              onClick={resetFilters}
-            >
-              <IconX size={14} /> {t('routing_policy.runtime.filter_reset')}
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <Card>
-        {loading && !data ? (
-          <div className={styles.loadingState}>
-            <IconRefreshCw size={24} className={styles.spinningIcon} />
-            <p>{t('common.loading')}</p>
-          </div>
-        ) : connectionStatus !== 'connected' ? (
-          <div className={styles.loadingState}>
-            <p>{t('routing_policy.runtime.disconnected_notice')}</p>
-          </div>
-        ) : (data?.accounts?.length ?? 0) === 0 ? (
-          <EmptyState
-            title={t('routing_policy.runtime.healthy_title')}
-            description={t('routing_policy.runtime.healthy_desc')}
-          />
-        ) : filteredAccounts.length === 0 ? (
-          <EmptyState
-            title={t('routing_policy.runtime.filter_empty')}
-            description={t('routing_policy.runtime.filter_empty_hint')}
-            action={
-              <Button variant="secondary" size="sm" onClick={resetFilters}>
-                {t('routing_policy.runtime.filter_reset')}
-              </Button>
-            }
-          />
-        ) : (
-          <>
-            <div className={styles.desktopTable}>
-              <Table className={styles.routingTable}>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className={styles.colProvider}>{t('routing_policy.runtime.provider')}</TableHead>
-                    <TableHead className={styles.colAccount}>{t('routing_policy.runtime.account')}</TableHead>
-                    <TableHead className={styles.colSource}>{t('routing_policy.runtime.source')}</TableHead>
-                    <TableHead className={styles.colScope}>{t('routing_policy.runtime.scope')}</TableHead>
-                    <TableHead className={styles.colResume}>{t('routing_policy.runtime.resume')}</TableHead>
-                    <TableHead className={styles.colRecovery}>{t('routing_policy.runtime.expected_recovery')}</TableHead>
-                    <TableHead className={styles.colActions} alignRight>
-                      {t('routing_policy.runtime.actions')}
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pagedAccounts.map((account) => {
-                    const remaining = formatRemainingTime(account.remainingSeconds, account.retryAt, account.resume, t);
-                    const hasCountdown = account.retryAt && account.retryAt > 0;
-                    return (
-                      <TableRow key={`${account.authIndex}:${account.authId}`}>
+          ) : !data ? (
+            <EmptyState
+              title={t('routing_policy.load_failed')}
+              description={t('routing_policy.runtime.unavailable')}
+              action={
+                <Button variant="secondary" onClick={() => void loadBoard({ showLoading: true })}>
+                  {t('common.refresh')}
+                </Button>
+              }
+            />
+          ) : data.accounts.length === 0 ? (
+            <EmptyState
+              title={t('routing_policy.runtime.healthy_title')}
+              description={t('routing_policy.runtime.healthy_desc')}
+            />
+          ) : filteredAccounts.length === 0 ? (
+            <EmptyState
+              title={t('routing_policy.runtime.filter_empty')}
+              description={t('routing_policy.runtime.filter_empty_hint')}
+              action={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    resetFilters();
+                    switchView('all');
+                  }}
+                >
+                  {t('routing_policy.runtime.filter_reset')}
+                </Button>
+              }
+            />
+          ) : (
+            <>
+              <div className={styles.desktopTable}>
+                <Table className={styles.routingTable}>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className={styles.colAccount}>
+                        {t('routing_policy.runtime.account')}
+                      </TableHead>
+                      <TableHead className={styles.colRestriction}>
+                        {t('routing_policy.runtime.restriction_group')}
+                      </TableHead>
+                      <TableHead
+                        className={styles.colRecovery}
+                        title={t('routing_policy.summary.global_hint')}
+                      >
+                        {t('routing_policy.runtime.recovery_group')}
+                      </TableHead>
+                      <TableHead className={styles.colActions} alignRight>
+                        {t('routing_policy.runtime.actions')}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pagedAccounts.map((account) => (
+                      <TableRow key={account.authId}>
                         <TableCell>
-                          <span className={styles.providerTag}>{account.provider}</span>
+                          <BoardIdentity
+                            account={account}
+                            planLabel={
+                              plans.get(account.authId) || t('routing_policy.runtime.plan_unknown')
+                            }
+                            copied={copiedAuthId === account.authId}
+                            onSelect={() => setSelectedAccount(account)}
+                            onCopy={(event) => handleCopyAuthId(account.authId, event)}
+                          />
                         </TableCell>
                         <TableCell>
-                          <div className={styles.accountCell}>
-                            <div className={styles.accountRow}>
-                              <button
-                                type="button"
-                                className={styles.accountButton}
-                                onClick={() => setSelectedAccount(account)}
-                                title={t('routing_policy.runtime.details_click_hint')}
-                              >
-                                <strong>{account.fileName || account.authIndex}</strong>
-                              </button>
-                              <button
-                                type="button"
-                                className={styles.copyButton}
-                                onClick={(e) => handleCopyAuthId(account.authId, e)}
-                                title={
-                                  copiedAuthId === account.authId
-                                    ? t('routing_policy.runtime.copied')
-                                    : t('routing_policy.runtime.copy_auth_id')
-                                }
-                                aria-label={t('routing_policy.runtime.copy_auth_id')}
-                              >
-                                {copiedAuthId === account.authId ? <IconCheck size={13} /> : <IconCopy size={13} />}
-                              </button>
-                            </div>
-                            <div className={styles.authIdText} title={account.authId}>
-                              <code>{account.authId}</code>
-                            </div>
-                          </div>
+                          <BoardRestriction account={account} />
                         </TableCell>
                         <TableCell>
-                          <div className={styles.sourceTagGroup}>
-                            {account.sources.map((src) => (
-                              <span
-                                key={src}
-                                className={src === 'inspection' ? styles.sourceTagInspection : styles.sourceTagUpstream}
-                              >
-                                {t(`routing_policy.sources.${src}`, { defaultValue: src })}
-                              </span>
-                            ))}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {account.scope === 'credential' ? (
-                            <span className={styles.scopeTagCredential}>{t('routing_policy.scopes.credential')}</span>
-                          ) : account.models && account.models.length > 0 ? (
-                            <div className={styles.modelChipGroup}>
-                              {account.models.slice(0, 2).map((model) => (
-                                <code key={model} className={styles.modelChip} title={model}>
-                                  {model}
-                                </code>
-                              ))}
-                              {account.models.length > 2 && (
-                                <span
-                                  className={styles.moreModelsBadge}
-                                  title={account.models.slice(2).join(', ')}
-                                >
-                                  {t('routing_policy.runtime.models_more', { count: account.models.length - 2 })}
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className={styles.scopeTagCredential}>{t('routing_policy.scopes.model')}</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <span
-                            className={`${styles.resumeTag} ${
-                              styles[`resumeTag_${schedulingBoardResumeTone(account.resume)}`]
-                            }`}
-                          >
-                            {t(`routing_policy.resume.${account.resume}`, { defaultValue: account.resume })}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div className={styles.recoveryCell}>
-                            <strong className={styles.recoveryCountdown}>{remaining}</strong>
-                            {hasCountdown ? (
-                              <small className={styles.recoveryTimestamp}>
-                                {formatTimestamp(account.retryAt, i18n.language, '-')}
-                              </small>
-                            ) : null}
-                          </div>
+                          <BoardRecovery account={account} />
                         </TableCell>
                         <TableCell alignRight>
-                          {account.inspection ? (
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => openInspection(account)}
-                              title={t('routing_policy.runtime.open_inspection')}
-                            >
-                              {t('routing_policy.runtime.open_inspection')}
-                            </Button>
-                          ) : (
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => setSelectedAccount(account)}
-                              title={t('routing_policy.runtime.view_details')}
-                            >
-                              {t('routing_policy.runtime.view_details')}
-                            </Button>
-                          )}
+                          <BoardActions
+                            account={account}
+                            onSelect={() => setSelectedAccount(account)}
+                            onInspect={() => openInspection(account)}
+                          />
                         </TableCell>
                       </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-
-            <div className={styles.mobileCards}>
-              {pagedAccounts.map((account) => {
-                const remaining = formatRemainingTime(account.remainingSeconds, account.retryAt, account.resume, t);
-                const hasCountdown = account.retryAt && account.retryAt > 0;
-                return (
-                  <article key={`${account.authIndex}:${account.authId}`} className={styles.mobileCard}>
-                    <div className={styles.mobileCardHeader}>
-                      <div className={styles.mobileCardTitleBlock}>
-                        <div className={styles.mobileCardProviderRow}>
-                          <span className={styles.providerTag}>{account.provider}</span>
-                          <button
-                            type="button"
-                            className={styles.accountButton}
-                            onClick={() => setSelectedAccount(account)}
-                            title={t('routing_policy.runtime.details_click_hint')}
-                          >
-                            <strong>{account.fileName || account.authIndex}</strong>
-                          </button>
-                          <button
-                            type="button"
-                            className={styles.copyButton}
-                            onClick={(e) => handleCopyAuthId(account.authId, e)}
-                            title={
-                              copiedAuthId === account.authId
-                                ? t('routing_policy.runtime.copied')
-                                : t('routing_policy.runtime.copy_auth_id')
-                            }
-                            aria-label={t('routing_policy.runtime.copy_auth_id')}
-                          >
-                            {copiedAuthId === account.authId ? <IconCheck size={13} /> : <IconCopy size={13} />}
-                          </button>
-                        </div>
-                        <div className={styles.authIdText} title={account.authId}>
-                          <code>{account.authId}</code>
-                        </div>
-                      </div>
-                      {account.inspection ? (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => openInspection(account)}
-                          title={t('routing_policy.runtime.open_inspection')}
-                        >
-                          {t('routing_policy.runtime.open_inspection')}
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => setSelectedAccount(account)}
-                          title={t('routing_policy.runtime.view_details')}
-                        >
-                          {t('routing_policy.runtime.view_details')}
-                        </Button>
-                      )}
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className={styles.mobileCards}>
+                {pagedAccounts.map((account) => (
+                  <article key={account.authId} className={styles.mobileCard}>
+                    <BoardIdentity
+                      account={account}
+                      planLabel={
+                        plans.get(account.authId) || t('routing_policy.runtime.plan_unknown')
+                      }
+                      copied={copiedAuthId === account.authId}
+                      onSelect={() => setSelectedAccount(account)}
+                      onCopy={(event) => handleCopyAuthId(account.authId, event)}
+                    />
+                    <div className={styles.mobileSections}>
+                      <section className={styles.mobileSection}>
+                        <h3>{t('routing_policy.runtime.restriction_group')}</h3>
+                        <BoardRestriction account={account} />
+                      </section>
+                      <section className={styles.mobileSection}>
+                        <h3>{t('routing_policy.runtime.recovery_group')}</h3>
+                        <BoardRecovery account={account} />
+                      </section>
                     </div>
-
-                    <div className={styles.mobileCardMetaGrid}>
-                      <div className={styles.mobileCardMetaItem}>
-                        <small>{t('routing_policy.runtime.source')}</small>
-                        <div className={styles.sourceTagGroup}>
-                          {account.sources.map((src) => (
-                            <span
-                              key={src}
-                              className={src === 'inspection' ? styles.sourceTagInspection : styles.sourceTagUpstream}
-                            >
-                              {t(`routing_policy.sources.${src}`, { defaultValue: src })}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                      <div className={styles.mobileCardMetaItem}>
-                        <small>{t('routing_policy.runtime.scope')}</small>
-                        <div>
-                          {account.scope === 'credential' ? (
-                            <span className={styles.scopeTagCredential}>{t('routing_policy.scopes.credential')}</span>
-                          ) : account.models && account.models.length > 0 ? (
-                            <div className={styles.modelChipGroup}>
-                              {account.models.slice(0, 1).map((model) => (
-                                <code key={model} className={styles.modelChip} title={model}>
-                                  {model}
-                                </code>
-                              ))}
-                              {account.models.length > 1 && (
-                                <span
-                                  className={styles.moreModelsBadge}
-                                  title={account.models.slice(1).join(', ')}
-                                >
-                                  {t('routing_policy.runtime.models_more', { count: account.models.length - 1 })}
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className={styles.scopeTagCredential}>{t('routing_policy.scopes.model')}</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className={styles.mobileCardMetaItem}>
-                        <small>{t('routing_policy.runtime.resume')}</small>
-                        <div>
-                          <span
-                            className={`${styles.resumeTag} ${
-                              styles[`resumeTag_${schedulingBoardResumeTone(account.resume)}`]
-                            }`}
-                          >
-                            {t(`routing_policy.resume.${account.resume}`, { defaultValue: account.resume })}
-                          </span>
-                        </div>
-                      </div>
-                      <div className={styles.mobileCardMetaItem}>
-                        <small>{t('routing_policy.runtime.expected_recovery')}</small>
-                        <div className={styles.mobileCardRecovery}>
-                          <strong>{remaining}</strong>
-                          {hasCountdown ? (
-                            <small>{formatTimestamp(account.retryAt, i18n.language, '-')}</small>
-                          ) : null}
-                        </div>
-                      </div>
+                    <div className={styles.mobileFooter}>
+                      <BoardActions
+                        account={account}
+                        onSelect={() => setSelectedAccount(account)}
+                        onInspect={() => openInspection(account)}
+                      />
                     </div>
                   </article>
-                );
-              })}
-            </div>
+                ))}
+              </div>
 
-            <ProPagination
-              pageSizeOptions={PRO_PAGE_SIZE_OPTIONS}
-              page={page}
-              pageSize={pageSize}
-              total={filteredAccounts.length}
-              onPageChange={setPage}
-              onPageSizeChange={(nextSize) => {
-                setPageSize(nextSize);
-                setPage(1);
-              }}
-              idPrefix="routing-board"
+              <div className={styles.pagination}>
+                <ProPagination
+                  pageSizeOptions={PRO_PAGE_SIZE_OPTIONS}
+                  page={page}
+                  pageSize={pageSize}
+                  total={filteredAccounts.length}
+                  onPageChange={setPage}
+                  onPageSizeChange={(nextSize) => {
+                    setPageSize(nextSize);
+                    setPage(1);
+                  }}
+                  idPrefix="routing-board"
+                />
+              </div>
+            </>
+          )}
+        </Card>
+
+        <ProDetailDialog
+          open={activeSurface === 'runtime-detail'}
+          title={t('routing_policy.runtime.details_title')}
+          onClose={() => setSelectedAccount(null)}
+          onAfterClose={() => setSelectedAuthId(null)}
+        >
+          {selectedAccount ? (
+            <SchedulingBoardDetailPanel
+              account={selectedAccount}
+              planLabel={
+                plans.get(selectedAccount.authId) || t('routing_policy.runtime.plan_unknown')
+              }
+              t={t}
+              language={i18n.language}
+              onOpenInspection={openInspection}
             />
-          </>
-        )}
-      </Card>
-
-      <ProDetailDialog
-        open={activeSurface === 'runtime-detail'}
-        title={t('routing_policy.runtime.details_title')}
-        onClose={() => setSelectedAccount(null)}
-        onAfterClose={() => setSelectedAuthId(null)}
-      >
-        {selectedAccount ? (
-          <SchedulingBoardDetailPanel
-            account={selectedAccount}
-            t={t}
-            language={i18n.language}
-            onOpenInspection={openInspection}
-          />
-        ) : selectedAuthId ? (
-          <p>{t('routing_policy.runtime.no_longer_listed')}</p>
-        ) : null}
-      </ProDetailDialog>
-    </div>
+          ) : selectedAuthId ? (
+            <p>
+              {t(
+                data
+                  ? 'routing_policy.runtime.no_longer_listed'
+                  : 'routing_policy.runtime.unavailable'
+              )}
+            </p>
+          ) : null}
+        </ProDetailDialog>
+      </div>
+    </BoardClock>
   );
 }

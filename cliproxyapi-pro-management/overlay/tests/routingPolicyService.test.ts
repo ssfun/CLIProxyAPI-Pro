@@ -53,8 +53,12 @@ describe('scheduling board service model', () => {
   });
 
   test('whole-account scope does not narrow the display to model details', () => {
-    expect(schedulingBoardModelsLabel({ scope: 'credential', models: ['model-a'] }, 'All models')).toBe('All models');
-    expect(schedulingBoardModelsLabel({ scope: 'model', models: ['model-a'] }, 'All models')).toBe('model-a');
+    expect(
+      schedulingBoardModelsLabel({ scope: 'credential', models: ['model-a'] }, 'All models')
+    ).toBe('All models');
+    expect(schedulingBoardModelsLabel({ scope: 'model', models: ['model-a'] }, 'All models')).toBe(
+      'model-a'
+    );
     expect(schedulingBoardModelsLabel({ scope: 'model', models: [] }, 'All models')).toBe('-');
   });
 
@@ -70,21 +74,26 @@ describe('scheduling board service model', () => {
   });
 
   test('formats remaining countdowns correctly', () => {
-    const t = (key: string, opts?: any) => {
-      if (key === 'routing_policy.runtime.remaining_seconds') return `${opts.count}s left`;
-      if (key === 'routing_policy.runtime.remaining_minutes') return `${opts.count}m left`;
+    const t = (key: string, opts?: Record<string, unknown>) => {
+      if (key === 'routing_policy.runtime.remaining_seconds') return `${opts?.count}s left`;
+      if (key === 'routing_policy.runtime.remaining_minutes') return `${opts?.count}m left`;
       if (key === 'routing_policy.runtime.due_recheck') return 'Due for recheck';
       if (key === 'routing_policy.runtime.due_probe') return 'Due for probe';
       if (key === 'routing_policy.runtime.due_now') return 'Due now';
       return key;
     };
 
-    expect(formatRemainingTime(45, 1000, 'auto-expire', t)).toBe('45s left');
-    expect(formatRemainingTime(180, 1000, 'auto-expire', t)).toBe('3m left');
-    expect(formatRemainingTime(0, 50, 'recheck-quota', t)).toBe('Due for recheck');
-    expect(formatRemainingTime(0, 50, 'probe-request', t)).toBe('Due for probe');
-    expect(formatRemainingTime(0, 50, 'auto-expire', t)).toBe('Due now');
-    expect(formatRemainingTime(undefined, 0, 'auto-expire', t)).toBe('-');
+    expect(formatRemainingTime(46000, 'auto-expire', t, '-', 1000)).toBe('45s left');
+    expect(formatRemainingTime(181000, 'auto-expire', t, '-', 1000)).toBe('3m left');
+    expect(formatRemainingTime(50, 'recheck-quota', t)).toBe('Due for recheck');
+    expect(formatRemainingTime(50, 'probe-request', t)).toBe('Due for probe');
+    expect(formatRemainingTime(50, 'auto-expire', t)).toBe('Due now');
+    expect(formatRemainingTime(0, 'auto-expire', t)).toBe('-');
+    expect(formatRemainingTime(110000, 'auto-expire', t, '-', 100000)).toBe('10s left');
+    expect(formatRemainingTime(110000, 'auto-expire', t, '-', 200000)).toBe('Due now');
+    expect(formatRemainingTime(110000, 'action', t, '-', 200000)).toBe(
+      'routing_policy.runtime.due_action'
+    );
   });
 
   test('formats timestamps consistently', () => {

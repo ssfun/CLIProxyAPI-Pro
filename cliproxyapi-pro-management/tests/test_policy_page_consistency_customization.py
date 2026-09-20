@@ -180,6 +180,17 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
             self.assertIn('overlap', locales[locale]['routing_policy']['sources'])
             self.assertIn('next_auto_recovery', locales[locale]['routing_policy']['summary'])
 
+    def test_board_distinguishes_unknown_and_empty_snapshots(self) -> None:
+        source = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()
+        self.assertLess(source.index(') : !data ? ('), source.index(') : data.accounts.length === 0 ? ('))
+        self.assertNotIn('summary.nextRetryAt', source)
+        self.assertNotIn('runtime.expected_recovery', source)
+        self.assertNotIn('if (activeSurface !==', source)
+        self.assertIn('runtime.last_updated', source)
+        self.assertIn('summary.global_hint', source)
+        self.assertEqual(source.count('<BoardRecovery account={account} />'), 2)
+        self.assertIn("from '@/utils/clipboard'", source)
+
     def test_header_and_discard_actions_cover_all_locales(self) -> None:
         locales = json.loads(LOCALES.read_text())
         routing = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()

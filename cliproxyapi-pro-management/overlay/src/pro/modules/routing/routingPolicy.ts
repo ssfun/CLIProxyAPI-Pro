@@ -140,18 +140,14 @@ export const schedulingBoardResumeTone = (
 };
 
 export const formatRemainingTime = (
-  remainingSeconds: number | undefined,
   retryAt: number | undefined,
   resume: string,
   t: (key: string, options?: Record<string, unknown>) => string,
-  emptyText = '-'
+  emptyText = '-',
+  now = Date.now()
 ): string => {
   if (retryAt && retryAt > 0) {
-    const now = Date.now();
-    const diffSeconds =
-      remainingSeconds !== undefined && remainingSeconds > 0
-        ? remainingSeconds
-        : Math.ceil((retryAt - now) / 1000);
+    const diffSeconds = Math.ceil((retryAt - now) / 1000);
 
     if (diffSeconds > 0) {
       if (diffSeconds < 60) {
@@ -164,6 +160,7 @@ export const formatRemainingTime = (
       const hours = Math.ceil(minutes / 60);
       return t('routing_policy.runtime.remaining_hours', { count: hours, defaultValue: `${hours}h left` });
     }
+    if (resume === 'action') return t('routing_policy.runtime.due_action');
     if (resume === 'recheck-quota') {
       return t('routing_policy.runtime.due_recheck');
     }
@@ -178,18 +175,19 @@ export const formatRemainingTime = (
 export const formatTimestamp = (
   value: number | undefined,
   locale: string,
-  emptyText: string
+  emptyText: string,
+  compact = false
 ): string => {
   if (!value) return emptyText;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return emptyText;
   return new Intl.DateTimeFormat(locale, {
-    year: 'numeric',
+    year: compact ? undefined : 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit',
+    second: compact ? undefined : '2-digit',
   }).format(date);
 };
 
