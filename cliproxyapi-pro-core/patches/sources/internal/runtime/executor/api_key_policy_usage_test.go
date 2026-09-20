@@ -299,3 +299,85 @@ func TestModelAuditAntigravityUsesFinalWireModel(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+
+type codexModelAuditCapture struct {
+	records chan coreusage.Record
+	authID  string
+}
+
+func (c *codexModelAuditCapture) HandleUsage(_ context.Context, record coreusage.Record) {
+	if record.Provider == "codex" && record.AuthID == c.authID {
+		c.records <- record
+	}
+}
+
+func TestModelAuditCodexLargeFinalWireBody(t *testing.T) {
+	for _, mode := range []string{"execute", "stream", "compact"} {
+		for _, responseModel := range []string{"gpt-5.4", "gpt-5.3-codex"} {
+			t.Run(mode+"/"+responseModel, func(t *testing.T) {
+				wireModels := make(chan string, 1)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					body, err := io.ReadAll(r.Body)
+					if err != nil {
+						t.Error(err)
+						w.WriteHeader(500)
+						return
+					}
+					model := gjson.GetBytes(body, "model")
+					if model.Index < 64*1024 {
+						t.Errorf("model must follow large input, offset=%d", model.Index)
+					}
+					wireModels <- model.String()
+					response := fmt.Sprintf(`{"id":"resp_audit","object":"response","status":"completed","model":%q,"output":[],"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}}`, responseModel)
+					if mode == "compact" {
+						w.Header().Set("Content-Type", "application/json")
+						fmt.Fprint(w, response)
+					} else {
+						w.Header().Set("Content-Type", "text/event-stream")
+						fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":%s}\n\n", response)
+					}
+				}))
+				defer server.Close()
+				capture := &codexModelAuditCapture{records: make(chan coreusage.Record, 4), authID: t.Name()}
+				coreusage.RegisterNamedPlugin(t.Name(), capture)
+				defer coreusage.UnregisterNamedPlugin(t.Name(), capture)
+				e := NewCodexExecutor(&config.Config{})
+				auth := &cliproxyauth.Auth{ID: t.Name(), Attributes: map[string]string{"base_url": server.URL, "api_key": "test"}}
+				req := cliproxyexecutor.Request{Model: "gpt-5.4", Payload: []byte(`{"input":[{"role":"user","content":"` + strings.Repeat("x", 96*1024) + `"}],"model":"gpt-5.4"}`)}
+				opts := cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAIResponse}
+				if mode == "compact" {
+					opts.Alt = "responses/compact"
+				}
+				if mode == "stream" {
+					opts.Stream = true
+					result, err := e.ExecuteStream(context.Background(), auth, req, opts)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for chunk := range result.Chunks {
+						if chunk.Err != nil {
+							t.Fatal(chunk.Err)
+						}
+					}
+				} else {
+					if _, err := e.Execute(context.Background(), auth, req, opts); err != nil {
+						t.Fatal(err)
+					}
+				}
+				select {
+				case record := <-capture.records:
+					wire := <-wireModels
+					want := "match"
+					if wire != responseModel {
+						want = "mismatch"
+					}
+					if wire != "gpt-5.4" || record.UpstreamModel != wire || record.ResponseModel != responseModel || record.ModelMatchStatus != want {
+						t.Fatalf("wire=%q upstream=%q response=%q status=%q, want response=%q status=%q", wire, record.UpstreamModel, record.ResponseModel, record.ModelMatchStatus, responseModel, want)
+					}
+				case <-time.After(2 * time.Second):
+					t.Fatal("no Codex usage record")
+				}
+			})
+		}
+	}
+}

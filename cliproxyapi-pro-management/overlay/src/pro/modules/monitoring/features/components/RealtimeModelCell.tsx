@@ -13,7 +13,7 @@ export function RealtimeModelCell({ row, t, onDetails }: { row: RealtimeLogRow; 
       {audit.showSent && <small className={styles.monoCell}>↳ {t('monitoring.model_upstream')}: {audit.sent}</small>}
       {audit.legacyModel && <small className={styles.monoCell}>{audit.legacyModel}</small>}
       {audit.showResponse && (
-        <div className={flagged ? styles[`modelAudit${audit.status}`] : undefined}>
+        <div className={audit.responseTone ? styles[`modelAudit${audit.responseTone}`] : undefined}>
           <small className={styles.monoCell}>↳ {t('monitoring.model_response')}: {audit.response}</small>
           {flagged && <span className={styles.modelAuditBadge}>{t(`monitoring.model_status_${audit.status}`)}</span>}
         </div>

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveModelAudit } from '../src/pro/modules/monitoring/features/modelAudit';
+import type { TFunction } from 'i18next';
+import { modelAuditItems, resolveModelAudit } from '../src/pro/modules/monitoring/features/modelAudit';
 import { collectUsageDetailsWithEndpoint } from '../src/pro/modules/monitoring/features/usage';
 
 const row = {
@@ -31,3 +32,16 @@ describe('model audit presentation', () => {
     expect(details[0]).toMatchObject({ requested_model: 'smart', upstream_model: 'gpt-6-astra', response_model: 'gpt-5.6-luna', model_match_status: 'mismatch', __modelName: 'billing-model' });
   });
 });
+
+ test('highlights name differences without inventing an upstream verdict', () => {
+   const unknown = { ...row, requestedModel: 'codex-auto-review', upstreamModel: '', responseModel: 'gpt-5.6-luna' };
+   expect(resolveModelAudit(unknown)).toMatchObject({ responseTone: 'different', status: 'unknown', unknownReason: 'missing_sent' });
+   expect(resolveModelAudit({ ...row, requestedModel: 'smart' })).toMatchObject({ responseTone: 'different', status: 'match' });
+   expect(resolveModelAudit({ ...row, responseModel: '' })).toMatchObject({ responseTone: '', unknownReason: 'missing_response' });
+   expect(resolveModelAudit(row).responseTone).toBe('');
+   expect(resolveModelAudit({ ...row, responseModel: 'other', modelMatchStatus: 'mismatch' }).responseTone).toBe('mismatch');
+   expect(resolveModelAudit({ ...row, responseModel: 'variant', modelMatchStatus: 'variant' }).responseTone).toBe('variant');
+   const items = modelAuditItems(unknown, ((key: string) => key) as TFunction);
+   expect(items.find((item) => item.key === 'status')?.value).toBe('monitoring.model_unknown_missing_sent');
+   expect(items.every((item) => typeof item.value === 'string')).toBe(true);
+ });

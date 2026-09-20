@@ -1,4 +1,4 @@
-import { modelAuditItems } from '../modelAudit';
+import { modelAuditItems, resolveModelAudit } from '../modelAudit';
 import type { ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import type { MonitoringStatusTone } from '../hooks/useMonitoringData';
@@ -28,6 +28,7 @@ export function RealtimeRequestDetailsPanel({
   t: TFunction;
   language?: string;
 }) {
+  const audit = resolveModelAudit(row);
   const categoryText = translateRealtimeErrorCategory(row.errorCategoryKey, t, language);
   const statusText = row.failed
     ? buildRealtimeStatusLabel(row, t('monitoring.result_failed'))
@@ -71,7 +72,10 @@ export function RealtimeRequestDetailsPanel({
       context={row.failed ? categoryText : undefined}
       summary={summaryText}
       groups={[
-        { title: t('monitoring.model_audit_title'), items: modelAuditItems(row, t) },
+        { title: t('monitoring.model_audit_title'), items: modelAuditItems(row, t).map((item) => ({
+          ...item, value: item.key === 'response' && audit.responseTone
+            ? <span className={styles[`modelAudit${audit.responseTone}`]}>{item.value}</span> : item.value,
+        })) },
         {
           title: translateRealtimeErrorText('request_context', t, language),
           items: requestItems.map((item) => ({ ...item, value: maskSensitiveText(item.value) })),

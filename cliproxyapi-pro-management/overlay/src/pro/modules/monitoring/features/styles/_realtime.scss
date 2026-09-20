@@ -833,7 +833,9 @@
   min-height: 80px;
 }
 
+.modelAuditmismatch,
 .realtimeTable .realtimeModelCell .modelAuditmismatch { color: #d56a16; }
+.modelAuditvariant,
 .realtimeTable .realtimeModelCell .modelAuditvariant { color: #a77a18; }
 .realtimeTable .realtimeModelCell .modelAuditBadge {
   display: inline-block;
@@ -898,3 +900,9 @@
 .realtimeTable tbody td {
   overflow: hidden;
 }
+
+.modelAuditdifferent,
+.realtimeTable .realtimeModelCell .modelAuditdifferent { color: #2563eb; }
+
+:global([data-theme='dark']) .modelAuditdifferent,
+:global([data-theme='dark']) .realtimeTable .realtimeModelCell .modelAuditdifferent { color: #60a5fa; }

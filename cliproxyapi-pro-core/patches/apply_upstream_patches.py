@@ -6044,6 +6044,27 @@ replace_once(
 \tserved, terminal := extractResponseModelEvent(payload, provider)''',
     'format := r.responseModelFormat',
 )
+# Observe the complete final wire body: the HTTP fallback reads only a bounded
+# prefix and cannot find a model placed after a large conversation input.
+for relative_path, expected_count in (
+    ('internal/runtime/executor/codex_executor_execute.go', 2),
+    ('internal/runtime/executor/codex_executor_stream.go', 1),
+):
+    target = ROOT / relative_path
+    if 'reporter.ObserveUpstreamRequestModel(upstreamBody)' not in read(target):
+        replace_all_exact(
+            target,
+            '\thttpResp, err := httpClient.Do(httpReq)',
+            '\treporter.ObserveUpstreamRequestModel(upstreamBody)\n\thttpResp, err := httpClient.Do(httpReq)',
+            expected_count,
+        )
+# Compact returns a JSON response object rather than Codex SSE events.
+replace_once(
+    codex_execute,
+    '\treporter.Publish(ctx, helps.ParseOpenAIUsage(upstreamData))',
+    '\treporter.SetResponseModelFormat("openai-response")\n\treporter.ObserveResponseModel(data)\n\treporter.Publish(ctx, helps.ParseOpenAIUsage(upstreamData))',
+    'reporter.ObserveResponseModel(data)',
+)
 for relative_path in (
     'internal/runtime/executor/codex_websockets_execute.go',
     'internal/runtime/executor/codex_websockets_stream.go',
