@@ -1,4 +1,4 @@
-import { parseKeyConcurrencyLimit } from '../src/pro/modules/apiKeyPolicy/apiKeyPolicy';
+import { parseKeyConcurrencyLimit, findCurrentAPIKeyBinding, refreshAPIKeyBinding, apiKeyPolicyApi, type APIKeyPolicyBinding } from '../src/pro/modules/apiKeyPolicy/apiKeyPolicy';
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -32,6 +32,32 @@ const catalog: APIKeyPolicyCatalog = {
     'claude-sonnet-4': ['claude'],
   },
 };
+
+describe('key reference refresh', () => {
+  const original: APIKeyPolicyBinding = { bindingId: 'session-key-a', keyRef: 'expired', maskedKey: 'same-mask', state: 'unmanaged', weakKey: false };
+
+  test('matches stable session identity, never a shared mask or old reference', () => {
+    const fresh = { ...original, keyRef: 'fresh' };
+    const other = { ...original, bindingId: 'session-key-b' };
+    expect(findCurrentAPIKeyBinding([other, fresh], original)).toBe(fresh);
+    expect(findCurrentAPIKeyBinding([other], original)).toBeUndefined();
+    expect(findCurrentAPIKeyBinding([{ ...fresh, bindingId: 'other-session' }], original)).toBeUndefined();
+    expect(findCurrentAPIKeyBinding([fresh], { ...original, bindingId: undefined })).toBeUndefined();
+  });
+
+  test('refreshes a consumed reference without changing the caller draft or expected state', async () => {
+    const bindings = apiKeyPolicyApi.bindings;
+    apiKeyPolicyApi.bindings = async () => ({ items: [{ ...original, keyRef: 'fresh', disabled: true }], orphaned: [], nextCursor: '', configGeneration: 2 });
+    try {
+      expect((await refreshAPIKeyBinding(original)).keyRef).toBe('fresh');
+      expect(original.keyRef).toBe('expired');
+      expect(original.disabled).toBeUndefined();
+      await expect(refreshAPIKeyBinding({ ...original, bindingId: 'deleted' })).rejects.toMatchObject({ apiCode: 'api_key_reference_stale' });
+    } finally {
+      apiKeyPolicyApi.bindings = bindings;
+    }
+  });
+});
 
 const validProfile = (): APIKeyProfileInput => ({
   name: 'Production',

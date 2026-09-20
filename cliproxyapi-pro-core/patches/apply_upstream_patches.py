@@ -2107,7 +2107,7 @@ add_go_import(management_handler_source, '"crypto/subtle"\n', '\t"crypto/sha256"
 replace_once(
     management_handler_source,
     '\tappliedReloadGeneration uint64\n',
-    '\tappliedReloadGeneration uint64\n\tconfigGeneration        uint64\n',
+    '\tappliedReloadGeneration uint64\n\tconfigGeneration        uint64\n\tapiKeyConfigFingerprint string\n',
     'configGeneration        uint64',
 )
 replace_once(
@@ -2133,8 +2133,9 @@ replace_once(
 \th.mu.Unlock()
 ''',
     '''\th.mu.Lock()
+\th.updateAPIKeyConfigGenerationLocked()
 \th.cfg = cfg
-\th.configGeneration++
+\th.updateAPIKeyConfigGenerationLocked()
 \tapplication := h.proApp
 \tvar apiKeys []string
 \tif cfg != nil {
@@ -2197,10 +2198,10 @@ replace_once(
 ''',
     '''\t\treturn false
 \t}
-\th.configGeneration++
+\th.updateAPIKeyConfigGenerationLocked()
 \tsnapshot := h.reloadSnapshotConfigLocked()
 ''',
-    'h.configGeneration++\n\tsnapshot := h.reloadSnapshotConfigLocked()',
+    'h.updateAPIKeyConfigGenerationLocked()\n\tsnapshot := h.reloadSnapshotConfigLocked()',
 )
 
 server_source = ROOT / 'internal/api/server.go'

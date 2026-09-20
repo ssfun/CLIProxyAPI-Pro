@@ -33,6 +33,7 @@ function harness(options: { refreshedLimit?: number; refreshFails?: boolean } = 
   let notifications = 0;
   const load = async () => { requestRevisionRef.current++; loads++; if (options.refreshFails) return; displayedDisabled = serverDisabled; displayedLimit = options.refreshedLimit ?? serverLimit; };
   const dependencies = {
+    refreshAPIKeyBinding: async (binding: { keyRef: string }) => ({ ...binding, keyRef: 'fresh' }),
     apiKeyPolicyApi: {
       setKeyConcurrency: async (_keyRef: string, limit: number) => { writes++; await request.promise; serverLimit = limit; },
       setKeyDisabled: async () => { writes++; await request.promise; serverDisabled = true; },
@@ -99,6 +100,7 @@ describe('API key card asynchronous mutations', () => {
   test('resynchronizes after an older refresh finishes before the write', async () => {
     const h = harness();
     const action = h.act();
+    await Promise.resolve(); // Reference preflight completes before the write begins.
     await h.load();
     h.request.resolve();
     await action;
@@ -106,6 +108,7 @@ describe('API key card asynchronous mutations', () => {
   });
   test('does not publish a completed write into another page session', async () => {
     const h = harness(); const action = h.act();
+    await Promise.resolve();
     h.keyActionSessionRef.current++;
     h.request.resolve(); await action;
     expect(h.state()).toMatchObject({ loads: 0, notifications: 0 });
@@ -113,11 +116,13 @@ describe('API key card asynchronous mutations', () => {
   });
   test('keeps refresh invalidation for revealed secrets', async () => {
     const h = harness(); const action = h.act('reveal');
+    await Promise.resolve();
     await h.load(); h.request.resolve(); await action;
     expect(h.state().reveals).toBe(0);
   });
   test('reloads conflicts even when a refresh advanced the read revision', async () => {
     const h = harness(); const action = h.act();
+    await Promise.resolve();
     await h.load(); h.request.reject(new Error('config_version_conflict')); await action;
     expect(h.state()).toMatchObject({ loads: 2, notifications: 1 });
   });
@@ -142,6 +147,7 @@ describe('API key concurrency asynchronous mutations', () => {
   });
   test('does not publish a limit into a new connection session', async () => {
     const h = harness(); const action = h.act('concurrency', 2);
+    await Promise.resolve();
     h.workspaceSessionRef.current++; h.request.resolve(); await action;
     expect(h.state()).toMatchObject({ loads: 0, notifications: 0 });
   });
@@ -161,6 +167,7 @@ describe('API key concurrency asynchronous mutations', () => {
 describe('concurrency workspace boundaries and snapshot reconciliation', () => {
   test('ignores a successful response from a workspace that has been replaced', async () => {
     const h = harness(); const action = h.act('concurrency', 2);
+    await Promise.resolve();
     h.workspaceSessionRef.current += 2; // Close A, then open B in the same page session.
     h.edit('7', 0);
     h.request.resolve(); await action;
@@ -170,6 +177,7 @@ describe('concurrency workspace boundaries and snapshot reconciliation', () => {
   });
   test('does not clear another workspace draft after an old request conflicts', async () => {
     const h = harness(); const action = h.act('concurrency', 2);
+    await Promise.resolve();
     h.workspaceSessionRef.current++; h.edit('7', 0);
     h.request.reject(new Error('config_version_conflict')); await action;
     expect(h.view().concurrencyValue).toBe('7');

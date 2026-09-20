@@ -33,6 +33,8 @@ import { ProTaskDialog, ProWorkspaceSheet } from '@/pro/shared/ProSurface';
 import { buildMonitoringUsageLocationState } from '@/pro/shared/monitoringNavigation';
 import {
   apiKeyPolicyApi,
+  findCurrentAPIKeyBinding,
+  refreshAPIKeyBinding,
   parseKeyConcurrencyLimit,
   apiKeyPolicyErrorCode,
   apiKeyPolicyConflictKeyRef,
@@ -528,13 +530,15 @@ export function APIKeyPolicyPage() {
     const revision = requestRevisionRef.current;
     const session = keyActionSessionRef.current;
     try {
+      const currentBinding = await refreshAPIKeyBinding(binding);
+      if (session !== keyActionSessionRef.current || revision !== requestRevisionRef.current) return;
       if (action === 'toggle') {
-        await apiKeyPolicyApi.setKeyDisabled(binding.keyRef, !binding.disabled, binding.disabled === true);
+        await apiKeyPolicyApi.setKeyDisabled(currentBinding.keyRef, !binding.disabled, binding.disabled === true);
         if (session !== keyActionSessionRef.current) return;
         showNotification(t(binding.disabled ? 'api_key_policy.key_enabled_done' : takeoverStatus?.takeoverEnabled ? 'api_key_policy.key_disabled_done' : 'api_key_policy.key_disabled_pending'), 'success');
         await load();
       } else {
-        const key = revealedKeys[binding.keyRef] ?? (await apiKeyPolicyApi.readKey(binding.keyRef)).key;
+        const key = (await apiKeyPolicyApi.readKey(currentBinding.keyRef)).key;
         if (session !== keyActionSessionRef.current || revision !== requestRevisionRef.current) return;
         if (action === 'reveal') setRevealedKeys((current) => ({ ...current, [binding.keyRef]: key }));
         else {
@@ -598,8 +602,13 @@ export function APIKeyPolicyPage() {
     binding: APIKeyPolicyBinding,
     profile?: { id: string; name: string },
   ) => {
+    const session = keyActionSessionRef.current;
+    const revision = requestRevisionRef.current;
     try {
-      const { apiKeyHash } = await apiKeyPolicyApi.usageTarget(binding.keyRef);
+      const currentBinding = await refreshAPIKeyBinding(binding);
+      if (session !== keyActionSessionRef.current || revision !== requestRevisionRef.current) return;
+      const { apiKeyHash } = await apiKeyPolicyApi.usageTarget(currentBinding.keyRef);
+      if (session !== keyActionSessionRef.current || revision !== requestRevisionRef.current) return;
       navigate('/monitoring#request-events', {
         state: buildMonitoringUsageLocationState({
           apiKeyHash,
@@ -697,7 +706,7 @@ export function APIKeyPolicyPage() {
       if (workspaceTarget.kind === 'create') {
         const bindings = await apiKeyPolicyApi.bindings();
         if (revision !== saveRevisionRef.current) return;
-        const binding = bindings.items.find((item) => item.keyRef === workspaceTarget.binding.keyRef);
+        const binding = findCurrentAPIKeyBinding(bindings.items, workspaceTarget.binding);
         if (!binding) {
           // A stale reference or older Core must not silently discard the draft.
           showNotification(t('api_key_policy.key_ref_stale'), 'warning');
@@ -796,8 +805,10 @@ export function APIKeyPolicyPage() {
     try {
       let policy: APIKeyPolicy;
       if (workspaceTarget.kind === 'create') {
+        const binding = await refreshAPIKeyBinding(workspaceTarget.binding);
+        if (revision !== saveRevisionRef.current || workspaceSession !== workspaceSessionRef.current) return;
         policy = await apiKeyPolicyApi.create(
-          workspaceTarget.binding.keyRef,
+          binding.keyRef,
           draft.displayName.trim(),
           draft.profileEnabled ? draft.profile : undefined,
           quotaSupported ? draft.quota : undefined,

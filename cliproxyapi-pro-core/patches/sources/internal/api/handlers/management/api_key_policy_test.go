@@ -335,6 +335,46 @@ func TestAPIKeyPolicyWorkspaceCanPauseAndResumeProfileEnforcement(t *testing.T) 
 	}
 }
 
+func TestAPIKeyReferenceRefreshAndKeySetGeneration(t *testing.T) {
+	h, router := newAPIKeyPolicyManagementHarness(t, []string{"key-a", "key-b"})
+	list := func(session string) apiKeyPolicyBinding {
+		return bindingResponse(t, policyRequest(t, router, http.MethodGet, "/v0/management/api-key-policy-bindings", session, nil)).Items[0]
+	}
+	first := list("session-a")
+	_, generation := h.apiKeyConfigSnapshot()
+	h.SetConfig(&config.Config{SDKConfig: config.SDKConfig{APIKeys: []string{"key-b", "key-a", "key-a"}}})
+	_, reordered := h.apiKeyConfigSnapshot()
+	if reordered != generation {
+		t.Fatal("unchanged normalized key set invalidated references")
+	}
+	target := policyRequest(t, router, http.MethodPost, "/v0/management/api-key-policy-usage-target", "session-a", map[string]any{"keyRef": first.KeyRef})
+	if target.Code != http.StatusOK {
+		t.Fatalf("reference invalid after unrelated reload: %s", target.Body.String())
+	}
+	h.SetConfig(&config.Config{SDKConfig: config.SDKConfig{APIKeys: []string{"key-a", "key-b"}}})
+	h.apiKeyRefsMu.Lock()
+	ref := h.apiKeyRefs[first.KeyRef]
+	ref.expiresAt = time.Now().Add(-time.Second)
+	h.apiKeyRefs[first.KeyRef] = ref
+	h.apiKeyRefsMu.Unlock()
+	fresh := list("session-a")
+	if first.BindingID == "" || fresh.BindingID != first.BindingID || fresh.KeyRef == first.KeyRef {
+		t.Fatal("expired reference could not be safely reconciled")
+	}
+	if other := list("session-b"); other.BindingID == first.BindingID {
+		t.Fatal("binding identity crossed sessions")
+	}
+	created := policyRequest(t, router, http.MethodPost, "/v0/management/api-key-policies", "session-a", createPolicyBody(fresh.KeyRef))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("refreshed create failed: %s", created.Body.String())
+	}
+	h.SetConfig(&config.Config{SDKConfig: config.SDKConfig{APIKeys: []string{"key-b"}}})
+	_, removed := h.apiKeyConfigSnapshot()
+	if removed == generation {
+		t.Fatal("key removal did not invalidate references")
+	}
+}
+
 func TestAPIKeyPolicyBindingsAndKeyReferenceSecurity(t *testing.T) {
 	h, router := newAPIKeyPolicyManagementHarness(t, []string{"sk-sensitive-canary-123456789"})
 	listed := policyRequest(t, router, http.MethodGet, "/v0/management/api-key-policy-bindings", "session-a", nil)
@@ -362,7 +402,7 @@ func TestAPIKeyPolicyBindingsAndKeyReferenceSecurity(t *testing.T) {
 
 	listed = policyRequest(t, router, http.MethodGet, "/v0/management/api-key-policy-bindings", "session-a", nil)
 	keyRef = bindingResponse(t, listed).Items[0].KeyRef
-	h.SetConfig(&config.Config{SDKConfig: config.SDKConfig{APIKeys: []string{"sk-sensitive-canary-123456789"}}})
+	h.SetConfig(&config.Config{SDKConfig: config.SDKConfig{APIKeys: []string{"sk-sensitive-canary-123456789", "added-key"}}})
 	staleGeneration := policyRequest(t, router, http.MethodPost, "/v0/management/api-key-policies", "session-a", createPolicyBody(keyRef))
 	if staleGeneration.Code != http.StatusConflict || !strings.Contains(staleGeneration.Body.String(), "api_key_reference_stale") {
 		t.Fatalf("generation status=%d body=%s", staleGeneration.Code, staleGeneration.Body.String())
@@ -404,7 +444,7 @@ func TestAPIKeyPolicyUsageTargetIsSessionAndGenerationBoundWithoutConsumingRefer
 		}
 	}
 
-	h.SetConfig(&config.Config{SDKConfig: config.SDKConfig{APIKeys: []string{rawKey}}})
+	h.SetConfig(&config.Config{SDKConfig: config.SDKConfig{APIKeys: []string{rawKey, "added-key"}}})
 	stale := policyRequest(t, router, http.MethodPost, "/v0/management/api-key-policy-usage-target", "session-a", body)
 	if stale.Code != http.StatusConflict || !strings.Contains(stale.Body.String(), "api_key_reference_stale") {
 		t.Fatalf("stale status=%d body=%s", stale.Code, stale.Body.String())

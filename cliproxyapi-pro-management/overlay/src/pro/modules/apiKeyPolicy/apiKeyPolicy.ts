@@ -88,6 +88,7 @@ export interface APIKeyPolicy {
 }
 
 export interface APIKeyPolicyBinding {
+  bindingId?: string;
   disabled?: boolean;
   concurrencyLimit?: number;
   maskedKey: string;
@@ -102,6 +103,22 @@ export interface APIKeyPolicyBindingPage {
   orphaned: APIKeyPolicy[];
   nextCursor: string;
   configGeneration: number;
+}
+
+// A mask or list position is not an identity. Older Core can only match a live reference.
+export function findCurrentAPIKeyBinding(items: APIKeyPolicyBinding[], original: APIKeyPolicyBinding) {
+  return items.find((item) => original.bindingId
+    ? item.bindingId === original.bindingId
+    : item.keyRef === original.keyRef);
+}
+
+export async function refreshAPIKeyBinding(original: APIKeyPolicyBinding): Promise<APIKeyPolicyBinding> {
+  const page = await apiKeyPolicyApi.bindings();
+  const binding = findCurrentAPIKeyBinding(page.items, original);
+  if (!binding) {
+    throw Object.assign(new Error('API key reference is stale'), { apiCode: 'api_key_reference_stale' });
+  }
+  return binding;
 }
 
 export interface APIKeyPolicyCatalog {

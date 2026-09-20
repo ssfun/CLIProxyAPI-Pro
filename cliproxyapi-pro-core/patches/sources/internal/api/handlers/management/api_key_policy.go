@@ -2,12 +2,15 @@ package management
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +33,7 @@ type apiKeyReference struct {
 }
 
 type apiKeyPolicyBinding struct {
+	BindingID        string               `json:"bindingId"`
 	ConcurrencyLimit int                  `json:"concurrencyLimit"`
 	Disabled         bool                 `json:"disabled"`
 	MaskedKey        string               `json:"maskedKey"`
@@ -214,10 +218,36 @@ func (h *Handler) apiKeyPolicyService() *apikeypolicy.Service {
 func (h *Handler) apiKeyConfigSnapshot() ([]string, uint64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.updateAPIKeyConfigGenerationLocked()
 	if h.cfg == nil {
 		return nil, h.configGeneration
 	}
 	return append([]string(nil), h.cfg.APIKeys...), h.configGeneration
+}
+
+// Only changes to the normalized key set invalidate references and cursors.
+// Call under h.mu, including before replacing h.cfg.
+func (h *Handler) updateAPIKeyConfigGenerationLocked() {
+	var keys []string
+	if h.cfg != nil {
+		for hash := range configuredAPIKeyIdentities(h.cfg.APIKeys) {
+			keys = append(keys, hash)
+		}
+	}
+	sort.Strings(keys)
+	digest := sha256.Sum256([]byte(strings.Join(keys, "\n")))
+	fingerprint := base64.RawURLEncoding.EncodeToString(digest[:])
+	if h.apiKeyConfigFingerprint != "" && h.apiKeyConfigFingerprint != fingerprint {
+		h.configGeneration++
+	}
+	h.apiKeyConfigFingerprint = fingerprint
+}
+
+// A session-scoped identity used only to reconcile lists, never to authorize actions.
+func apiKeyBindingID(c *gin.Context, identity apikeypolicy.AuthenticatedAPIKeyIdentity) string {
+	mac := hmac.New(sha256.New, []byte(managementSessionID(c)))
+	_, _ = mac.Write([]byte(identity.Hash()))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func managementSessionID(c *gin.Context) string {
@@ -394,6 +424,7 @@ func (h *Handler) ListAPIKeyPolicyBindings(c *gin.Context) {
 			return
 		}
 		binding := apiKeyPolicyBinding{ConcurrencyLimit: service.KeyConcurrencyLimit(key.identity), Disabled: service.KeyDisabled(key.identity), MaskedKey: maskAPIKey(key.raw), KeyRef: keyRef, State: apikeypolicy.StateUnconfigured, WeakKey: weakAPIKey(key.raw)}
+		binding.BindingID = apiKeyBindingID(c, key.identity)
 		if policy, exists := byHash[key.identity.Hash()]; exists {
 			policy.State = apikeypolicy.StateConfigured
 			binding.State, binding.Policy = apikeypolicy.StateConfigured, &policy
