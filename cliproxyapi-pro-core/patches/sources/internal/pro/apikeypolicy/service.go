@@ -1672,7 +1672,8 @@ func (s *Service) recordQuotaUsageAtGeneration(ctx context.Context, attribution 
 		}
 		costMicros, err = estimator(ctx, usage)
 		if errors.Is(err, ErrQuotaPriceMissing) {
-			return 0, false, fmt.Errorf("%w: %v", errQuotaPricingUnavailable, err)
+			// Unpriced models remain usable; their tokens count, but their cost is zero.
+			costMicros, err = 0, nil
 		}
 		if err != nil || costMicros < 0 {
 			if err == nil {
@@ -2815,7 +2816,15 @@ func (s *Service) writePolicy(ctx context.Context, policyID string, validateCost
 				return err
 			}
 			if err := s.validateCostQuotaPolicy(transactionCtx, policy); err != nil {
-				return err
+				var missing *MissingQuotaPriceRulesError
+				if !errors.As(err, &missing) {
+					return err
+				}
+				for index := range policies {
+					if policies[index].ID == policyID {
+						policies[index].MissingPriceModels = append([]string(nil), missing.Models...)
+					}
+				}
 			}
 		}
 		current := s.index.Load()

@@ -1127,7 +1127,7 @@ func TestProfileCatalogRejectsUnknownProviderAndModel(t *testing.T) {
 	}
 }
 
-func TestCostQuotaSaveRequiresPriceCoverageAcrossEverySavedProfile(t *testing.T) {
+func TestCostQuotaSaveWarnsAboutMissingPricesAcrossEverySavedProfile(t *testing.T) {
 	service := newTestService(t)
 	catalog := NewProfileCatalog(
 		[]string{"codex", "claude"},
@@ -1162,17 +1162,16 @@ func TestCostQuotaSaveRequiresPriceCoverageAcrossEverySavedProfile(t *testing.T)
 		t.Fatal(err)
 	}
 	costLimit := 10.0
-	_, err = service.UpdateWorkspace(context.Background(), policy.ID, policy.Version, WorkspaceUpdate{
+	policy, err = service.UpdateWorkspace(context.Background(), policy.ID, policy.Version, WorkspaceUpdate{
 		DisplayName: policy.DisplayName,
 		Quota:       QuotaUpdate{Present: true, Value: &QuotaInput{Enabled: true, Cost: &costLimit}},
 	})
-	var missing *MissingQuotaPriceRulesError
-	if !errors.As(err, &missing) || !reflect.DeepEqual(missing.Models, []string{"claude-opus"}) {
-		t.Fatalf("cost quota price coverage error = %#v, %v", missing, err)
+	if err != nil || !reflect.DeepEqual(policy.MissingPriceModels, []string{"claude-opus"}) {
+		t.Fatalf("cost quota warning = %#v, %v", policy.MissingPriceModels, err)
 	}
 	stored, getErr := service.Get(context.Background(), policy.ID)
-	if getErr != nil || stored.Quota != nil || stored.Version != policy.Version {
-		t.Fatalf("rejected cost quota partially persisted: policy=%#v error=%v", stored, getErr)
+	if getErr != nil || stored.Quota == nil || stored.Version != policy.Version {
+		t.Fatalf("cost quota was not persisted: policy=%#v error=%v", stored, getErr)
 	}
 	priced["claude-opus"] = struct{}{}
 	updated, err := service.UpdateWorkspace(context.Background(), policy.ID, policy.Version, WorkspaceUpdate{
@@ -1449,7 +1448,7 @@ func TestCostQuotaSettlementIsIdempotentWithoutRepricing(t *testing.T) {
 	}
 }
 
-func TestMissingCostPriceFailsClosedAndBlocksFurtherAdmission(t *testing.T) {
+func TestMissingCostPriceSettlesTokensAtZeroCostWithoutBlocking(t *testing.T) {
 	service := newTestService(t)
 	service.SetCostEstimator(func(context.Context, QuotaUsageDelta) (int64, error) {
 		return 0, ErrQuotaPriceMissing
@@ -1475,15 +1474,15 @@ func TestMissingCostPriceFailsClosedAndBlocksFurtherAdmission(t *testing.T) {
 	}
 	if err = SettleQuotaUsage(WithDecision(context.Background(), admitted), "missing-price", QuotaUsageDelta{
 		Provider: "codex", Model: "missing-price", InputTokens: 3, TotalTokens: 3,
-	}); !errors.Is(err, errQuotaPricingUnavailable) {
-		t.Fatalf("missing price settlement = %v, want pricing unavailable", err)
+	}); err != nil {
+		t.Fatalf("missing price settlement = %v", err)
 	}
 	loaded, err := service.Get(context.Background(), created.ID)
-	if err != nil || loaded.Quota == nil || loaded.Quota.Usage.TotalTokensUsed != 0 || loaded.Quota.Usage.CostUsed != 0 {
+	if err != nil || loaded.Quota == nil || loaded.Quota.Usage.TotalTokensUsed != 3 || loaded.Quota.Usage.CostUsed != 0 {
 		t.Fatalf("missing-price usage = %#v error=%v", loaded.Quota, err)
 	}
-	if _, err = service.AdmitDecision(context.Background(), decision); !errors.Is(err, ErrQuotaUnavailable) {
-		t.Fatalf("missing price admission = %v, want fail closed", err)
+	if _, err = service.AdmitDecision(context.Background(), decision); err != nil {
+		t.Fatalf("missing price blocked admission: %v", err)
 	}
 }
 

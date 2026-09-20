@@ -330,17 +330,18 @@ type ProfileCatalogSnapshot struct {
 }
 
 type Policy struct {
-	ID              string    `json:"id"`
-	APIKeyHash      string    `json:"-"`
-	DisplayName     string    `json:"displayName"`
-	ProfileEnabled  bool      `json:"profileEnabled"`
-	ActiveProfileID string    `json:"activeProfileId"`
-	Version         int64     `json:"version"`
-	CreatedAtMS     int64     `json:"createdAtMs"`
-	UpdatedAtMS     int64     `json:"updatedAtMs"`
-	Profiles        []Profile `json:"profiles"`
-	Quota           *Quota    `json:"quota,omitempty"`
-	State           string    `json:"state,omitempty"`
+	MissingPriceModels []string  `json:"missingPriceModels,omitempty"`
+	ID                 string    `json:"id"`
+	APIKeyHash         string    `json:"-"`
+	DisplayName        string    `json:"displayName"`
+	ProfileEnabled     bool      `json:"profileEnabled"`
+	ActiveProfileID    string    `json:"activeProfileId"`
+	Version            int64     `json:"version"`
+	CreatedAtMS        int64     `json:"createdAtMs"`
+	UpdatedAtMS        int64     `json:"updatedAtMs"`
+	Profiles           []Profile `json:"profiles"`
+	Quota              *Quota    `json:"quota,omitempty"`
+	State              string    `json:"state,omitempty"`
 }
 
 // Quota is the API-key-wide budget. Profile IDs remain usage attribution only:

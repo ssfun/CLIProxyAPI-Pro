@@ -74,6 +74,7 @@ export type APIKeyQuotaPeriod =
   | { type: 'calendar_duration'; unit: 'day' | 'month'; timezone?: string };
 
 export interface APIKeyPolicy {
+  missingPriceModels?: string[];
   id: string;
   displayName: string;
   state: APIKeyPolicyState;

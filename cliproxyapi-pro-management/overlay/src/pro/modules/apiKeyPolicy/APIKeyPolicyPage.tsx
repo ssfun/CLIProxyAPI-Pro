@@ -839,7 +839,11 @@ export function APIKeyPolicyPage() {
         draftRevisionRef.current += 1;
         setDraft(workspaceDraftFromTarget(target, savedProfile?.id));
       }
-      showNotification(t('api_key_policy.saved'), 'success');
+      if (policy.missingPriceModels?.length) {
+        showNotification(t('api_key_policy.saved_missing_prices', { models: policy.missingPriceModels.join(', ') }), 'warning');
+      } else {
+        showNotification(t('api_key_policy.saved'), 'success');
+      }
       await Promise.all([load(), refreshQuotaAfterMutation()]);
     } catch (error) {
       if (revision !== saveRevisionRef.current || workspaceSession !== workspaceSessionRef.current) return;
