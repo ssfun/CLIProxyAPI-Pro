@@ -1,3 +1,5 @@
+import { allocateRealtimeColumnWidths, retainRealtimeColumnSample } from './features/realtimeColumnLayout';
+import type { TFunction } from 'i18next';
 import { RealtimeModelCell } from './features/components/RealtimeModelCell';
 import { resolveModelAudit } from './features/modelAudit';
 import { MonitoringApiKeyCell } from './features/components/MonitoringApiKeyCell';
@@ -168,7 +170,7 @@ const getSuccessRateClassName = (rate: number) => (
   rate >= 0.95 ? styles.goodText : rate >= 0.85 ? styles.warnText : styles.badText
 );
 
-const getRealtimeLogColumnContentTexts = (key: RealtimeLogColumnKey, row: RealtimeLogDisplayRow) => {
+const getRealtimeLogColumnContentTexts = (key: RealtimeLogColumnKey, row: RealtimeLogDisplayRow, t: TFunction, language: string) => {
   switch (key) {
     case 'type':
       return [
@@ -177,67 +179,45 @@ const getRealtimeLogColumnContentTexts = (key: RealtimeLogColumnKey, row: Realti
       ];
     case 'model': {
       const audit = resolveModelAudit(row);
-      return [audit.requested, audit.sent, audit.response, audit.legacyModel, buildRealtimeMetaText(row)];
+      return [audit.requested, audit.showSent ? `↳ ${t('monitoring.model_upstream')}: ${audit.sent}` : '', audit.showResponse ? `↳ ${t('monitoring.model_response')}: ${audit.response}` : '', audit.legacyModel, buildRealtimeMetaText(row)];
     }
     case 'reasoningEffort':
       return [row.reasoningEffort.trim() || '-'];
     case 'stream':
-      return [row.stream ? 'Streaming' : 'Non-streaming'];
+      return [t(row.stream ? 'monitoring.stream_mode_streaming' : 'monitoring.stream_mode_non_streaming')];
     case 'apiKey':
       return [formatMonitoringApiKeyLabel(row.clientApiKey)];
     case 'recent':
       return ['||||||||||'];
     case 'status':
-      return [buildRealtimeStatusLabel(row, row.failed ? 'Failed' : 'Success')];
+      return [buildRealtimeStatusLabel(row, row.failed ? t('monitoring.result_failed') : t('monitoring.result_success'))];
     case 'successRate':
       return [formatPercent(row.successRate)];
     case 'calls':
       return [formatCompactNumber(row.requestCount)];
     case 'latency':
       return [
-        `First ${formatDurationMs(row.ttftMs)}`,
-        `Total ${formatDurationMs(row.latencyMs)}`,
+        `${t('monitoring.realtime_duration_ttft')} ${formatDurationMs(row.ttftMs, { locale: language })}`,
+        `${t('monitoring.realtime_duration_total')} ${formatDurationMs(row.latencyMs, { locale: language })}`,
       ];
     case 'tokens':
       return [
-        formatTokenCount(row.totalTokens),
-        `I ${formatTokenCount(row.inputTokens)} O ${formatTokenCount(row.outputTokens)}`,
-        row.reasoningTokens > 0 ? `R ${formatTokenCount(row.reasoningTokens)}` : '',
+        `${t('monitoring.realtime_tokens_total')}: ${formatTokenCount(row.totalTokens)}`,
+        `${t('monitoring.realtime_tokens_input')}: ${formatTokenCount(row.inputTokens)} | ${t('monitoring.realtime_tokens_output')}: ${formatTokenCount(row.outputTokens)}`,
+        row.reasoningTokens > 0 ? `${t('monitoring.realtime_tokens_reasoning')}: ${formatTokenCount(row.reasoningTokens)}` : '',
       ];
     case 'cacheRead':
       return [
         formatTokenCount(row.cachedTokens),
-        row.cacheInputTokens > 0 ? formatPercent(Math.min(row.cachedTokens / row.cacheInputTokens, 1)) : '--',
+        `${row.cacheInputTokens > 0 ? formatPercent(Math.min(row.cachedTokens / row.cacheInputTokens, 1)) : '--'} ${t('monitoring.realtime_cache_hit')}`,
       ];
     case 'cost':
       return [formatUsdPrecise(row.totalCost)];
     case 'time':
-      return [new Date(row.timestampMs).toLocaleString()];
+      return [new Date(row.timestampMs).toLocaleString(language)];
     default:
       return [];
   }
-};
-
-const estimateRealtimeLogColumnWidth = (
-  key: RealtimeLogColumnKey,
-  label: string,
-  rows: RealtimeLogDisplayRow[]
-) => {
-  const maxTextLength = rows.reduce((maxLength, row) => {
-    const rowMaxLength = getRealtimeLogColumnContentTexts(key, row)
-      .reduce((innerMax, text) => Math.max(innerMax, text.length), 0);
-    return Math.max(maxLength, rowMaxLength);
-  }, label.length);
-  const characterWidth = key === 'recent' ? 6 : key === 'tokens' || key === 'cacheRead' ? 8 : 7;
-  const padding = key === 'status' ? 36 : key === 'tokens' || key === 'cacheRead' ? 34 : 28;
-  return clampRealtimeLogColumnWidth(key, maxTextLength * characterWidth + padding);
-};
-
-const estimateRealtimeLogHeaderWidth = (key: RealtimeLogColumnKey, label: string) => {
-  const textWidth = Array.from(label).reduce((total, char) => (
-    total + (char.charCodeAt(0) > 255 ? 13 : 7)
-  ), 0);
-  return clampRealtimeLogColumnWidth(key, textWidth + 42);
 };
 
 export function MonitoringCenterPage() {
@@ -847,6 +827,7 @@ export function MonitoringCenterPage() {
       key: 'type',
       label: t('monitoring.column_type'),
       colClassName: styles.realtimeTypeCol,
+      cellClassName: () => styles.realtimeIdentityCell,
       width: REALTIME_LOG_COLUMN_DEFAULT_WIDTHS.type,
       render: (row) => (
         <div className={styles.primaryCell}>
@@ -857,7 +838,7 @@ export function MonitoringCenterPage() {
             <strong>{row.provider}{row.accountPlan === '-' ? '' : ' · '}</strong>
             {row.accountPlan === '-' ? null : row.accountPlan}
           </span>
-          <small>{row.account || row.authLabel || row.accountMasked || '-'}</small>
+          <small title={row.account || row.authLabel || row.accountMasked || '-'}>{row.account || row.authLabel || row.accountMasked || '-'}</small>
         </div>
       ),
     },
@@ -1066,27 +1047,62 @@ export function MonitoringCenterPage() {
       colClassName: styles.realtimeTimeCol,
       cellClassName: () => styles.realtimeTimeCell,
       width: REALTIME_LOG_COLUMN_DEFAULT_WIDTHS.time,
-      render: (row) => new Date(row.timestampMs).toLocaleString(i18n.language),
+      render: (row) => <span className={styles.realtimeTimeParts} title={new Date(row.timestampMs).toLocaleString(i18n.language)}><span>{new Date(row.timestampMs).toLocaleDateString(i18n.language)}</span><span>{new Date(row.timestampMs).toLocaleTimeString(i18n.language)}</span></span>,
     },
   }), [hasPrices, i18n.language, setSelectedRealtimeErrorRow, t]);
-  const visibleRealtimeLogColumns = useMemo(
-    () => realtimeLogColumns
-      .filter((column) => column.visible)
-      .map((column) => {
-        const definition = realtimeLogColumnDefinitions[column.key];
-        const contentWidth = column.width ?? estimateRealtimeLogColumnWidth(
-          column.key,
-          definition.label,
-          realtimeLogPageRows
-        );
-        return {
-          ...definition,
-          width: Math.max(contentWidth, estimateRealtimeLogHeaderWidth(column.key, definition.label)),
-        };
-      })
-      .filter(Boolean),
-    [realtimeLogColumnDefinitions, realtimeLogColumns, realtimeLogPageRows]
-  );
+  const [realtimeContainerWidth, setRealtimeContainerWidth] = useState(0);
+  const [autoWidthRevision, setAutoWidthRevision] = useState(0);
+  const [columnSample, setColumnSample] = useState<{
+    epoch: string;
+    ready: boolean;
+    value: Record<RealtimeLogColumnKey, { preferred: number; header: number }>;
+  } | null>(null);
+  const columnLayoutEpoch = `${i18n.language}:${autoWidthRevision}`;
+
+  useEffect(() => {
+    const element = realtimeLogWrapperRef.current;
+    if (!element) return;
+    let frame = 0;
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setRealtimeContainerWidth(element.clientWidth));
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    update();
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+  }, [realtimeLogWrapperRef]);
+
+  useEffect(() => {
+    if (columnSample?.epoch === columnLayoutEpoch && (columnSample.ready || realtimeLogPageRows.length === 0)) return;
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    const family = getComputedStyle(document.body).fontFamily;
+    const measure = (text: string, font: string) => {
+      if (context) { context.font = font; return context.measureText(text).width; }
+      return Array.from(text).reduce((sum, char) => sum + (char.charCodeAt(0) > 255 ? 13 : 7), 0);
+    };
+    const value = Object.fromEntries(Object.values(realtimeLogColumnDefinitions).map((definition) => {
+      const key = definition.key;
+      const font = key === 'model' ? '500 13px monospace' : `600 13px ${family}`;
+      const header = Math.ceil(measure(definition.label, `700 12px ${family}`)) + 40;
+      const content = realtimeLogPageRows.flatMap((row) => getRealtimeLogColumnContentTexts(key, row, t, i18n.language));
+      const preferred = Math.ceil(Math.max(header, ...content.map((text) => measure(text, font) + (key === 'status' || key === 'cost' ? 52 : 32))));
+      return [key, { preferred: Math.max(preferred, key === 'recent' ? 86 : 68), header }];
+    })) as Record<RealtimeLogColumnKey, { preferred: number; header: number }>;
+    setColumnSample((previous) => retainRealtimeColumnSample(previous, columnLayoutEpoch, realtimeLogPageRows.length > 0, () => value));
+  }, [columnLayoutEpoch, columnSample, realtimeLogColumnDefinitions, realtimeLogPageRows, t, i18n.language]);
+
+  const visibleRealtimeLogColumns = useMemo(() => {
+    const visible = realtimeLogColumns.filter((column) => column.visible);
+    const widths = allocateRealtimeColumnWidths(visible.map((column) => ({
+      key: column.key,
+      preferred: columnSample?.value[column.key].preferred ?? REALTIME_LOG_COLUMN_DEFAULT_WIDTHS[column.key],
+      header: columnSample?.value[column.key].header ?? 68,
+      manual: column.width,
+    })), realtimeContainerWidth);
+    return widths.map(({ key, width }) => ({ ...realtimeLogColumnDefinitions[key], width }));
+  }, [realtimeLogColumnDefinitions, realtimeLogColumns, columnSample, realtimeContainerWidth]);
   const realtimeLogTableMinWidth = useMemo(
     () => visibleRealtimeLogColumns.reduce((total, column) => total + column.width, 0),
     [visibleRealtimeLogColumns]
@@ -1269,8 +1285,14 @@ export function MonitoringCenterPage() {
     window.addEventListener('mouseup', handleMouseUp);
   }, [resizeRealtimeLogColumn, visibleRealtimeLogColumns]);
 
+  const resetRealtimeLogWidths = useCallback(() => {
+    updateRealtimeLogColumns((columns) => columns.map((column) => ({ key: column.key, visible: column.visible })));
+    setAutoWidthRevision((revision) => revision + 1);
+  }, [updateRealtimeLogColumns]);
+
   const resetRealtimeLogColumns = useCallback(() => {
     updateRealtimeLogColumns(() => createDefaultRealtimeLogColumns());
+    setAutoWidthRevision((revision) => revision + 1);
   }, [updateRealtimeLogColumns]);
 
   useEffect(() => {
@@ -1698,6 +1720,7 @@ export function MonitoringCenterPage() {
               <div className={styles.realtimeColumnsDropdown}>
                 <div className={styles.realtimeColumnsDropdownHeader}>
                   <span>{t('monitoring.realtime_columns_hint')}</span>
+                  <button type="button" className={styles.inlineActionButton} onClick={resetRealtimeLogWidths}>{t('monitoring.realtime_columns_auto_width')}</button>
                   <button type="button" className={styles.inlineActionButton} onClick={resetRealtimeLogColumns}>
                     {t('monitoring.realtime_columns_reset')}
                   </button>

@@ -405,7 +405,7 @@
 .realtimeColumnResizeHandle {
   position: absolute;
   top: 0;
-  right: -4px;
+  right: 0;
   bottom: 0;
   z-index: 4;
   width: 8px;
@@ -864,3 +864,37 @@
 }
 .modelAuditDetailsButton:hover { text-decoration: underline; }
 .modelAuditDetailsButton:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
+// Keep each model hop and identity on one line; the existing tooltip/details
+// retain the full text even when an unusually long identifier is clipped.
+.realtimeTable .realtimeIdentityCell .primaryCell > small,
+.realtimeTable .realtimeModelCell small {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  -webkit-line-clamp: unset;
+  -webkit-box-orient: initial;
+}
+
+.realtimeModelCell > div {
+  min-width: 0;
+}
+
+.realtimeTimeParts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.realtimeTimeParts > span {
+  white-space: nowrap;
+}
+
+.realtimeTable tbody td {
+  overflow: hidden;
+}
