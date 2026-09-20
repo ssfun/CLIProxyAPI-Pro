@@ -608,6 +608,19 @@
   gap: $spacing-md;
 }
 
+.detailReasons {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+
+  > h3 {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+  }
+}
+
 .detailList {
   display: flex;
   flex-direction: column;
@@ -615,6 +628,8 @@
 }
 
 .detailItemCard {
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -625,6 +640,7 @@
 }
 
 .detailItemHeader {
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -632,6 +648,7 @@
 }
 
 .detailBadges {
+  min-width: 0;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -671,7 +688,8 @@
 .detailActionFooter {
   display: flex;
   justify-content: flex-end;
-  margin-top: $spacing-xs;
+  padding-top: $spacing-sm;
+  border-top: 1px solid var(--border-color);
 }
 
 @container scheduling-board (min-width: 721px) and (max-width: 1040px) {

@@ -366,80 +366,80 @@ function SchedulingBoardDetailPanel({
             ],
           },
         ]}
-        detailLabel={t('routing_policy.runtime.reason_details')}
-        detail={
-          <div className={styles.detailList}>
-            {account.details.map((detail, index) => {
-              const isInspection = detail.source === 'inspection';
-              return (
-                <div
-                  key={`${detail.source}-${detail.model || 'all'}-${index}`}
-                  className={styles.detailItemCard}
-                >
-                  <div className={styles.detailItemHeader}>
-                    <div className={styles.detailBadges}>
-                      <span
-                        className={
-                          isInspection ? styles.sourceTagInspection : styles.sourceTagUpstream
-                        }
-                      >
-                        {t(`routing_policy.sources.${detail.source}`, {
-                          defaultValue: detail.source,
-                        })}
-                      </span>
-                      {detail.httpStatus ? (
-                        <span className={styles.detailHttpStatus}>HTTP {detail.httpStatus}</span>
-                      ) : null}
-                      <span className={styles.detailScopeTag}>
-                        {detail.scope === 'credential'
-                          ? t('routing_policy.runtime.all_models')
-                          : detail.model || '-'}
-                      </span>
-                    </div>
+      />
+      <section className={styles.detailReasons}>
+        <h3>{t('routing_policy.runtime.reason_details')}</h3>
+        <div className={styles.detailList}>
+          {account.details.map((detail, index) => {
+            const isInspection = detail.source === 'inspection';
+            return (
+              <div
+                key={`${detail.source}-${detail.model || 'all'}-${index}`}
+                className={styles.detailItemCard}
+              >
+                <div className={styles.detailItemHeader}>
+                  <div className={styles.detailBadges}>
                     <span
-                      className={`${styles.resumeTag} ${
-                        styles[`resumeTag_${schedulingBoardResumeTone(detail.resume)}`]
-                      }`}
+                      className={
+                        isInspection ? styles.sourceTagInspection : styles.sourceTagUpstream
+                      }
                     >
-                      {t(`routing_policy.resume.${detail.resume}`, {
-                        defaultValue: detail.resume,
+                      {t(`routing_policy.sources.${detail.source}`, {
+                        defaultValue: detail.source,
                       })}
                     </span>
-                  </div>
-                  <div className={styles.detailItemReason}>
-                    {t(`routing_policy.reasons.${detail.reason}`, {
-                      defaultValue: detail.reason || '-',
-                    })}
-                  </div>
-                  <div className={styles.detailItemFooter}>
-                    <span>
-                      {t('routing_policy.runtime.retry_at')}:{' '}
-                      {formatTimestamp(
-                        detail.retryAt,
-                        language,
-                        t('routing_policy.runtime.not_scheduled')
-                      )}
-                      {detail.retryAt ? (
-                        <>
-                          {' '}
-                          · <BoardCountdown at={detail.retryAt} resume={detail.resume} />
-                        </>
-                      ) : null}
+                    {detail.httpStatus ? (
+                      <span className={styles.detailHttpStatus}>HTTP {detail.httpStatus}</span>
+                    ) : null}
+                    <span className={styles.detailScopeTag}>
+                      {detail.scope === 'credential'
+                        ? t('routing_policy.runtime.all_models')
+                        : detail.model || '-'}
                     </span>
                   </div>
+                  <span
+                    className={`${styles.resumeTag} ${
+                      styles[`resumeTag_${schedulingBoardResumeTone(detail.resume)}`]
+                    }`}
+                  >
+                    {t(`routing_policy.resume.${detail.resume}`, {
+                      defaultValue: detail.resume,
+                    })}
+                  </span>
                 </div>
-              );
-            })}
-            {account.inspection && onOpenInspection ? (
-              <div className={styles.detailActionFooter}>
-                <Button variant="primary" size="sm" onClick={() => onOpenInspection(account)}>
-                  {t('routing_policy.runtime.open_inspection')}
-                </Button>
+                <div className={styles.detailItemReason}>
+                  {t(`routing_policy.reasons.${detail.reason}`, {
+                    defaultValue: detail.reason || '-',
+                  })}
+                </div>
+                <div className={styles.detailItemFooter}>
+                  <span>
+                    {t('routing_policy.runtime.retry_at')}:{' '}
+                    {formatTimestamp(
+                      detail.retryAt,
+                      language,
+                      t('routing_policy.runtime.not_scheduled')
+                    )}
+                    {detail.retryAt ? (
+                      <>
+                        {' '}
+                        · <BoardCountdown at={detail.retryAt} resume={detail.resume} />
+                      </>
+                    ) : null}
+                  </span>
+                </div>
               </div>
-            ) : null}
-          </div>
-        }
-      />
+            );
+          })}
+        </div>
+      </section>
+      {account.inspection && onOpenInspection ? (
+        <div className={styles.detailActionFooter}>
+          <Button variant="primary" size="sm" onClick={() => onOpenInspection(account)}>
+            {t('routing_policy.runtime.open_inspection')}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
