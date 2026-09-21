@@ -132,6 +132,36 @@ class QuotaSearchCustomizationTest(unittest.TestCase):
             CUSTOMIZATIONS.flush_writes()
             self.assertEqual(page, page_path.read_text())
 
+    def test_quota_page_reuses_upstream_search_control_and_state(self) -> None:
+        source = QUOTA_PAGE_SOURCE.replace(
+            "import { EmptyState }", "import { Input } from '@/components/ui/Input';\nimport {\n  filterEntriesBySearch,\n} from './logic';\nimport { EmptyState }"
+        ).replace(
+            "  const { t } = useTranslation();",
+            "  const { t } = useTranslation();\n  const [search, setSearch] = useState('');",
+        ).replace(
+            '  const filteredEntries = useMemo(() => filterEntriesByTab(entries, tab), [entries, tab]);',
+            '  const filteredEntries = useMemo(\n    () => filterEntriesBySearch(filterEntriesByTab(entries, tab), search),\n    [entries, tab, search]\n  );',
+        )
+        control = '<Input type="search" value={search} onChange={handleSearchChange} aria-label={t(\'quota_management.search_label\')} />'
+        source = source.replace('        {error && (', '        ' + control + '\n        {error && (')
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir)
+            path = target / 'src/features/quota/QuotaPage.tsx'
+            path.parent.mkdir(parents=True)
+            path.write_text(source)
+            CUSTOMIZATIONS.patch_quota_page_latest(target)
+            CUSTOMIZATIONS.flush_writes()
+            first = path.read_text()
+            self.assertIn(control, first)
+            self.assertEqual(first.count('type="search"'), 1)
+            self.assertEqual(first.count('const [search, setSearch]'), 1)
+            self.assertEqual(first.count('const quotaSearchStore = useMemo('), 1)
+            self.assertIn('filterEntriesByTab(searchedEntries, tab)', first)
+            self.assertNotIn('filterEntriesBySearch', first)
+            CUSTOMIZATIONS.patch_quota_page_latest(target)
+            CUSTOMIZATIONS.flush_writes()
+            self.assertEqual(first, path.read_text())
+
     def test_search_placeholders_are_concise_and_match_each_page(self) -> None:
         self.assertEqual(
             {

@@ -18,7 +18,9 @@ func (m *Manager) SetAccountPolicyResolver(resolver AccountPolicyResolver) {
 	m.mu.Lock()
 	m.accountPolicyResolver = resolver
 	m.mu.Unlock()
-	m.syncScheduler()
+	// Policy changes do not change the base auth generation. Refresh entries
+	// explicitly so upstream scheduler version checks cannot skip the new policy.
+	m.RefreshSchedulerAll()
 }
 
 func (m *Manager) applyAccountPolicy(auth *Auth) *Auth {

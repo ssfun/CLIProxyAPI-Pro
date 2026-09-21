@@ -6803,16 +6803,21 @@ replace_once(
 }''',
     'out = append(out, resolveAccountPolicy(a, resolver))',
 )
+# Preserve the scheduler structural epoch introduced by upstream v7.3.10.
+scheduler_epoch_update = (
+    '\tm.structuralEpoch.Add(1)\n'
+    if '\tm.structuralEpoch.Add(1)\n' in read(auth_conductor) else ''
+)
 replace_once(
     auth_conductor,
     '''	snapshot := auth.Clone()
 	m.mu.RUnlock()
-	m.scheduler.upsertAuth(snapshot)
+''' + scheduler_epoch_update + '''	m.scheduler.upsertAuth(snapshot)
 ''',
     '''	resolver := m.accountPolicyResolver
 	snapshot := resolveAccountPolicy(auth, resolver)
 	m.mu.RUnlock()
-	m.scheduler.upsertAuth(snapshot)
+''' + scheduler_epoch_update + '''	m.scheduler.upsertAuth(snapshot)
 ''',
     'snapshot := resolveAccountPolicy(auth, resolver)',
 )

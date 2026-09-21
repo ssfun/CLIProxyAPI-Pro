@@ -1337,10 +1337,11 @@ def patch_codex_account_id_resolver(target: Path) -> None:
         "  return resolveAccountIdCandidate(payload);\n"
         "}\n",
     )
+    token_candidates = 'tokenCandidates' if 'const tokenCandidates =' in read(path) else 'candidates'
     replace_once(
         path,
-        "  const candidates = [file.id_token, metadata?.id_token, attributes?.id_token];\n",
-        "  const candidates = [\n"
+        f"  const {token_candidates} = [file.id_token, metadata?.id_token, attributes?.id_token];\n",
+        f"  const {token_candidates} = [\n"
         "    file,\n"
         "    metadata,\n"
         "    attributes,\n"
@@ -1940,8 +1941,10 @@ def patch_quota_page_latest(target: Path) -> None:
     replace_once(path, "        codex: codexQuota,\n", "        codex: codexQuota,\n        'gemini-cli': geminiCliQuota,\n")
     replace_once(path, '[antigravityQuota, claudeQuota, codexQuota, devinQuota,', '[antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, devinQuota,')
     marker = "  const getQuota = useCallback(\n"
-    search_state = "  const [search, setSearch] = useState('');\n  const quotaSearchStore = useMemo(\n    () => ({ antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota }),\n    [antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota]\n  );\n\n"
-    insert_once(path, marker, search_state + marker, 'const [search, setSearch]')
+    search_state = "  const quotaSearchStore = useMemo(\n    () => ({ antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota }),\n    [antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota]\n  );\n\n"
+    if 'const [search, setSearch]' not in read(path):
+        search_state = "  const [search, setSearch] = useState('');\n" + search_state
+    insert_once(path, marker, search_state + marker, 'const quotaSearchStore = useMemo(')
     entries_marker = "  const entries = useMemo(() => classifyQuotaFiles(files), [files]);\n"
     searched_entries = entries_marker + "  const searchedEntries = useMemo(\n    () => entries.filter(({ file }) => matchesQuotaSearch(buildQuotaSearchValues(file, quotaSearchStore, t), search)),\n    [entries, quotaSearchStore, search, t]\n  );\n"
     insert_once(path, entries_marker, searched_entries, 'const searchedEntries = useMemo(')
@@ -1950,12 +1953,26 @@ def patch_quota_page_latest(target: Path) -> None:
         '  const tabCounts = useMemo(() => buildTabCounts(entries), [entries]);',
         '  const tabCounts = useMemo(() => buildTabCounts(searchedEntries), [searchedEntries]);',
     )
+    if 'filterEntriesBySearch(filterEntriesByTab(entries, tab), search)' in read(path):
+        text = read(path)
+        if text.count('  filterEntriesBySearch,\n') != 1:
+            raise RuntimeError(f'Expected one quota search import in {path}')
+        write(path, text.replace('  filterEntriesBySearch,\n', '', 1))
+        replace_once(
+            path,
+            '  const filteredEntries = useMemo(\n'
+            '    () => filterEntriesBySearch(filterEntriesByTab(entries, tab), search),\n'
+            '    [entries, tab, search]\n'
+            '  );',
+            '  const filteredEntries = useMemo(() => filterEntriesByTab(entries, tab), [entries, tab]);',
+        )
     replace_once(
         path,
         '  const filteredEntries = useMemo(() => filterEntriesByTab(entries, tab), [entries, tab]);',
         '  const filteredEntries = useMemo(() => filterEntriesByTab(searchedEntries, tab), [searchedEntries, tab]);',
     )
-    insert_once(path, "        {error && (\n", "        <Input\n          type=\"search\"\n          value={search}\n          onChange={(event) => { setSearch(event.target.value); setPage(1); }}\n          placeholder={t('quota_management.search_placeholder')}\n          aria-label={t('quota_management.search_label')}\n          rightElement={<IconSearch size={18} />}\n        />\n\n        {error && (\n", 'rightElement={<IconSearch')
+    if 'type="search"' not in read(path):
+        insert_once(path, "        {error && (\n", "        <Input\n          type=\"search\"\n          value={search}\n          onChange={(event) => { setSearch(event.target.value); setPage(1); }}\n          placeholder={t('quota_management.search_placeholder')}\n          aria-label={t('quota_management.search_label')}\n          rightElement={<IconSearch size={18} />}\n        />\n\n        {error && (\n", 'rightElement={<IconSearch')
 
 
 def patch_quota_cards_latest(target: Path) -> None:

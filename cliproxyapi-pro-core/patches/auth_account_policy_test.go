@@ -112,6 +112,9 @@ func TestAccountPolicyResolverAffectsSchedulerWithoutMutatingBaseAuth(t *testing
 	if stored.Prefix != "" || stored.Attributes["priority"] != "" || stored.Attributes[AttributeWeight] != "" {
 		t.Fatalf("base auth was mutated: %#v", stored.Attributes)
 	}
+	manager.SetAccountPolicyResolver(nil)
+	assertScheduledAccountPolicy(t, manager, "high", 0, 1, "")
+	assertScheduledAccountPolicy(t, manager, "low", 0, 1, "")
 }
 
 func assertScheduledAccountPolicy(t *testing.T, manager *Manager, authID string, wantPriority int, wantWeight int64, wantPrefix string) {

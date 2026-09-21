@@ -95,6 +95,24 @@ class NarrowUpstreamCustomizationsTest(unittest.TestCase):
             CUSTOMIZATIONS.flush_writes()
             self.assertEqual(first, path.read_text())
 
+    def test_codex_account_id_patch_preserves_upstream_direct_candidates(self) -> None:
+        direct = "  const directCandidates = [file.chatgpt_account_id];\n  for (const candidate of directCandidates) {\n    const id = normalizeStringValue(candidate);\n    if (id) return id;\n  }\n"
+        source = CODEX_RESOLVER_SOURCE.replace('const candidates = [file.id_token', direct + '  const tokenCandidates = [file.id_token').replace('of candidates)', 'of tokenCandidates)')
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir)
+            path = target / 'src/utils/quota/resolvers.ts'
+            path.parent.mkdir(parents=True)
+            path.write_text(source)
+            CUSTOMIZATIONS.patch_codex_account_id_resolver(target)
+            CUSTOMIZATIONS.flush_writes()
+            first = path.read_text()
+            self.assertIn(direct, first)
+            self.assertIn('const tokenCandidates = [\n    file,\n    metadata,\n    attributes,', first)
+            self.assertIn('for (const candidate of tokenCandidates)', first)
+            CUSTOMIZATIONS.patch_codex_account_id_resolver(target)
+            CUSTOMIZATIONS.flush_writes()
+            self.assertEqual(first, path.read_text())
+
     def test_codex_account_id_patch_extends_only_account_id_resolution(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir)
