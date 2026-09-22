@@ -695,13 +695,7 @@ replace_go_function(
 		httpClient.Timeout = timeout
 	}
 
-	var rawProxyURL string
-	if auth != nil {
-		rawProxyURL = strings.TrimSpace(auth.ProxyURL)
-	}
-	if rawProxyURL == "" && cfg != nil {
-		rawProxyURL = strings.TrimSpace(cfg.ProxyURL)
-	}
+	rawProxyURL := effectiveProxyURL(ctx, cfg, auth)
 	resolution := proxyutil.ResolveEffectiveProxy(rawProxyURL)
 	if resolution.Effective != "" {
 		transport := buildResolvedProxyTransport(resolution)
@@ -754,7 +748,7 @@ replace_go_function(
     '''func NewDevinHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, timeout time.Duration) *http.Client {
 	generation := proxyutil.ResolveEffectiveProxy("").Generation
 	syncDevinRuntimeProxyGeneration(generation)
-	if ctx != nil {
+	if cliproxyexecutor.RequestProxyURL(ctx) == "" && ctx != nil {
 		if rt, ok := ctx.Value("cliproxy.roundtripper").(http.RoundTripper); ok && rt != nil {
 			if tr, ok := rt.(*http.Transport); ok {
 				key := runtimeProxyTransportKey{scope: fmt.Sprintf("rt:%p", tr), generation: generation}
@@ -771,12 +765,7 @@ replace_go_function(
 		}
 	}
 
-	rawProxyURL := ""
-	if auth != nil && strings.TrimSpace(auth.ProxyURL) != "" {
-		rawProxyURL = strings.TrimSpace(auth.ProxyURL)
-	} else if cfg != nil {
-		rawProxyURL = strings.TrimSpace(cfg.ProxyURL)
-	}
+	rawProxyURL := effectiveProxyURL(ctx, cfg, auth)
 	resolution := proxyutil.ResolveEffectiveProxy(rawProxyURL)
 	syncDevinRuntimeProxyGeneration(resolution.Generation)
 	key := runtimeProxyTransportKey{scope: resolution.Effective, generation: resolution.Generation}
@@ -1104,13 +1093,7 @@ replace_go_function(
     utls_client,
     'func NewUtlsHTTPClient(',
     '''func NewUtlsHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, timeout time.Duration) *http.Client {
-	var rawProxyURL string
-	if auth != nil {
-		rawProxyURL = strings.TrimSpace(auth.ProxyURL)
-	}
-	if rawProxyURL == "" && cfg != nil {
-		rawProxyURL = strings.TrimSpace(cfg.ProxyURL)
-	}
+	rawProxyURL := effectiveProxyURL(ctx, cfg, auth)
 	resolution := proxyutil.ResolveEffectiveProxy(rawProxyURL)
 
 	var ctxRoundTripper http.RoundTripper
@@ -1256,7 +1239,7 @@ replace_once(
 		base:                base,
 ''',
     '''	settings := resolveAntigravityPoolSettings(cfg)
-	resolution := proxyutil.ResolveEffectiveProxy(antigravityProxyURL(cfg, auth))
+	resolution := proxyutil.ResolveEffectiveProxy(antigravityProxyURL(context.Background(), cfg, auth))
 	syncAntigravityRuntimeProxyGeneration(resolution.Generation)
 	key := antigravityTransportKey{
 		credential:          antigravityTransportScope(auth),
@@ -1273,7 +1256,7 @@ replace_go_function(
 	if len(cfgs) > 0 {
 		cfg = cfgs[0]
 	}
-	resolution := proxyutil.ResolveEffectiveProxy(antigravityProxyURL(cfg, auth))
+	resolution := proxyutil.ResolveEffectiveProxy(antigravityProxyURL(context.Background(), cfg, auth))
 	return antigravityHTTP11TransportResolved(auth, base, resolution, cfgs...)
 }
 
@@ -1356,7 +1339,7 @@ replace_go_function(
     '''func newAntigravityHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, timeout time.Duration) *http.Client {
 	// Resolve once so the transport route and its cache generation always come
 	// from the same runtime-override snapshot.
-	resolution := proxyutil.ResolveEffectiveProxy(antigravityProxyURL(cfg, auth))
+	resolution := proxyutil.ResolveEffectiveProxy(antigravityProxyURL(ctx, cfg, auth))
 	syncAntigravityRuntimeProxyGeneration(resolution.Generation)
 
 	// Native Antigravity reuses one transport across requests. Opt into a
@@ -3991,44 +3974,15 @@ replace_once(
 ''',
     'accountPolicyResolver AccountPolicyResolver',
 )
-replace_once(
+# Track attempts after session enrichment in Execute, ExecuteCount and ExecuteStream.
+# Anchor on enrichment so upstream context setup (including request proxy URLs)
+# remains intact when new statements are added at the start of these methods.
+replace_all_exact(
     auth_conductor,
-    '''func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
-\treq, opts = cliproxysession.Enrich(req, opts)
-\tnormalized := m.normalizeProviders(providers)
-''',
-    '''func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
-\treq, opts = cliproxysession.Enrich(req, opts)
-\tctx = coreusage.WithAttemptTracking(ctx)
-\tnormalized := m.normalizeProviders(providers)
-''',
-    'ctx = coreusage.WithAttemptTracking(ctx)\n\tnormalized := m.normalizeProviders(providers)',
-)
-replace_once(
-    auth_conductor,
-    '''func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
-\treq, opts = cliproxysession.Enrich(req, opts)
-\tnormalized := m.normalizeProviders(providers)
-''',
-    '''func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
-\treq, opts = cliproxysession.Enrich(req, opts)
-\tctx = coreusage.WithAttemptTracking(ctx)
-\tnormalized := m.normalizeProviders(providers)
-''',
-    'ExecuteCount(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {\n\tctx = coreusage.WithAttemptTracking(ctx)',
-)
-replace_once(
-    auth_conductor,
-    '''func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
-\treq, opts = cliproxysession.Enrich(req, opts)
-\tif m.HomeEnabled() {
-''',
-    '''func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
-\treq, opts = cliproxysession.Enrich(req, opts)
-\tctx = coreusage.WithAttemptTracking(ctx)
-\tif m.HomeEnabled() {
-''',
-    'ExecuteStream(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {\n\tctx = coreusage.WithAttemptTracking(ctx)',
+    '\treq, opts = cliproxysession.Enrich(req, opts)\n',
+    '\treq, opts = cliproxysession.Enrich(req, opts)\n'
+    '\tctx = coreusage.WithAttemptTracking(ctx)\n',
+    expected_count=3,
 )
 
 auth_conductor_stream = ROOT / 'sdk/cliproxy/auth/conductor_stream.go'

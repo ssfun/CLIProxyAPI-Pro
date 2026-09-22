@@ -13,6 +13,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pro/proxypool/socks5"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/proxyutil"
 )
 
@@ -64,5 +65,52 @@ func TestNewProxyAwareHTTPClientRoutesEmptyGlobalProxyThroughRuntimeOverride(t *
 	_ = response.Body.Close()
 	if got := proxyDials.Load(); got != 1 {
 		t.Fatalf("proxy dials after clear = %d, want 1", got)
+	}
+}
+
+func TestHTTPClientsPreserveRequestProxyWithRuntimeTakeover(t *testing.T) {
+	proxyutil.ClearRuntimeProxyOverride()
+	t.Cleanup(proxyutil.ClearRuntimeProxyOverride)
+	const globalProxy = "http://global.example:8080"
+	const requestProxy = "http://request.example:8081"
+	const takeoverProxy = "http://pool.example:8082"
+	cfg := &config.Config{}
+	cfg.ProxyURL = globalProxy
+	proxyutil.SetRuntimeProxyOverride(globalProxy, takeoverProxy)
+	ctx := context.WithValue(context.Background(), "cliproxy.roundtripper", &http.Transport{})
+	ctx = cliproxyexecutor.WithRequestProxyURL(ctx, requestProxy)
+	req, err := http.NewRequest(http.MethodGet, "https://upstream.example", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, build := range map[string]func(context.Context, *config.Config, *cliproxyauth.Auth, time.Duration) *http.Client{
+		"generic": NewProxyAwareHTTPClient,
+		"utls":    NewUtlsHTTPClient,
+		"devin":   NewDevinHTTPClient,
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, test := range []struct {
+				ctx  context.Context
+				auth *cliproxyauth.Auth
+				want string
+			}{
+				{ctx, &cliproxyauth.Auth{ProxyURL: "http://auth.example:8083"}, requestProxy},
+				{context.Background(), &cliproxyauth.Auth{}, takeoverProxy},
+			} {
+				client := build(test.ctx, cfg, test.auth, time.Second)
+				route := client.Transport
+				if fallback, ok := route.(*fallbackRoundTripper); ok {
+					route = fallback.fallback
+				}
+				transport, ok := route.(*http.Transport)
+				if !ok || transport.Proxy == nil {
+					t.Fatalf("transport = %T, want HTTP proxy transport", client.Transport)
+				}
+				got, err := transport.Proxy(req)
+				if err != nil || got == nil || got.String() != test.want {
+					t.Fatalf("proxy = %v, err = %v, want %s", got, err, test.want)
+				}
+			}
+		})
 	}
 }
