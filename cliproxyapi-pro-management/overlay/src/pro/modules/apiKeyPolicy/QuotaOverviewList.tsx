@@ -307,19 +307,14 @@ export function QuotaOverviewList({
                         {copy('edit')}
                       </Button>
                       {quota?.enabled ? (
-                        <Collapsible
-                          className={styles.more}
-                          label={copy('more')}
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => onReset(policy)}
+                          disabled={busy}
                         >
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            onClick={() => onReset(policy)}
-                            disabled={busy}
-                          >
-                            {t('api_key_policy.quota_reset')}
-                          </Button>
-                        </Collapsible>
+                          {t('api_key_policy.quota_reset')}
+                        </Button>
                       ) : null}
                     </div>
                   </footer>

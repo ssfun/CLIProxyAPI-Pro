@@ -165,8 +165,7 @@
   flex-wrap: wrap;
   gap: 4px 10px;
 }
-.details,
-.more {
+.details {
   border: 0;
   background: transparent;
   border-radius: 0;
@@ -180,14 +179,12 @@
 .metric:not(.primary) {
   gap: 3px;
 }
-.details > summary,
-.more > summary {
+.details > summary {
   padding: 6px 0;
   font-size: 12px;
   gap: 8px;
 }
-.details > div,
-.more > div {
+.details > div {
   padding: 10px 0 0;
 }
 .exactUsage {
@@ -226,9 +223,6 @@
   flex-wrap: wrap;
   gap: 12px;
   margin-left: auto;
-}
-.more > summary {
-  min-height: 32px;
 }
 .actions :global(.btn) {
   white-space: normal;
