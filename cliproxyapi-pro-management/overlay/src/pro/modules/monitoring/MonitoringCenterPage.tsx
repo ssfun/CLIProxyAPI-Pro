@@ -289,8 +289,8 @@ export function MonitoringCenterPage() {
   const profileCatalogFetchedAtRef = useRef(0);
   const profileCatalogGenerationRef = useRef<number | null>(null);
   const [isUsageTrendHidden, setIsUsageTrendHidden] = useState(false);
-  const [modelRankingMetric, setModelRankingMetric] = useState<RankingMetric>('requests');
-  const [apiKeyRankingMetric, setApiKeyRankingMetric] = useState<RankingMetric>('requests');
+  const [modelRankingMetric, setModelRankingMetric] = useState<RankingMetric>('cost');
+  const [apiKeyRankingMetric, setApiKeyRankingMetric] = useState<RankingMetric>('cost');
   const [usageTrendApiKey, setUsageTrendApiKey] = useState('all');
   const [realtimeLogUsage, setRealtimeLogUsage] = useState<UsagePayload | null>(null);
   const [realtimeLogPageSize, setRealtimeLogPageSize] = useState(DEFAULT_PRO_PAGE_SIZE);
