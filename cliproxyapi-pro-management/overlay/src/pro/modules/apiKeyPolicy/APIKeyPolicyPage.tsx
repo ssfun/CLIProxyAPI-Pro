@@ -1,3 +1,4 @@
+import { QuotaOverviewList } from './QuotaOverviewList';
 import { useQuotaSummaries } from './useQuotaSummaries';
 import {
   useCallback,
@@ -67,7 +68,7 @@ import styles from './APIKeyPolicyPage.module.scss';
 
 type BindingFilter = 'all' | 'unconfigured' | 'configured' | 'orphaned';
 type PageView = 'policies' | 'quotas';
-type QuotaFilter = 'all' | 'attention' | 'exhausted' | 'blocked' | 'inactive' | 'disabled';
+type QuotaFilter = 'all' | 'enabled' | 'available' | 'warning' | 'unavailable' | 'attention' | 'exhausted' | 'blocked' | 'inactive' | 'disabled';
 type QuotaVisualState = 'inactive' | 'disabled' | 'available' | 'warning' | 'exhausted' | 'blocked' | 'unknown';
 type CapabilityState = 'checking' | 'ready' | 'unsupported' | 'error';
 type WorkspaceTarget =
@@ -140,11 +141,6 @@ const quotaVisualState = (
   if (summary.admissionState === 'exhausted') return 'exhausted';
   return quotaMaximumRatio(summary) >= 0.8 ? 'warning' : 'available';
 };
-
-const formatQuotaNumber = (value: number): string => new Intl.NumberFormat(undefined, {
-  notation: Math.abs(value) >= 10000 ? 'compact' : 'standard',
-  maximumFractionDigits: 1,
-}).format(value);
 
 const updateQuotaLimit = (
   quota: APIKeyQuotaInput | null,
@@ -321,37 +317,6 @@ function ChoiceList({
 
 function PolicyBadge({ state, children }: { state: string; children: ReactNode }) {
   return <span className={`${styles.badge} ${styles[`badge_${state}`] ?? ''}`}>{children}</span>;
-}
-
-function QuotaMetric({
-  label,
-  used,
-  limit,
-  cost = false,
-}: {
-  label: string;
-  used?: number;
-  limit?: number;
-  cost?: boolean;
-}) {
-  const { t } = useTranslation();
-  const unavailable = used === undefined;
-  const ratio = unavailable ? null : quotaRatio(used, limit);
-  const format = cost ? (value: number) => `$${formatQuotaCost(value)}` : formatQuotaNumber;
-  const detail = unavailable
-    ? t('api_key_policy.quota_overview.snapshot_unavailable')
-    : limit === undefined
-      ? t('api_key_policy.quota_overview.unlimited')
-      : t('api_key_policy.quota_overview.remaining', { value: format(Math.max(limit - used, 0)) });
-  return (
-    <div className={styles.quotaMetric} role="group" aria-label={label}>
-      <div><span>{label}</span><strong>{unavailable ? '—' : `${format(used)} / ${limit === undefined ? '∞' : format(limit)}`}</strong></div>
-      <div className={styles.quotaProgress} aria-hidden="true">
-        {!unavailable ? <span style={{ width: `${Math.min((ratio ?? 0) * 100, 100)}%` }} /> : null}
-      </div>
-      <small>{detail}</small>
-    </div>
-  );
 }
 
 export function APIKeyPolicyPage() {
@@ -1073,6 +1038,10 @@ export function APIKeyPolicyPage() {
       if (!policy) return [];
       const summary = quotaSummaryByPolicy.get(policy.id);
       const visualState = quotaVisualState(summary, takeoverActive, policy.quota?.enabled === true);
+      if (quotaFilter === 'enabled' && !policy.quota?.enabled) return [];
+      if (quotaFilter === 'available' && visualState !== 'available') return [];
+      if (quotaFilter === 'warning' && visualState !== 'warning') return [];
+      if (quotaFilter === 'unavailable' && !['unknown', 'exhausted', 'blocked'].includes(visualState)) return [];
       if (quotaFilter === 'attention' && !['unknown', 'warning', 'exhausted', 'blocked'].includes(visualState)) return [];
       if (quotaFilter === 'exhausted' && visualState !== 'exhausted') return [];
       if (quotaFilter === 'blocked' && visualState !== 'blocked') return [];
@@ -1416,57 +1385,33 @@ export function APIKeyPolicyPage() {
           </> : (
             <section className={styles.quotaOverview}>
               <div className={styles.quotaStats}>
-                <div>
-                  <small>{t('api_key_policy.quota_overview.enabled')}</small><strong>{quotaCounts.enabled}</strong>
-                </div>
-                <div>
-                  <small>{t('api_key_policy.quota_overview.available')}</small><strong>{quotaCounts.available}</strong>
-                </div>
-                <div>
-                  <small>{t('api_key_policy.quota_overview.attention')}</small><strong>{quotaCounts.warning}</strong>
-                </div>
-                <div>
-                  <small>{t('api_key_policy.quota_overview.unavailable')}</small><strong>{quotaCounts.exhausted + quotaCounts.blocked + quotaCounts.unknown}</strong>
-                </div>
-                <div>
-                  <small>{t('api_key_policy.quota_overview.inactive')}</small><strong>{quotaCounts.inactive}</strong>
-                </div>
+                {([
+                  ['enabled', quotaCounts.enabled],
+                  ['available', quotaCounts.available],
+                  ['warning', quotaCounts.warning],
+                  ['unavailable', quotaCounts.exhausted + quotaCounts.blocked + quotaCounts.unknown],
+                  ['inactive', quotaCounts.inactive],
+                ] as const).map(([filter, count]) => (
+                  <button type="button" key={filter} aria-pressed={quotaFilter === filter} onClick={() => setQuotaFilter(quotaFilter === filter ? 'all' : filter)}>
+                    <small>{t(`api_key_policy.quota_overview.${filter === 'warning' ? 'attention' : filter}`)}</small><strong>{count}</strong>
+                  </button>
+                ))}
               </div>
               <div className={styles.quotaToolbar}>
                 <input className="input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('api_key_policy.quota_overview.search')} />
-                <Select value={quotaFilter} onChange={(value) => setQuotaFilter(value as QuotaFilter)} options={(['all', 'attention', 'exhausted', 'blocked', 'inactive', 'disabled'] as const).map((value) => ({ value, label: t(`api_key_policy.quota_filter.${value}`) }))} ariaLabel={t('api_key_policy.quota_overview.filter')} />
+                <Select value={quotaFilter} onChange={(value) => setQuotaFilter(value as QuotaFilter)} options={(['all', 'enabled', 'available', 'warning', 'unavailable', 'attention', 'exhausted', 'blocked', 'inactive', 'disabled'] as const).map((value) => ({ value, label: t(`api_key_policy.quota_filter.${value}`) }))} ariaLabel={t('api_key_policy.quota_overview.filter')} />
                 <Button variant="secondary" size="sm" onClick={() => void loadQuotaSummaries()} loading={quotaLoading}>{t('common.refresh')}</Button>
               </div>
               {quotaError ? <div className={styles.quotaStale} role="alert"><IconAlertTriangle size={15} /><span>{t('api_key_policy.quota_overview.stale')}: {quotaError}</span></div> : null}
-              <div className={styles.quotaList} role="list" aria-label={t('api_key_policy.quota_overview.title')}>
-                {quotaRows.map(({ binding, policy, summary, visualState }) => {
-                  const quota = summary?.quota;
-                  const periodLabel = !summary
-                    ? t('api_key_policy.quota_overview.snapshot_unavailable')
-                    : quota?.period.type === 'past_duration'
-                      ? t('api_key_policy.quota_overview.rolling_period', { value: quota.period.value, unit: t(`api_key_policy.quota_unit.${quota.period.unit}`) })
-                      : quota?.period.type === 'calendar_duration'
-                        ? t('api_key_policy.quota_overview.calendar_period', {
-                          unit: t(`api_key_policy.quota_calendar_unit.${quota.period.unit}`),
-                          timezone: quota.period.timezone ?? 'UTC',
-                        })
-                        : t('api_key_policy.quota_period.all_time');
-                  return (
-                    <article className={styles.quotaListItem} role="listitem" key={policy.id}>
-                      <div className={styles.quotaKeyCell}><strong title={policy.displayName}>{policy.displayName}</strong><code title={binding.maskedKey}>{binding.maskedKey}</code></div>
-                      <div className={styles.quotaPeriodCell}><strong>{periodLabel}</strong>{summary?.nextRecoverAtMs ? <small>{t('api_key_policy.quota_overview.recovers_at', { time: formatAPIKeyPolicyTimestamp(summary.nextRecoverAtMs, i18n.resolvedLanguage ?? i18n.language, quota?.period.type === 'calendar_duration' ? quota.period.timezone ?? 'UTC' : undefined) })}</small> : <small>{!summary ? t('api_key_policy.quota_overview.snapshot_unavailable') : quota?.period.type === 'all_time' ? t('api_key_policy.quota_overview.manual_reset') : t('api_key_policy.quota_overview.active_window')}</small>}</div>
-                      <div className={styles.quotaStateCell}><PolicyBadge state={`quota_${visualState}`}>{t(`api_key_policy.quota_state.${visualState}`)}</PolicyBadge>{summary?.blockedReason ? <small>{t(`api_key_policy.quota_block.${summary.blockedReason}`)}</small> : null}</div>
-                      <div className={styles.quotaRowActions}><Button variant="secondary" size="sm" onClick={() => openWorkspace({ kind: 'policy', policy, readOnly: false })}>{t('api_key_policy.quota_overview.edit')}</Button>{quota?.enabled ? <Button variant="danger" size="sm" onClick={() => void resetQuotaFromOverview(policy)} disabled={quotaBusy}>{t('api_key_policy.quota_reset')}</Button> : null}{usageTargetSupported ? <Button variant="ghost" size="sm" onClick={() => void openUsage(binding)}>{t('api_key_policy.view_usage')}</Button> : null}</div>
-                      <div className={styles.quotaMetrics}>
-                        <QuotaMetric label={t('api_key_policy.quota_requests')} used={quota ? quota.usage.requestsUsed : undefined} limit={quota?.requests} />
-                        <QuotaMetric label={t('api_key_policy.quota_tokens')} used={quota ? quota.usage.totalTokensUsed : undefined} limit={quota?.totalTokens} />
-                        <QuotaMetric label={t('api_key_policy.quota_cost')} used={quota ? quota.usage.costUsed : undefined} limit={quota?.cost} cost />
-                      </div>
-                    </article>
-                  );
-                })}
-                {!quotaLoading && quotaRows.length === 0 ? <div className={styles.empty}>{t('api_key_policy.quota_overview.empty')}</div> : null}
-              </div>
+              <QuotaOverviewList
+                rows={quotaRows}
+                revealDisabled={quotaFilter === 'disabled' || Boolean(search.trim())}
+                busy={quotaBusy}
+                onEdit={(policy) => openWorkspace({ kind: 'policy', policy, readOnly: false })}
+                onReset={(policy) => void resetQuotaFromOverview(policy)}
+                onUsage={usageTargetSupported ? (binding) => void openUsage(binding) : undefined}
+              />
+              {!quotaLoading && quotaRows.length === 0 ? <div className={styles.empty}>{t('api_key_policy.quota_overview.empty')}</div> : null}
               {quotaSnapshotAt > 0 ? <p className={styles.quotaSnapshot}>{t('api_key_policy.quota_overview.updated_at', { time: formatAPIKeyPolicyTimestamp(quotaSnapshotAt, i18n.resolvedLanguage ?? i18n.language) })}</p> : null}
             </section>
           )}

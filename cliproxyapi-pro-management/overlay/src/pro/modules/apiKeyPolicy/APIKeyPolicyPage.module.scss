@@ -459,39 +459,14 @@
 
 .quotaOverview { display: grid; gap: 12px; min-width: 0; }
 .quotaStats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); overflow: hidden; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); }
-.quotaStats > div { display: grid; gap: 3px; padding: 11px 14px; border-right: 1px solid var(--border-color); }
-.quotaStats > div:last-child { border-right: 0; }
+.quotaStats > button { display: grid; gap: 3px; padding: 11px 14px; cursor: pointer; text-align: left; color: inherit; font: inherit; background: transparent; border: 0; border-right: 1px solid var(--border-color); }
+.quotaStats > button:last-child { border-right: 0; }
+.quotaStats > button[aria-pressed="true"] { background: var(--accent-bg); box-shadow: inset 0 -2px var(--primary-color); }
+.quotaStats > button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
 .quotaStats small { color: var(--text-secondary); font-size: 10px; }
 .quotaStats strong { font-size: 17px; }
 .quotaToolbar { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(180px, 240px) auto; gap: 10px; align-items: center; }
 .quotaStale { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 1px solid var(--warning-border); border-radius: 7px; color: var(--warning-text); background: var(--warning-bg); font-size: 11px; }
-.quotaList { display: grid; gap: 1px; min-width: 0; overflow: hidden; border: 1px solid var(--border-color); border-radius: 10px; background: var(--border-color); }
-.quotaList > .empty { background: var(--bg-primary); }
-.quotaListItem { display: grid; grid-template-columns: minmax(180px, 1.3fr) minmax(180px, 1fr) minmax(130px, .75fr) auto; grid-template-areas: "key period state actions" "metrics metrics metrics metrics"; gap: 13px 18px; min-width: 0; padding: 14px 16px; background: var(--bg-primary); }
-.quotaKeyCell,
-.quotaPeriodCell,
-.quotaStateCell { display: grid; min-width: 0; gap: 4px; }
-.quotaKeyCell { grid-area: key; align-content: center; }
-.quotaPeriodCell { grid-area: period; align-content: center; }
-.quotaStateCell { grid-area: state; align-content: center; justify-items: start; }
-.quotaKeyCell strong { font-size: 13px; }
-.quotaPeriodCell strong { font-size: 12px; }
-.quotaKeyCell strong,
-.quotaKeyCell code,
-.quotaPeriodCell strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.quotaKeyCell code,
-.quotaPeriodCell small,
-.quotaStateCell small { color: var(--text-secondary); font-size: 10px; }
-.quotaMetrics { display: grid; grid-area: metrics; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.quotaMetric { display: grid; min-width: 0; gap: 6px; padding: 10px 11px; border-radius: 7px; background: var(--bg-secondary); }
-.quotaMetric > div:first-child { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
-.quotaMetric > div:first-child span { overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
-.quotaMetric strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
-.quotaMetric small { color: var(--text-secondary); font-size: 9px; font-variant-numeric: tabular-nums; }
-.quotaProgress { height: 5px; overflow: hidden; border-radius: 3px; background: var(--muted-bg, rgba(148, 163, 184, .18)); }
-.quotaProgress span { display: block; height: 100%; border-radius: inherit; background: var(--primary-color); }
-.quotaRowActions { display: flex; grid-area: actions; align-items: center; justify-content: flex-end; gap: 6px; }
-.quotaRowActions :global(.btn) { white-space: nowrap; }
 .quotaSnapshot { margin: 0; color: var(--text-secondary); text-align: right; font-size: 10px; }
 .badge_quota_available { color: var(--success-color); }
 .badge_quota_warning { color: var(--warning-text); border-color: var(--warning-border); background: var(--warning-bg); }
@@ -604,7 +579,6 @@
 	.statusOverview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.overviewItem:nth-child(2) { border-right: 0; }
 	.overviewItem:nth-child(-n + 2) { border-bottom: 1px solid var(--border-color); }
-  .quotaListItem { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "key state" "period actions" "metrics metrics"; }
 }
 
 @media (max-width: 760px) {
@@ -620,15 +594,9 @@
   .cards { grid-template-columns: 1fr; }
   .viewTabs { width: 100%; }
   .quotaStats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .quotaStats > div:nth-child(2n) { border-right: 0; }
-  .quotaStats > div:nth-child(-n + 4) { border-bottom: 1px solid var(--border-color); }
-  .quotaStats > div:last-child { grid-column: 1 / -1; }
-  .quotaListItem { grid-template-columns: 1fr; grid-template-areas: "key" "state" "period" "metrics" "actions"; gap: 11px; padding: 13px; }
-  .quotaMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .quotaMetric > div:first-child { display: grid; align-items: start; gap: 3px; }
-  .quotaMetric:last-child { grid-column: 1 / -1; }
-  .quotaRowActions { display: grid; grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); }
-  .quotaRowActions :global(.btn) { width: 100%; }
+  .quotaStats > button:nth-child(2n) { border-right: 0; }
+  .quotaStats > button:nth-child(-n + 4) { border-bottom: 1px solid var(--border-color); }
+  .quotaStats > button:last-child { grid-column: 1 / -1; }
   .profileHeading,
 	.profileToggleSection,
   .conflict { align-items: stretch; flex-direction: column; }

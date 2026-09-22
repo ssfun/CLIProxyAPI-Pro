@@ -1,0 +1,293 @@
+.list {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  container-type: inline-size;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+  grid-auto-rows: 1fr;
+}
+.grid > article {
+  display: flex;
+  min-width: 0;
+}
+.card {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+}
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.identity {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.identity h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.identity code {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.state {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+}
+.available {
+  color: var(--success-color);
+}
+.warning,
+.unknown {
+  color: var(--warning-text);
+}
+.exhausted,
+.blocked,
+.blockedReason {
+  color: var(--danger-color);
+}
+.blockedReason {
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.muted {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.noLimit {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+.limits {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+.metric {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+.metricTitle {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.metricTitle > span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.metricTitle strong {
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.primary .metricTitle {
+  flex-direction: column;
+  gap: 2px;
+}
+.primary .metricTitle strong {
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.metricCaption {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.progress {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--muted-bg, rgba(148, 163, 184, 0.18));
+}
+.primary .progress {
+  height: 6px;
+}
+.progress > span {
+  display: block;
+  height: 100%;
+  background: var(--primary-color);
+  border-radius: inherit;
+}
+.progress.warning > span {
+  background: var(--warning-text);
+}
+.progress.exhausted > span {
+  background: var(--danger-color);
+}
+.unlimitedUsage {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+.unlimitedUsage > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+}
+.unlimitedUsage strong {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.unlimitedUsage small,
+.period {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.period {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.details,
+.more {
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+}
+.metadata {
+  display: grid;
+  grid-template-rows: minmax(32px, auto) minmax(30px, auto);
+  gap: 4px;
+  margin-top: auto;
+}
+.metric:not(.primary) {
+  gap: 3px;
+}
+.details > summary,
+.more > summary {
+  padding: 6px 0;
+  font-size: 12px;
+  gap: 8px;
+}
+.details > div,
+.more > div {
+  padding: 10px 0 0;
+}
+.exactUsage {
+  margin: 0;
+  font-size: 12px;
+  display: grid;
+  gap: 6px;
+}
+.exactUsage > div {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.exactUsage dt {
+  color: var(--text-secondary);
+}
+.exactUsage dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid var(--border-color);
+  padding-top: 12px;
+  margin-top: 0;
+}
+.editActions {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-left: auto;
+}
+.more > summary {
+  min-height: 32px;
+}
+.actions :global(.btn) {
+  white-space: normal;
+}
+.disabledList {
+  display: grid;
+}
+.disabledRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+}
+.disabledRow + .disabledRow {
+  border-top: 1px solid var(--border-color);
+}
+.disabledRow .identity {
+  flex: 1;
+}
+.disabledRow .identity strong {
+  font-size: 13px;
+}
+.disabledRow :global(.btn) {
+  flex-shrink: 0;
+}
+@container (max-width: 1050px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (max-width: 680px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@container (max-width: 380px) {
+  .card {
+    padding: 16px;
+  }
+  .state {
+    max-width: 100px;
+  }
+  .disabledRow {
+    flex-wrap: wrap;
+  }
+  .disabledRow > .muted {
+    display: none;
+  }
+}
+
+.grid:has(details[open]) {
+  grid-auto-rows: auto;
+}
+@container (max-width: 680px) {
+  .grid {
+    grid-auto-rows: auto;
+  }
+}
+
+.limits > .primary, .limits > p { grid-column: 1 / -1; }
+.metric:not(.primary) .metricTitle { flex-direction: column; gap: 2px; }
+.metric:not(.primary) .metricCaption { flex-wrap: wrap; gap: 2px 6px; }

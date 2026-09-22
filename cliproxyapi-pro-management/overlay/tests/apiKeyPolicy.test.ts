@@ -195,7 +195,6 @@ describe('API Key Policy profile drafts', () => {
 
   test('negotiates and renders the lightweight API Key quota overview', () => {
     const page = readFileSync(resolve(import.meta.dir, '../src/pro/modules/apiKeyPolicy/APIKeyPolicyPage.tsx'), 'utf8');
-    const styles = readFileSync(resolve(import.meta.dir, '../src/pro/modules/apiKeyPolicy/APIKeyPolicyPage.module.scss'), 'utf8');
     const client = readFileSync(resolve(import.meta.dir, '../src/pro/modules/apiKeyPolicy/apiKeyPolicy.ts'), 'utf8');
     const legacyCapabilities = validateAPIKeyPolicyCapabilities({
       apiVersion: 1,
@@ -217,19 +216,10 @@ describe('API Key Policy profile drafts', () => {
     expect(page).toContain('onRefresh={() => void refreshPage()}');
     expect(page).toContain("quotaFilter === 'inactive'");
     expect(page).toContain("'blocked', 'inactive', 'disabled'");
-    expect(page).toContain("quota_overview.inactive");
     expect(page).toContain("if (quotaConfigured && !takeoverActive) return 'inactive';");
     expect(page.indexOf("if (quotaConfigured && !takeoverActive) return 'inactive';"))
       .toBeLessThan(page.indexOf("if (!summary) return quotaConfigured ? 'unknown' : 'disabled';"));
     expect(page).toContain('key={binding.keyRef}');
-    expect(page).toContain("t(`api_key_policy.quota_block.${summary.blockedReason}`)");
-    expect(page).toContain('className={styles.quotaList} role="list"');
-    expect(page).toContain('className={styles.quotaListItem} role="listitem"');
-    expect(page).toContain('className={styles.quotaMetrics}');
-    expect(page).not.toContain('className={styles.quotaTableHead}');
-    expect(page).toContain("t('api_key_policy.quota_overview.remaining'");
-    expect(styles).toContain('grid-template-areas: "key period state actions" "metrics metrics metrics metrics";');
-    expect(styles).toContain('grid-template-areas: "key" "state" "period" "metrics" "actions";');
   });
 
   test('has complete distinct translations for every supported language', async () => {
@@ -342,8 +332,6 @@ describe('API Key Policy profile drafts', () => {
     expect(page).not.toContain("placeholder={t('api_key_policy.quota_timezone_example')}");
     expect(page).toContain("!validIanaTimezone(draft.quota.period.timezone)");
     expect(page).toContain("timezone: normalized.timezone?.trim() || 'UTC'");
-    expect(page).toContain("timezone: quota.period.timezone ?? 'UTC'");
-    expect(page).toContain("quota.period.timezone ?? 'UTC' : undefined");
     expect(styles).toContain('.quotaPeriodGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start;');
     expect(styles).toContain('.quotaPeriodGrid :global(.form-group) { margin-bottom: 0; }');
     expect(styles).toContain('.quotaSelectTrigger { height: 46px;');
