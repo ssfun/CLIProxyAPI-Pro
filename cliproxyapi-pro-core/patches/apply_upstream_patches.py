@@ -2490,6 +2490,108 @@ replace_once(
     'apikeypolicy.AdmitQuotaTurn(executionParent)',
 )
 
+responses_websocket_forward = ROOT / 'sdk/api/handlers/openai/openai_responses_websocket_forward.go'
+replace_once(
+    responses_websocket_forward,
+    '''	for {
+		select {
+''',
+    '''	handleError := func(errMsg *interfaces.ErrorMessage) ([]byte, string, []string, *interfaces.ErrorMessage, error) {
+		if errMsg == nil {
+			cancel(nil)
+			return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), nil, nil
+		}
+
+		h.LoggingAPIResponseError(context.WithValue(context.Background(), "gin", c), errMsg)
+		if opts.suppressError != nil && opts.suppressError(errMsg) {
+			cancel(errMsg.Error)
+			return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, nil
+		}
+		markAPIResponseTimestamp(c)
+		if matched, errClose := writer.closeForUpstreamError(errMsg.Error); matched {
+			cancel(errMsg.Error)
+			if errClose != nil {
+				return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, errClose
+			}
+			return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, websocket.ErrCloseSent
+		}
+
+		errorPayload, wrote, errTerminate := writeResponsesWebsocketTerminalError(writer, wsTimelineLog, errMsg, nil)
+		if wrote {
+			log.Infof(
+				"responses websocket: downstream_out id=%s type=%d event=%s payload=%s",
+				sessionID,
+				websocket.TextMessage,
+				websocketPayloadEventType(errorPayload),
+				websocketPayloadPreview(errorPayload),
+			)
+		}
+		cancel(errMsg.Error)
+		return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, errTerminate
+	}
+
+	for {
+		select {
+''',
+)
+replace_once(
+    responses_websocket_forward,
+    '''			if errMsg == nil {
+				cancel(nil)
+				return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), nil, nil
+			}
+
+			h.LoggingAPIResponseError(context.WithValue(context.Background(), "gin", c), errMsg)
+			if opts.suppressError != nil && opts.suppressError(errMsg) {
+				cancel(errMsg.Error)
+				return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, nil
+			}
+			markAPIResponseTimestamp(c)
+			if matched, errClose := writer.closeForUpstreamError(errMsg.Error); matched {
+				cancel(errMsg.Error)
+				if errClose != nil {
+					return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, errClose
+				}
+				return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, websocket.ErrCloseSent
+			}
+
+			errorPayload, wrote, errTerminate := writeResponsesWebsocketTerminalError(writer, wsTimelineLog, errMsg, nil)
+			if wrote {
+				log.Infof(
+					"responses websocket: downstream_out id=%s type=%d event=%s payload=%s",
+					sessionID,
+					websocket.TextMessage,
+					websocketPayloadEventType(errorPayload),
+					websocketPayloadPreview(errorPayload),
+				)
+			}
+			cancel(errMsg.Error)
+			return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, errTerminate
+''',
+    '''			return handleError(errMsg)
+''',
+)
+replace_once(
+    responses_websocket_forward,
+    '''		case chunk, ok := <-data:
+			if !ok {
+''',
+    '''		case chunk, ok := <-data:
+			if !ok {
+				// The producer queues its terminal error before closing data. Both
+				// channels may be ready, so consume that error before treating EOF
+				// as an incomplete response or closing a duplex connection.
+				select {
+				case errMsg, ok := <-errs:
+					if ok {
+						return handleError(errMsg)
+					}
+				default:
+				}
+''',
+)
+queue_go_source('sdk/api/handlers/openai/responses_websocket_terminal_order_test.go')
+
 realtime_websocket_source = ROOT / 'internal/client/codex/live/websocket.go'
 add_go_import(realtime_websocket_source, '\t"encoding/json"\n', '\t"errors"\n')
 add_go_import(realtime_websocket_source, '\t"errors"\n', '\t"fmt"\n')
@@ -7146,6 +7248,8 @@ if result_scheduler_upserts != {'sdk/cliproxy/auth/conductor_cooldown.go': 1}:
     raise SystemExit(f'unexpected Manager result scheduler upserts: {result_scheduler_upserts}')
 
 format_go_writes([
+    'sdk/api/handlers/openai/openai_responses_websocket_forward.go',
+    'sdk/api/handlers/openai/responses_websocket_terminal_order_test.go',
     'cmd/server/main.go',
 	'internal/cache/bounded_lru.go',
 	'internal/auth/claude/utls_transport.go',
