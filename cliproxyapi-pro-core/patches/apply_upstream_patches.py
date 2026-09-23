@@ -3601,29 +3601,30 @@ func FilterModelMapsForRequest(ctx context.Context, models []map[string]any, idK
 openai_handlers_source = ROOT / 'sdk/api/handlers/openai/openai_handlers.go'
 replace_once(
     openai_handlers_source,
-    '''\tif _, ok := c.Request.URL.Query()["client_version"]; ok {
-\t\tclientVersion := c.Query("client_version")
-\t\th.WriteModelListResponse(c, h.HandlerType(), h.codexClientModelsResponse(clientVersion))
-\t\treturn
-\t}
-
-\t// Get all available models
-\tallModels := h.Models()
+    '''func (h *OpenAIAPIHandler) OpenAIModels(c *gin.Context) {
 ''',
-    '''\tallModels, policyErr := handlers.FilterModelMapsForRequest(c.Request.Context(), h.Models(), "id", registry.GetGlobalRegistry().GetModelProviders)
+    '''func (h *OpenAIAPIHandler) OpenAIModels(c *gin.Context) {
+\tallModels, policyErr := handlers.FilterModelMapsForRequest(c.Request.Context(), h.Models(), "id", registry.GetGlobalRegistry().GetModelProviders)
 \tif policyErr != nil {
 \t\th.WriteErrorResponse(c, policyErr)
 \t\treturn
 \t}
-\tif _, ok := c.Request.URL.Query()["client_version"]; ok {
-\t\tclientVersion := c.Query("client_version")
-\t\th.WriteModelListResponse(c, h.HandlerType(), codexmodels.BuildResponseForClient(allModels, registry.GetGlobalRegistry().GetModelProviders, h.Cfg != nil && h.Cfg.CodexOptimizeMultiAgentV2, clientVersion))
-\t\treturn
-\t}
-
-\t// Get all models visible to the frozen request policy.
 ''',
     'allModels, policyErr := handlers.FilterModelMapsForRequest',
+)
+# Preserve upstream catalog serialization and its error handling.
+replace_once(
+    openai_handlers_source,
+    'h.codexClientModelsResponse(clientVersion)',
+    'codexmodels.BuildResponseForClient(allModels, registry.GetGlobalRegistry().GetModelProviders, h.Cfg != nil && h.Cfg.CodexOptimizeMultiAgentV2, clientVersion)',
+)
+replace_once(
+    openai_handlers_source,
+    '''\t// Get all available models
+\tallModels := h.Models()
+''',
+    '''\t// Get all models visible to the frozen request policy.
+''',
 )
 add_go_import(openai_handlers_source, '"' + import_path('internal/registry') + '"\n', '\tcodexmodels "' + import_path('internal/client/codex/models') + '"\n')
 
