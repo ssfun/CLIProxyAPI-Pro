@@ -67,6 +67,12 @@ func (h *Handler) TestAuthFileConnection(c *gin.Context) {
 		return
 	}
 
+	c.JSON(http.StatusOK, h.testAuthConnection(c.Request.Context(), auth, model))
+}
+
+// testAuthConnection is shared by the auth-file diagnostic and scheduling
+// recovery. Its real result continues through the upstream result accounting.
+func (h *Handler) testAuthConnection(ctx context.Context, auth *coreauth.Auth, model string) authFileConnectionTestResponse {
 	payload, errPayload := json.Marshal(map[string]any{
 		"model": model,
 		"messages": []map[string]any{{
@@ -76,11 +82,10 @@ func (h *Handler) TestAuthFileConnection(c *gin.Context) {
 		"stream": false,
 	})
 	if errPayload != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build test request"})
-		return
+		return authFileConnectionTestResponse{Error: "failed to build test request", ErrorCode: "request_build_failed"}
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), authFileConnectionTestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, authFileConnectionTestTimeout)
 	defer cancel()
 	ctx = coreusage.WithSkipMonitoring(ctx)
 	startedAt := time.Now()
@@ -106,35 +111,33 @@ func (h *Handler) TestAuthFileConnection(c *gin.Context) {
 	latencyMS := time.Since(startedAt).Milliseconds()
 	if errExecute != nil {
 		message, code, status := authFileConnectionTestError(errExecute)
-		c.JSON(http.StatusOK, authFileConnectionTestResponse{
+		return authFileConnectionTestResponse{
 			Success:    false,
 			Model:      model,
 			LatencyMS:  latencyMS,
 			Error:      message,
 			ErrorCode:  code,
 			HTTPStatus: status,
-		})
-		return
+		}
 	}
 
 	output := extractAuthFileConnectionOutput(response.Payload)
 	if output == "" {
-		c.JSON(http.StatusOK, authFileConnectionTestResponse{
+		return authFileConnectionTestResponse{
 			Success:   false,
 			Model:     model,
 			LatencyMS: latencyMS,
 			Error:     "upstream completed without text output",
 			ErrorCode: "empty_output",
-		})
-		return
+		}
 	}
 
-	c.JSON(http.StatusOK, authFileConnectionTestResponse{
+	return authFileConnectionTestResponse{
 		Success:   true,
 		Model:     model,
 		LatencyMS: latencyMS,
 		Output:    output,
-	})
+	}
 }
 
 func resolveAuthFileConnectionTestModel(auth *coreauth.Auth, requested string) (string, error) {

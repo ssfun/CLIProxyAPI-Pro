@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -17,6 +18,48 @@ import (
 )
 
 const inspectionQuotaSource = "inspection"
+
+// checkQuotaRecoveryNow shares the same directed recovery path as the timed
+// worker. It never runs concurrently with a full inspection of the account.
+func (s *accountInspectionScheduler) checkQuotaRecoveryNow(ctx context.Context, auth *coreauth.Auth) error {
+	if s == nil || auth == nil || s.inspectionAuthManager() == nil {
+		return errors.New("quota recovery unavailable")
+	}
+	release, err := s.beginLifecycle()
+	if err != nil {
+		return err
+	}
+	defer release()
+	if !s.fullRunMu.TryRLock() {
+		return errAccountInspectionAlreadyRunning
+	}
+	defer s.fullRunMu.RUnlock()
+	s.mu.Lock()
+	running := s.isRunningLocked()
+	s.mu.Unlock()
+	if running {
+		return errAccountInspectionAlreadyRunning
+	}
+	current, ok := s.inspectionAuthManager().GetByID(auth.ID)
+	if !ok || current == nil || current.EnsureIndex() != auth.EnsureIndex() || current.RegistrationEpoch != auth.RegistrationEpoch {
+		return errAccountInspectionResultStale
+	}
+	hold, ok := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]
+	if !ok {
+		return errAccountInspectionResultStale
+	}
+	var settings accountInspectionSettings
+	if err := json.Unmarshal(hold.Settings, &settings); err != nil {
+		return fmt.Errorf("invalid quota recovery settings: %w", err)
+	}
+	if _, loaded := s.quotaRecoveryActive.LoadOrStore(auth.ID, struct{}{}); loaded {
+		return errAccountInspectionAlreadyRunning
+	}
+	defer s.quotaRecoveryActive.Delete(auth.ID)
+	recoveryErr := s.recoverQuotaAccountWithMode(ctx, current, true)
+	s.refreshAccountPoliciesIfQuotaChanged()
+	return recoveryErr
+}
 
 func (s *accountInspectionScheduler) fillQuotaProtectionResult(auth *coreauth.Auth, result *accountInspectionResult) {
 	if auth == nil {
@@ -190,17 +233,27 @@ func recoveryTime(auth *coreauth.Auth) int64 {
 }
 
 func (s *accountInspectionScheduler) recoverQuotaAccount(ctx context.Context, auth *coreauth.Auth) {
+	if auth == nil {
+		return
+	}
+	if _, loaded := s.quotaRecoveryActive.LoadOrStore(auth.ID, struct{}{}); loaded {
+		return
+	}
+	defer s.quotaRecoveryActive.Delete(auth.ID)
+	s.recoverQuotaAccountWithMode(ctx, auth, false)
+}
+
+func (s *accountInspectionScheduler) recoverQuotaAccountWithMode(ctx context.Context, auth *coreauth.Auth, manual bool) error {
 	hold := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
 	var settings accountInspectionSettings
-	if json.Unmarshal(hold.Settings, &settings) != nil {
-		return
+	if err := json.Unmarshal(hold.Settings, &settings); err != nil {
+		return fmt.Errorf("invalid quota recovery settings: %w", err)
 	}
-	if !hold.Recheck {
-		s.recoverQuotaWithProbeRequest(ctx, auth, hold, settings)
-		return
+	if !hold.Recheck && hold.RetryAt > 0 && auth.Provider == "xai" && xaiInspectionUsingAPI(auth) {
+		return s.recoverQuotaWithProbeRequest(ctx, auth, hold, settings)
 	}
-	if !settings.AutoExecuteQuotaRecoveryEnable {
-		return
+	if !manual && !settings.AutoExecuteQuotaRecoveryEnable {
+		return nil
 	}
 	threshold := settings.UsedPercentThreshold
 	// A small hysteresis prevents repeated protection near a configurable threshold.
@@ -212,28 +265,32 @@ func (s *accountInspectionScheduler) recoverQuotaAccount(ctx context.Context, au
 	defer cancel()
 	release, err := s.probeLimiter.Acquire(probeCtx, min(4, settings.Workers), settings.ProviderWorkers, auth.Provider)
 	if err != nil {
-		return
+		return err
 	}
 	defer release()
 	result := s.inspectAccount(probeCtx, accountFromAuth(auth), settings)
-	if ctx.Err() != nil {
-		return
+	if probeCtx.Err() != nil {
+		return probeCtx.Err()
 	}
 	// inspectAccount may have refreshed OAuth. Its bound result is the new identity,
 	// while the source revision still guards against a concurrent new restriction.
 	current, err := s.actionAuthForResult(result)
 	if err != nil {
-		return
+		return err
 	}
 	var next *prorouting.QuotaProtection
 	recovered := result.Error == "" && result.ErrorCode == "" && result.QuotaKnown && result.UsedPercent != nil && proinspection.QuotaRecovered(*result.UsedPercent, threshold)
 	if !recovered {
-		hold.Failures++
-		hold.RetryAt = prorouting.NextRecheckAt(result.QuotaResetAt, auth.ID, hold.Failures, time.Now())
+		if settings.AutoExecuteQuotaRecoveryEnable {
+			hold.Failures++
+			hold.RetryAt = prorouting.NextRecheckAt(result.QuotaResetAt, auth.ID, hold.Failures, time.Now())
+		} else {
+			hold.RetryAt = 0
+		}
 		next = &hold
 	}
 	if err := s.inspectionAuthManager().ChangeQuotaProtection(ctx, current, inspectionQuotaSource, hold.Revision, next); err != nil {
-		return
+		return err
 	}
 	updated, _ := s.inspectionAuthManager().GetByID(auth.ID)
 	s.fillQuotaProtectionResult(updated, &result)
@@ -248,9 +305,10 @@ func (s *accountInspectionScheduler) recoverQuotaAccount(ctx context.Context, au
 	if recovered {
 		s.appendLog("success", fmt.Sprintf("%s 额度恢复，已解除调度保护", proinspection.ResultIdentity(result)))
 	}
+	return nil
 }
 
-func (s *accountInspectionScheduler) recoverQuotaWithProbeRequest(ctx context.Context, auth *coreauth.Auth, hold prorouting.QuotaProtection, settings accountInspectionSettings) {
+func (s *accountInspectionScheduler) recoverQuotaWithProbeRequest(ctx context.Context, auth *coreauth.Auth, hold prorouting.QuotaProtection, settings accountInspectionSettings) error {
 	settings.Retries = 0
 	settings.AntigravityDeepProbeEnabled = false
 	settings.XAIDeepProbeEnabled = false
@@ -258,16 +316,16 @@ func (s *accountInspectionScheduler) recoverQuotaWithProbeRequest(ctx context.Co
 	defer cancel()
 	release, err := s.probeLimiter.Acquire(probeCtx, 1, 1, auth.Provider)
 	if err != nil {
-		return
+		return err
 	}
 	defer release()
 	result := s.inspectAccount(probeCtx, accountFromAuth(auth), settings)
-	if ctx.Err() != nil {
-		return
+	if probeCtx.Err() != nil {
+		return probeCtx.Err()
 	}
 	current, err := s.actionAuthForResult(result)
 	if err != nil {
-		return
+		return err
 	}
 	statusCode := 0
 	if result.StatusCode != nil {
@@ -295,7 +353,7 @@ func (s *accountInspectionScheduler) recoverQuotaWithProbeRequest(ctx context.Co
 		next = &hold
 	}
 	if err := s.inspectionAuthManager().ChangeQuotaProtection(ctx, current, inspectionQuotaSource, hold.Revision, next); err != nil {
-		return
+		return err
 	}
 	updated, _ := s.inspectionAuthManager().GetByID(auth.ID)
 	s.fillQuotaProtectionResult(updated, &result)
@@ -312,6 +370,7 @@ func (s *accountInspectionScheduler) recoverQuotaWithProbeRequest(ctx context.Co
 		result.ActionReason = "真实请求验证未完成，等待下次重试"
 	}
 	s.saveQuotaRecoveryResult(result)
+	return nil
 }
 
 func (s *accountInspectionScheduler) saveQuotaRecoveryResult(result accountInspectionResult) {

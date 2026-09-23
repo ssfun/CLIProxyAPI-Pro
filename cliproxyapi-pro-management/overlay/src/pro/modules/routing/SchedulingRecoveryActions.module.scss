@@ -1,0 +1,49 @@
+.recovery {
+  display: grid;
+  justify-items: start;
+  gap: 0.65rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.recovery h3,
+.recovery p {
+  margin: 0;
+}
+
+.recovery small {
+  color: var(--text-secondary);
+}
+
+.success {
+  color: var(--success-color);
+}
+
+.warning {
+  color: var(--warning-text);
+}
+
+.error {
+  color: var(--danger-color);
+}
+
+.manual {
+  width: 100%;
+}
+
+.manual summary {
+  cursor: pointer;
+}
+
+.manualRow,
+.buttons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.manualRow {
+  justify-content: space-between;
+  padding-block: 0.5rem;
+}

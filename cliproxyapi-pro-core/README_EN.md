@@ -205,12 +205,14 @@ The latest finished inspection result is persisted separately as `account-inspec
 
 ### Scheduling board
 
-The patch layer exposes a read-only scheduling board under the management prefix:
+The patch layer exposes live scheduling state and directed recovery under the management prefix:
 
 - `GET /v0/management/routing-policy` returns a live composite snapshot of upstream cooldowns, inspection quota holds, the effective restriction, and bucket counts
+- `POST /v0/management/routing-policy/check` runs a directed quota recheck or pinned connection test against the current restriction and returns the before/after state; connection tests may consume a small amount of quota
+- `POST /v0/management/routing-policy/restrictions/release` releases one source and model restriction using its observed revision; a changed account or restriction returns `409`
 - `PUT|PATCH /v0/management/routing-policy`, `PUT /v0/management/routing-policy/request-protection`, and `POST /v0/management/routing-policy/release` return `410 Gone`
 
-The board does not take over accounts, expose per-provider rules, or write parallel `routing:` protections. Inspection holds are released from Account Inspection; upstream cooldowns return to the pool automatically when they expire. Legacy `pro_settings/routing.request-protection` values are ignored.
+The board does not take over accounts, expose per-provider rules, or write parallel `routing:` protections. Manual checks reuse directed quota recovery and upstream result accounting. A release changes only the selected source; operator disablement and other restrictions remain independent. Legacy `pro_settings/routing.request-protection` values are ignored.
 
 ### Root redirect and health response
 
@@ -271,7 +273,7 @@ It then starts `CLIProxyAPI` and optionally restores the latest usage backup fro
 - `patches/routing_policy.go` — read-only scheduling-board handlers; startup, restore, and backup import clear leftover `routing:` protections.
 
 Static modules follow their actual host lifecycles: `pro/app` owns the proxy-pool and oauth-policy services on the request path; `pro/observability` follows the process context; inspection and routing controllers follow the Management Handler. OAuth plan detection reuses auth-bound upstream execution and the newest usable SQLite plugin-quota or inspection snapshot. Quota updates trigger auth-generation-safe model re-registration, while `POST /v0/management/pro/oauth-policy/refresh` starts an explicit re-detection. Cross-lifecycle backup ports use owner-scoped registration and reverse-order unregistration, so stopping an older Handler or Service cannot clear callbacks owned by a newer instance. `internal/embeddedusage` is restricted to upstream/SDK compatibility boundaries; `internal/pro` business modules do not depend back on that façade.
-- Core invariants: the scheduling board is a live read of upstream cooldowns and inspection holds; imported `routing_cursor_state` and `auth_runtime_stats` are applied to the live manager immediately; existing DB tables, JSONL record types, and `/v0/management/usage*` APIs remain compatible.
+- Core invariants: the scheduling board reads live upstream cooldowns and inspection holds, and recovery changes only the selected source; imported `routing_cursor_state` and `auth_runtime_stats` are applied to the live manager immediately; existing DB tables, JSONL record types, and `/v0/management/usage*` APIs remain compatible.
 - `patches/config_existing_updates.go` — existing-scalar-only YAML updates that never create missing keys.
 - `.github/workflows/release-core.yml` — image publish, Pro binary assets, `management.html` publish, usage backup, Render deployment trigger, Telegram notification, and run cleanup.
 

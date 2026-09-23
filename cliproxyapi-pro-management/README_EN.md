@@ -137,7 +137,7 @@ Adds a top-level scheduling-board route:
 /routing
 ```
 
-The page is a read-only view of accounts the selector will not pick right now. It never reads or edits global routing values in `config.yaml`. Buckets cover quota, auth/transient failures, pending recheck, and overlap. The only action is jumping to Account Inspection; upstream cooldowns are not cleared from this page.
+The page shows accounts currently withheld by the selector without reading or editing global routing values in `config.yaml`. Buckets cover quota, auth/transient failures, pending recheck, and overlap. Account details can check and recover through directed quota rechecks or pinned connection tests, and release one source/model restriction. Account Inspection opens the same recovery controls while keeping historical inspection results distinct from live scheduling state.
 
 The page uses:
 

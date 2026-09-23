@@ -194,7 +194,7 @@ Core 内建回环 SOCKS5 代理池以及 xAI、Codex、Claude、Gemini CLI、Ant
 
 额度自动操作使用临时调度保护，不再写入账号 `disabled`。默认开启自动复查：已知重置时间按实际阻塞窗口安排定向复查；没有可靠时间或复查失败时采用 1–30 分钟退避并加入时间抖动。恢复需低于原阈值至少 2 个百分点，避免临界抖动。到期任务每批最多 4 个并发，并继续遵守 provider 并发限制；积压任务连续处理，无需等待下一轮完整巡检。后台复查不执行删除、禁用或深度推理；xAI 官方 API 无独立额度查询时，到期交给真实请求验证。上游冷却已经覆盖同一额度窗口时，巡检不再叠加一层保护。
 
-额度保护与人工禁用、认证错误、upstream 原生冷却相互独立。恢复只解除对应来源的保护，不清除其他限制。Claude 明确的 Opus/Sonnet 专属额度、Antigravity 的 Claude/GPT 与 Gemini 分组、以及 Codex/Kimi 能从窗口名识别出的模型，按模型限制；无法可靠确定模型范围的巡检额度沿用账号级保护。复查优先按额度重置时间唤醒，只有没有可靠重置点时才用退避。状态保存在 SQLite 的 `pro_settings/quota-protection`，支持重启、备份与插件虚拟账号。界面显示“额度冷却中”和预计复查时间，也可手动解除保护。调度看板只读展示上游冷却和巡检保护的合成结果。恢复开关变更会由后台同步到已有任务；旧版没有可靠归属记录的已禁用账号保持原状态，需人工复核。
+额度保护与人工禁用、认证错误、upstream 原生冷却相互独立。恢复只解除对应来源的保护，不清除其他限制。Claude 明确的 Opus/Sonnet 专属额度、Antigravity 的 Claude/GPT 与 Gemini 分组、以及 Codex/Kimi 能从窗口名识别出的模型，按模型限制；无法可靠确定模型范围的巡检额度沿用账号级保护。复查优先按额度重置时间唤醒，只有没有可靠重置点时才用退避。状态保存在 SQLite 的 `pro_settings/quota-protection`，支持重启、备份与插件虚拟账号。界面显示“额度冷却中”和预计复查时间；调度看板合成上游冷却和巡检保护，并提供统一的定向检查与单项解除入口。恢复开关变更会由后台同步到已有任务；旧版没有可靠归属记录的已禁用账号保持原状态，需人工复核。
 
 
 巡检设置中的 `workers` 是所有 provider 合计的探测总并发，范围 `1–8`、默认 `4`；`providerWorkers` 是单个 provider 的探测并发，范围 `1–4`、默认 `2`。普通探测、深度探测、xAI 探测和探测前 token refresh 共用这两个限制，不再使用单独的串行闸门。`deleteWorkers` 范围 `1–4`、默认 `4`，同时约束自动操作和管理端手动批量操作。调度设置保存在账号巡检调度 JSON 中，不读取或修改 `config.yaml`。
@@ -213,12 +213,14 @@ Docker 镜像中的调度文件默认位置：
 
 ### 调度看板
 
-补丁层把 `/v0/management/routing-policy` 收成只读调度看板：
+补丁层通过 `/v0/management/routing-policy` 提供实时调度状态与定向恢复：
 
 - `GET /v0/management/routing-policy` 返回 live 合成快照：上游冷却、巡检额度保护、有效限制和分桶计数
+- `POST /v0/management/routing-policy/check` 按当前限制执行定向额度复查或固定账号连接验证，返回验证前后状态；连接验证可能消耗少量额度
+- `POST /v0/management/routing-policy/restrictions/release` 按来源、模型和状态版本解除单项巡检保护或上游定时冷却；版本或账号变化时返回 `409`
 - `PUT|PATCH /v0/management/routing-policy`、`PUT /v0/management/routing-policy/request-protection`、`POST /v0/management/routing-policy/release` 返回 `410 Gone`
 
-看板不接管账号，不按 provider 配置规则，也不再写 `routing:` 平行保护。解除巡检保护只在账号巡检页进行；上游冷却到期后由选择器自动回到调度池。旧的 `pro_settings/routing.request-protection` 会被忽略。
+看板不接管账号，不按 provider 配置规则，也不写 `routing:` 平行保护。手动检查与自动额度复查共用现有额度恢复路径；固定账号连接验证由 upstream 记录真实结果。解除操作只修改选定来源，人工禁用和其他限制保持独立。旧的 `pro_settings/routing.request-protection` 会被忽略。
 
 ### 根路径跳转和 health 响应
 
@@ -276,8 +278,8 @@ https://github.com/ssfun/CLIProxyAPI-Pro
 - `patches/account_inspection_host.go`、`patches/pro_auth_mutation.go` — Inspection quota port 与共享 Auth mutation/file persistence host adapter。
 - `patches/pro_management_runtime.go` — 组合随 Management Handler 启停的 inspection、routing 后台生命周期。
 - 生成后的 API Server 会在 `Stop` 时关闭 management Handler；直接通过 SDK 创建 Handler 的嵌入方也必须调用其 `Shutdown()`，以释放巡检、调度看板、登录清理及全局回调。
-- `patches/routing_policy.go` — 注入只读调度看板 handlers；启动、恢复与备份导入都会清掉旧的 `routing:` 平行保护。
-- 核心不变量：调度看板只读 live 上游冷却和巡检保护；导入的 `routing_cursor_state` 和 `auth_runtime_stats` 必须立即应用到 live manager；原 DB 表、JSONL record type 和 `/v0/management/usage*` API 保持兼容。
+- `patches/routing_policy.go` — 注入实时调度看板和定向恢复 handlers；启动、恢复与备份导入都会清掉旧的 `routing:` 平行保护。
+- 核心不变量：调度看板实时读取上游冷却和巡检保护，恢复只修改对应来源；导入的 `routing_cursor_state` 和 `auth_runtime_stats` 必须立即应用到 live manager；原 DB 表、JSONL record type 和 `/v0/management/usage*` API 保持兼容。
 
 静态模块按实际宿主生命周期组合：`pro/app` 管理请求路径上的 proxy-pool 与 oauth-policy 服务；`pro/observability` 随进程 context 启停；inspection 与 routing 控制器随 Management Handler 启停。跨生命周期备份端口使用 owner-scoped 注册和逆序注销，旧 Handler 或旧 Service 关闭时不会清除新实例的回调。`internal/embeddedusage` 只允许出现在 upstream/SDK 兼容边界，`internal/pro` 业务模块不反向依赖该 façade。
 - `patches/config_existing_updates.go` — 只修改已存在 YAML 标量、禁止补键的配置写入辅助层。

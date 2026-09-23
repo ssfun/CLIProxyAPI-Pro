@@ -287,7 +287,7 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
         inspection = (PRO_ROOT / 'modules/inspection/AccountInspectionPage.tsx').read_text()
         proxy_pool = (PRO_ROOT / 'modules/proxyPool/ProxyPoolPage.tsx').read_text()
         self.assertIn("useProSurfaceState<'realtime-detail' | 'price-management'>", monitoring)
-        self.assertIn("useProSurfaceState<'settings' | 'detail'>", inspection)
+        self.assertIn("useProSurfaceState<'settings' | 'detail' | 'recovery'>", inspection)
         self.assertIn("useProSurfaceState<'node' | 'import' | 'takeover'>", proxy_pool)
 
     def test_detail_data_is_cleared_only_after_the_exit_animation(self) -> None:

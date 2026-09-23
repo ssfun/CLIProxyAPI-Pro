@@ -32,6 +32,7 @@ import {
   type AccountInspectionResultItem,
 } from '@/pro/modules/inspection/features/accountInspection';
 import { readInspectionFocusLocationState } from '@/pro/shared/inspectionNavigation';
+import { SchedulingRecoveryDialog } from './SchedulingRecoveryDialog';
 import { ProDetailDialog, ProSettingsSheet } from '@/pro/shared/ProSurface';
 import { useProSurfaceState } from '@/pro/shared/useProSurfaceState';
 import {
@@ -80,7 +81,9 @@ import {
   healthToneClass,
   inspectionBackendReducer,
   isInspectableAccountInspectionAuthFile,
+  isSchedulingRecoveryAction,
   levelClassMap,
+  partitionInspectionActionTargets,
   resolveAccountInspectionAccountLabel,
   resolveAccountInspectionPlanLabel,
   scheduleAuthFileAccountStats,
@@ -172,7 +175,16 @@ export function AccountInspectionPage() {
     settingsDirty,
   } = backendState;
   const [selectedDetailResult, setSelectedDetailResultState] = useState<AccountInspectionResultItem | null>(null);
-  const { activeSurface, openSurface, closeSurface } = useProSurfaceState<'settings' | 'detail'>();
+  const [selectedRecoveryResult, setSelectedRecoveryResult] = useState<AccountInspectionResultItem | null>(null);
+  const { activeSurface, openSurface, closeSurface } = useProSurfaceState<'settings' | 'detail' | 'recovery'>();
+  const openRecoveryForItem = useCallback((item: AccountInspectionResultItem) => {
+    if (!item.authId || !item.authIndex) {
+      showNotification(t('routing_policy.recovery.unavailable_version'), 'info');
+      return;
+    }
+    setSelectedRecoveryResult(item);
+    openSurface('recovery');
+  }, [openSurface, showNotification, t]);
   const isSettingsModalOpen = activeSurface === 'settings';
   const setIsSettingsModalOpen = useCallback((open: boolean) => {
     if (open) openSurface('settings');
@@ -757,20 +769,27 @@ export function AccountInspectionPage() {
     if (!result) return;
 
     const confirmTargets = (targets: AccountInspectionResultItem[]) => {
-      const counts = countActions(targets);
+      const { executable, recovery } = partitionInspectionActionTargets(targets);
+      if (recovery.length > 0) {
+        showNotification(t(executable.length > 0
+          ? 'routing_policy.recovery.bulk_skipped'
+          : 'routing_policy.recovery.bulk_notice', { count: recovery.length }), 'info');
+      }
+      if (executable.length === 0) return;
+      const counts = countActions(executable);
       showConfirmation({
-        dedupeKey: `account-inspection:execute:${targets.map((item) => `${item.key}:${item.action}`).sort().join('|')}`,
+        dedupeKey: `account-inspection:execute:${executable.map((item) => `${item.key}:${item.action}`).sort().join('|')}`,
         title: t('monitoring.account_inspection_execute_confirm_title'),
         message: buildExecuteConfirmationMessage(
-          targets,
+          executable,
           t
         ),
         confirmText: t('monitoring.account_inspection_execute_confirm_button', {
-          count: targets.length,
+          count: executable.length,
         }),
         cancelText: t('common.cancel'),
         variant: counts.delete > 0 ? 'danger' : 'primary',
-        onConfirm: () => executeItems(targets),
+        onConfirm: () => executeItems(executable),
       });
     };
 
@@ -960,23 +979,36 @@ export function AccountInspectionPage() {
       showNotification(t('monitoring.account_inspection_no_selected_suggestions'), 'info');
       return;
     }
-    const counts = countActions(targets);
+    const { executable, recovery } = partitionInspectionActionTargets(targets);
+    if (recovery.length > 0) {
+      if (targets.length === 1 && recovery[0].authId && recovery[0].authIndex) {
+        openRecoveryForItem(recovery[0]);
+        return;
+      }
+      showNotification(t(executable.length > 0
+        ? 'routing_policy.recovery.bulk_skipped'
+        : 'routing_policy.recovery.bulk_notice', { count: recovery.length }), 'info');
+      if (executable.length === 0) {
+        return;
+      }
+    }
+    const counts = countActions(executable);
     showConfirmation({
-      dedupeKey: `account-inspection:execute:${targets.map((item) => `${item.key}:${item.action}`).sort().join('|')}`,
+      dedupeKey: `account-inspection:execute:${executable.map((item) => `${item.key}:${item.action}`).sort().join('|')}`,
       title: t('monitoring.account_inspection_execute_confirm_title'),
       message: buildExecuteConfirmationMessage(
-        targets,
+        executable,
         t
       ),
-      confirmText: t('monitoring.account_inspection_execute_confirm_button', { count: targets.length }),
+      confirmText: t('monitoring.account_inspection_execute_confirm_button', { count: executable.length }),
       cancelText: t('common.cancel'),
       variant: counts.delete > 0 ? 'danger' : 'primary',
       onConfirm: () => {
         setSelectedResultKeys(new Set());
-        void executeItems(targets);
+        void executeItems(executable);
       },
     });
-  }, [executeItems, recheckSelectedResults, resultBulkAction, selectedVisibleResultRows, showConfirmation, showNotification, t]);
+  }, [executeItems, openRecoveryForItem, recheckSelectedResults, resultBulkAction, selectedVisibleResultRows, showConfirmation, showNotification, t]);
 
   const quotaStore = useMemo(
     () => ({ antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota }),
@@ -1945,6 +1977,15 @@ export function AccountInspectionPage() {
                           </td>
                           <td className={styles.operationCell} data-label={t('common.action')}>
                             <div className={styles.operationActions}>
+                              {item.authId && item.authIndex && !item.quotaCooling ? (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => openRecoveryForItem(item)}
+                                >
+                                  {t('routing_policy.recovery.open')}
+                                </Button>
+                              ) : null}
                               <button
                                 type="button"
                                 className={styles.iconActionButton}
@@ -1959,10 +2000,18 @@ export function AccountInspectionPage() {
                                 <Button
                                   size="sm"
                                   variant={suggestedAction === 'delete' ? 'danger' : 'primary'}
-                                  onClick={() => handleExecuteSingle(item, suggestedAction)}
+                                  onClick={() => {
+                                    if (isSchedulingRecoveryAction(buildManualActionItem(item, suggestedAction))) {
+                                      openRecoveryForItem(item);
+                                    } else {
+                                      handleExecuteSingle(item, suggestedAction);
+                                    }
+                                  }}
                                   disabled={restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
                                 >
-                                  {item.quotaCooling && suggestedAction === 'enable' ? t('monitoring.account_inspection_release_quota') : formatActionLabel(suggestedAction, t)}
+                                  {isSchedulingRecoveryAction(buildManualActionItem(item, suggestedAction))
+                                    ? t('monitoring.account_inspection_release_quota')
+                                    : formatActionLabel(suggestedAction, t)}
                                 </Button>
                               ) : null}
                               {additionalActions.map((action) => (
@@ -1970,10 +2019,18 @@ export function AccountInspectionPage() {
                                   key={action}
                                   size="sm"
                                   variant={action === 'delete' ? 'danger' : 'secondary'}
-                                  onClick={() => handleExecuteSingle(item, action)}
+                                  onClick={() => {
+                                    if (isSchedulingRecoveryAction(buildManualActionItem(item, action))) {
+                                      openRecoveryForItem(item);
+                                    } else {
+                                      handleExecuteSingle(item, action);
+                                    }
+                                  }}
                                   disabled={restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
                                 >
-                                  {item.quotaCooling && action === 'enable' ? t('monitoring.account_inspection_release_quota') : formatActionLabel(action, t)}
+                                  {isSchedulingRecoveryAction(buildManualActionItem(item, action))
+                                    ? t('monitoring.account_inspection_release_quota')
+                                    : formatActionLabel(action, t)}
                                 </Button>
                               ))}
                             </div>
@@ -2143,6 +2200,18 @@ export function AccountInspectionPage() {
           <InspectionErrorDetailsPanel item={selectedDetailResult} t={t} />
         ) : null}
       </ProDetailDialog>
+
+      <SchedulingRecoveryDialog
+        open={activeSurface === 'recovery' && Boolean(selectedRecoveryResult)}
+        authId={selectedRecoveryResult?.authId || ''}
+        authIndex={selectedRecoveryResult?.authIndex || ''}
+        accountName={selectedRecoveryResult ? resolveAccountInspectionAccountLabel(selectedRecoveryResult) : ''}
+        onClose={closeSurface}
+        onResult={async () => {
+          const response = await accountInspectionApi.getStatus(currentInspectionDetailOptions);
+          applyBackendResponse(response);
+        }}
+      />
 
       <ProSettingsSheet
         open={isSettingsModalOpen}

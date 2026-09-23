@@ -11,7 +11,9 @@ import {
   isAuthFileRequestError,
   isResultAccountInvalid,
   isResultRequestError,
+  isSchedulingRecoveryAction,
   isXaiQuotaLow,
+  partitionInspectionActionTargets,
   resolveAccountInspectionAccountLabel,
   resolveAccountInspectionPlanLabel,
   resolveAssetInspectionHealthCounts,
@@ -148,6 +150,20 @@ describe('account inspection page model', () => {
     expect(view.filterRowCounts.quotaChanges).toBe(1);
     expect(view.filterRowCounts.pending).toBe(2);
     expect(view.actionableActionCounts).toMatchObject({ delete: 1, disable: 1 });
+  });
+
+  test('routes only live quota enable actions through scheduling recovery', () => {
+    const quotaRecovery = result({ key: 'quota-recovery', action: 'enable', quotaCooling: true });
+    const manualEnable = result({ key: 'manual-enable', action: 'enable', quotaCooling: true, disabled: true });
+    const disable = result({ key: 'disable', action: 'disable', quotaCooling: true });
+
+    expect(isSchedulingRecoveryAction(quotaRecovery)).toBe(true);
+    expect(isSchedulingRecoveryAction(manualEnable)).toBe(false);
+    expect(isSchedulingRecoveryAction(disable)).toBe(false);
+    expect(partitionInspectionActionTargets([quotaRecovery, manualEnable, disable])).toEqual({
+      recovery: [quotaRecovery],
+      executable: [manualEnable, disable],
+    });
   });
 
   test('uses the auth file name when the result email is unavailable', () => {

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +15,145 @@ import (
 	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
+
+func TestRoutingRecoveryChecksPinnedModelAndClearsNativeCooldown(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	manager := coreauth.NewManager(nil, nil, nil)
+	executor := &authFileConnectionExecutor{response: []byte(`{"choices":[{"message":{"content":"OK"}}]}`)}
+	manager.RegisterExecutor(executor)
+	model := authFileConnectionTestModels(&coreauth.Auth{Provider: "codex"})[0].ID
+	now := time.Now()
+	auth, err := manager.Register(context.Background(), &coreauth.Auth{
+		ID: "recover-model", Provider: "codex", FileName: "recover.json",
+		ModelStates: map[string]*coreauth.ModelState{
+			model: {Unavailable: true, Status: coreauth.StatusError, NextRetryAfter: now.Add(time.Hour), UpdatedAt: now},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{authManager: manager}
+	router := gin.New()
+	h.RegisterRoutingPolicyRoutes(router.Group("/"))
+	body, _ := json.Marshal(routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10)})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/routing-policy/check", strings.NewReader(string(body))))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", recorder.Code, recorder.Body.String())
+	}
+	if executor.lastAuthID != auth.ID || executor.lastModel != model {
+		t.Fatalf("pinned request = %s/%s", executor.lastAuthID, executor.lastModel)
+	}
+	var response struct {
+		After routingBoardAccount            `json:"after"`
+		Test  authFileConnectionTestResponse `json:"test"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Test.Success || response.After.AuthID != "" {
+		t.Fatalf("recovery = %+v body = %s", response, recorder.Body.String())
+	}
+}
+
+func TestRoutingRecoveryReleaseOnlySelectedSourceAndRejectsStaleRevision(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := startProQuotaTestService(t)
+	manager := coreauth.NewManager(nil, nil, nil)
+	now := time.Now()
+	auth, err := manager.Register(context.Background(), &coreauth.Auth{
+		ID: "overlap-release", Provider: "codex", FileName: "overlap.json",
+		Unavailable: true, NextRetryAfter: now.Add(time.Hour), UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, 0,
+		&prorouting.QuotaProtection{RetryAt: now.Add(2 * time.Hour).UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := manager.GetByID(auth.ID)
+	before := schedulingBoardAccount(current, time.Now())
+	var inspectionRevision, upstreamRevision string
+	for _, detail := range before.Details {
+		if detail.Source == "inspection" {
+			inspectionRevision = detail.Revision
+		}
+		if detail.Source == "upstream" {
+			upstreamRevision = detail.Revision
+		}
+	}
+	if inspectionRevision == "" || upstreamRevision == "" {
+		t.Fatalf("missing revisions: %+v", before.Details)
+	}
+	h := &Handler{authManager: manager}
+	router := gin.New()
+	h.RegisterRoutingPolicyRoutes(router.Group("/"))
+	send := func(request routingRecoveryRequest) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(request)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/routing-policy/restrictions/release", strings.NewReader(string(body))))
+		return recorder
+	}
+	base := routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10), Source: "inspection", Revision: inspectionRevision}
+	if recorder := send(base); recorder.Code != http.StatusOK {
+		t.Fatalf("inspection release status = %d body = %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := send(base); recorder.Code != http.StatusConflict {
+		t.Fatalf("stale release status = %d", recorder.Code)
+	}
+	remaining, _ := manager.GetByID(auth.ID)
+	if board := schedulingBoardAccount(remaining, time.Now()); board.AuthID == "" || board.Inspection || !containsString(board.Sources, "upstream") {
+		t.Fatalf("release changed native cooldown: %+v", board)
+	}
+	if recorder := send(routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10), Source: "upstream", Revision: upstreamRevision}); recorder.Code != http.StatusConflict {
+		t.Fatalf("stale native release status = %d", recorder.Code)
+	}
+	for _, detail := range schedulingBoardAccount(remaining, time.Now()).Details {
+		if detail.Source == "upstream" {
+			upstreamRevision = detail.Revision
+		}
+	}
+	if recorder := send(routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10), Source: "upstream", Revision: upstreamRevision}); recorder.Code != http.StatusOK {
+		t.Fatalf("native release status = %d body = %s", recorder.Code, recorder.Body.String())
+	}
+	remaining, _ = manager.GetByID(auth.ID)
+	if board := schedulingBoardAccount(remaining, time.Now()); board.AuthID != "" {
+		t.Fatalf("cooldown not cleared: %+v", board)
+	}
+}
+
+func TestRoutingRecoveryRejectsReplacedAccountWithSameIndex(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	manager := coreauth.NewManager(nil, nil, nil)
+	old, err := manager.Register(context.Background(), &coreauth.Auth{
+		ID: "replaced-recovery", Provider: "codex", FileName: "same.json",
+		Unavailable: true, NextRetryAfter: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldEpoch := strconv.FormatUint(old.RegistrationEpoch, 10)
+	newAuth, err := manager.Register(context.Background(), &coreauth.Auth{
+		ID: old.ID, Provider: old.Provider, FileName: old.FileName,
+		Unavailable: true, NextRetryAfter: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.EnsureIndex() != newAuth.EnsureIndex() {
+		t.Fatal("test account index changed")
+	}
+	h := &Handler{authManager: manager}
+	router := gin.New()
+	h.RegisterRoutingPolicyRoutes(router.Group("/"))
+	body, _ := json.Marshal(routingRecoveryRequest{AuthID: old.ID, AuthIndex: old.EnsureIndex(), RegistrationEpoch: oldEpoch})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/routing-policy/check", strings.NewReader(string(body))))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("old account check status = %d body = %s", recorder.Code, recorder.Body.String())
+	}
+}
 
 func TestGetRoutingPolicyReturnsReadOnlyBoard(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -353,5 +494,89 @@ func TestUpdateProAuthSerializesInspectionPriority(t *testing.T) {
 	}
 	if updated.Disabled || prorouting.ProtectionOwned(updated.Metadata) {
 		t.Fatalf("inspection must win: disabled=%v metadata=%#v", updated.Disabled, updated.Metadata)
+	}
+}
+
+func TestRoutingRecoveryRejectsDisappearedSource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	manager := coreauth.NewManager(nil, nil, nil)
+	auth, err := manager.Register(context.Background(), &coreauth.Auth{ID: "source-disappeared", Provider: "codex", Unavailable: true, NextRetryAfter: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{authManager: manager}
+	router := gin.New()
+	h.RegisterRoutingPolicyRoutes(router.Group("/"))
+	body, _ := json.Marshal(routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10), Source: "inspection"})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/routing-policy/check", strings.NewReader(string(body))))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestRoutingInspectionReleaseImmediatelyUpdatesStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := startProQuotaTestService(t)
+	t.Setenv("ACCOUNT_INSPECTION_SCHEDULE_PATH", t.TempDir()+"/schedule.json")
+	t.Setenv("ACCOUNT_INSPECTION_SNAPSHOT_PATH", t.TempDir()+"/snapshot.json")
+	manager := coreauth.NewManager(nil, nil, nil)
+	auth, err := manager.Register(ctx, &coreauth.Auth{ID: "release-inspection-status", Provider: "codex", FileName: "release.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = manager.ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, 0, &prorouting.QuotaProtection{RetryAt: time.Now().Add(time.Hour).UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	auth, _ = manager.GetByID(auth.ID)
+	hold := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
+	h := &Handler{authManager: manager}
+	scheduler := newAccountInspectionScheduler(h, nil)
+	accountInspectionSchedulers.Store(h, scheduler)
+	t.Cleanup(func() { accountInspectionSchedulers.Delete(h) })
+	result := accountFromAuth(auth).baseResult()
+	scheduler.fillQuotaProtectionResult(auth, &result)
+	result.IsQuota = true
+	scheduler.status.Results = []accountInspectionResult{result}
+	updates := make(chan accountInspectionLogStreamMessage, 4)
+	scheduler.subscribers[updates] = struct{}{}
+	router := gin.New()
+	h.RegisterRoutingPolicyRoutes(router.Group("/"))
+	router.GET("/account-inspection/status", h.GetAccountInspectionStatus)
+	statusResult := func() accountInspectionResult {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/account-inspection/status", nil))
+		var response struct {
+			Status accountInspectionStatus `json:"status"`
+		}
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status GET=%d", recorder.Code)
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if len(response.Status.Results) != 1 {
+			t.Fatalf("results=%+v", response.Status.Results)
+		}
+		return response.Status.Results[0]
+	}
+	if !statusResult().QuotaCooling {
+		t.Fatal("fixture has no inspection hold")
+	}
+	body, _ := json.Marshal(routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10), Source: "inspection", Revision: strconv.FormatInt(hold.Revision, 10)})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/routing-policy/restrictions/release", strings.NewReader(string(body))))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("release=%d %s", recorder.Code, recorder.Body.String())
+	}
+	updated := statusResult()
+	if updated.QuotaCooling || updated.QuotaRetryAt != 0 || updated.QuotaRevision != 0 || updated.IsQuota {
+		t.Fatalf("stale status after release: %+v", updated)
+	}
+	select {
+	case <-updates:
+	default:
+		t.Fatal("inspection status update was not broadcast")
 	}
 }

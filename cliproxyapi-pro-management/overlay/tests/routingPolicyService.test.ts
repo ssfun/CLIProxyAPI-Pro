@@ -5,6 +5,7 @@ import {
   formatTimestamp,
   normalizeSchedulingBoardResponse,
   schedulingBoardModelsLabel,
+  schedulingRecoveryResultTone,
   schedulingBoardResumeTone,
 } from '../src/pro/modules/routing/routingPolicy';
 
@@ -71,6 +72,12 @@ describe('scheduling board service model', () => {
     expect(schedulingBoardResumeTone('manual')).toBe('danger');
     expect(schedulingBoardResumeTone('reauthenticate')).toBe('danger');
     expect(schedulingBoardResumeTone('await-state-change')).toBe('neutral');
+  });
+
+  test('uses success tone only when recovery clears the restriction without a failed probe', () => {
+    expect(schedulingRecoveryResultTone({ after: undefined, test: { success: true } })).toBe('success');
+    expect(schedulingRecoveryResultTone({ after: { authId: 'a' } as never })).toBe('warning');
+    expect(schedulingRecoveryResultTone({ after: undefined, test: { success: false } })).toBe('error');
   });
 
   test('formats remaining countdowns correctly', () => {

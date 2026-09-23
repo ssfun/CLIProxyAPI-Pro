@@ -132,6 +132,7 @@ type accountInspectionScheduler struct {
 	fullRunStartMu          sync.Mutex
 	fullRunMu               sync.RWMutex
 	probeLimiter            proinspection.KeyedLimiter
+	quotaRecoveryActive     sync.Map
 	actionLimiter           proinspection.KeyedLimiter
 	pause                   *sync.Cond
 	cancel                  context.CancelFunc

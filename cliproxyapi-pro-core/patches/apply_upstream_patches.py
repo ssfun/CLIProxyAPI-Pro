@@ -6754,6 +6754,22 @@ write(
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_cooldown.go'
 replace_once(
     auth_conductor,
+    '''\tm.mu.Lock()
+\tif auth, ok := m.auths[result.AuthID]; ok && auth != nil {
+\t\tif modelKey == ""''',
+    '''\tm.mu.Lock()
+\tif auth, ok := m.auths[result.AuthID]; ok && auth != nil && pinnedResultIdentityMatches(result, auth) {
+\t\tif modelKey == ""''',
+    'pinnedResultIdentityMatches(result, auth)',
+)
+replace_once(
+    auth_conductor,
+    '\t\tif result.Success {\n\t\t\tif auth.Quota.Reason == "credential_quota"',
+    '\t\tif result.Success {\n\t\t\tif _, pinned := result.Options.Metadata[pinnedResultIdentityKey]; pinned {\n\t\t\t\tclearAuthStateOnSuccess(auth, now)\n\t\t\t}\n\t\t\tif auth.Quota.Reason == "credential_quota"',
+    'if _, pinned := result.Options.Metadata[pinnedResultIdentityKey]; pinned',
+)
+replace_once(
+    auth_conductor,
     '''\tvar authSnapshot *Auth
 \tcooldownStateChanged := false
 ''',

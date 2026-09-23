@@ -1469,6 +1469,25 @@
       "monitoring_settings_reset_success": "Statistics reset completed; {{count}} request events and {{accounts}} account counter records deleted"
     },
     "routing_policy": {
+      "recovery": {
+        "title": "Scheduling recovery",
+        "open": "Recovery",
+        "current_reason": "Current restriction",
+        "check": "Check and recover",
+        "explanation": "Check the live restriction and use the appropriate quota recheck or account request.",
+        "request_notice": "A connection check may send a small real request and use quota.",
+        "manual_title": "Release a specific restriction",
+        "manual_notice": "This removes the selected restriction. Other restrictions may still block scheduling.",
+        "release": "Release",
+        "confirm_release": "Confirm release",
+        "restored": "The account is no longer restricted by scheduling.",
+        "still_restricted": "The account still has scheduling restrictions. See the current reasons above.",
+        "no_current_block": "This inspection result is historical; the account has no current scheduling restriction.",
+        "failed": "Recovery check failed",
+        "bulk_notice": "Release quota protection from each account's live recovery panel.",
+        "bulk_skipped": "Skipped {{count}} quota recovery item(s); the remaining actions will continue.",
+        "unavailable_version": "This Core version does not support scheduling recovery."
+      },
       "title": "Scheduling Board",
       "subtitle": "Account restrictions and recovery progress.",
       "load_failed": "Failed to load scheduling board",
@@ -2831,6 +2850,25 @@
       "monitoring_settings_reset_success": "Статистика сброшена; удалено событий запросов: {{count}}, записей счётчиков аккаунтов: {{accounts}}"
     },
     "routing_policy": {
+      "recovery": {
+        "title": "Восстановление планирования",
+        "open": "Восстановление",
+        "current_reason": "Текущее ограничение",
+        "check": "Проверить и восстановить",
+        "explanation": "Проверить текущее ограничение: повторно запросить квоту или проверить подключение аккаунта.",
+        "request_notice": "Проверка подключения может отправить небольшой реальный запрос и потратить квоту.",
+        "manual_title": "Снять отдельное ограничение",
+        "manual_notice": "Будет снято только выбранное ограничение; остальные могут продолжать блокировать планирование.",
+        "release": "Снять",
+        "confirm_release": "Подтвердить снятие",
+        "restored": "Аккаунт больше не ограничен при планировании.",
+        "still_restricted": "Ограничения остаются. Проверьте текущие причины выше.",
+        "no_current_block": "Это прежний результат проверки; сейчас ограничений планирования нет.",
+        "failed": "Проверка восстановления не удалась",
+        "bulk_notice": "Снимайте защиту квоты через панель восстановления каждого аккаунта.",
+        "bulk_skipped": "Пропущено операций восстановления квоты: {{count}}; остальные действия будут выполнены.",
+        "unavailable_version": "Эта версия Core не поддерживает восстановление планирования."
+      },
       "title": "Панель планирования",
       "subtitle": "Ограничения аккаунтов и ход восстановления.",
       "load_failed": "Не удалось загрузить панель планирования",
@@ -4668,6 +4706,25 @@
       "monitoring_settings_reset_success": "统计数据已重置，共删除 {{count}} 条请求事件和 {{accounts}} 条账号计数记录"
     },
     "routing_policy": {
+      "recovery": {
+        "title": "调度恢复",
+        "open": "调度恢复",
+        "current_reason": "当前限制",
+        "check": "检查并恢复",
+        "explanation": "根据当前限制执行额度定向复查或账号连接验证，并重新判断调度状态。",
+        "request_notice": "连接验证可能发送一次最小真实请求并消耗少量额度。",
+        "manual_title": "手动解除指定限制",
+        "manual_notice": "只解除选中的限制；其他限制仍可能阻止调度。",
+        "release": "解除",
+        "confirm_release": "确认解除",
+        "restored": "账号已不再受到调度限制。",
+        "still_restricted": "账号仍受调度限制，请查看当前原因。",
+        "no_current_block": "这条巡检结果属于历史记录，账号当前没有调度限制。",
+        "failed": "恢复检查失败",
+        "bulk_notice": "请在各账号的实时调度恢复面板中解除额度保护。",
+        "bulk_skipped": "已跳过 {{count}} 个额度恢复项，其余操作将继续执行。",
+        "unavailable_version": "当前 Core 版本尚不支持调度恢复操作。"
+      },
       "title": "调度看板",
       "subtitle": "查看受限账号及恢复进度。",
       "load_failed": "调度看板加载失败",
@@ -6366,6 +6423,25 @@
       "monitoring_settings_reset_success": "統計資料已重設，共刪除 {{count}} 筆請求事件和 {{accounts}} 筆帳號計數記錄"
     },
     "routing_policy": {
+      "recovery": {
+        "title": "調度恢復",
+        "open": "調度恢復",
+        "current_reason": "目前限制",
+        "check": "檢查並恢復",
+        "explanation": "依照目前限制執行額度定向複查或帳號連線驗證，並重新判斷調度狀態。",
+        "request_notice": "連線驗證可能送出一次最小真實請求並消耗少量額度。",
+        "manual_title": "手動解除指定限制",
+        "manual_notice": "只解除選取的限制；其他限制仍可能阻止調度。",
+        "release": "解除",
+        "confirm_release": "確認解除",
+        "restored": "帳號已不再受到調度限制。",
+        "still_restricted": "帳號仍受調度限制，請查看目前原因。",
+        "no_current_block": "這筆巡檢結果屬於歷史紀錄，帳號目前沒有調度限制。",
+        "failed": "恢復檢查失敗",
+        "bulk_notice": "請在各帳號的即時調度恢復面板中解除額度保護。",
+        "bulk_skipped": "已略過 {{count}} 個額度恢復項，其餘操作將繼續執行。",
+        "unavailable_version": "目前 Core 版本尚不支援調度恢復操作。"
+      },
       "title": "調度看板",
       "subtitle": "查看受限帳號及恢復進度。",
       "load_failed": "調度看板載入失敗",

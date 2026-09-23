@@ -1014,11 +1014,16 @@ func TestQuotaRecoverySkipsIdleScanWithoutStoredProtections(t *testing.T) {
 func TestQuotaRecoveryRechecksWithoutFullInspection(t *testing.T) {
 	ctx := startProQuotaTestService(t)
 	for _, tc := range []struct {
-		name, body                   string
-		status                       int
-		disabled, replace, recovered bool
+		name, body                           string
+		status                               int
+		disabled, replace, recovered, manual bool
+		cancelBefore, wantError              bool
 	}{
 		{name: "recovered", body: `{"five_hour":{"utilization":10}}`, status: 200, recovered: true},
+		{name: "manual recovery with automation off", body: `{"five_hour":{"utilization":10}}`, status: 200, recovered: true, manual: true},
+		{name: "manual check still exhausted", body: `{"five_hour":{"utilization":99}}`, status: 200, manual: true},
+		{name: "manual check canceled before execution", body: `{"five_hour":{"utilization":99}}`, status: 200, manual: true, cancelBefore: true, wantError: true},
+		{name: "manual check new protection during probe", body: `{"five_hour":{"utilization":10}}`, status: 200, manual: true, replace: true, wantError: true},
 		{name: "hysteresis", body: `{"five_hour":{"utilization":94}}`, status: 200},
 		{name: "unknown", body: `{}`, status: 200},
 		{name: "failed", body: `{}`, status: 500},
@@ -1034,9 +1039,13 @@ func TestQuotaRecoveryRechecksWithoutFullInspection(t *testing.T) {
 			}
 			settings := proinspection.DefaultSettings()
 			settings.UsedPercentThreshold = 95
-			settings.AutoExecuteQuotaRecoveryEnable = true
+			settings.AutoExecuteQuotaRecoveryEnable = !tc.manual
 			raw, _ := json.Marshal(settings)
 			hold := prorouting.QuotaProtection{Recheck: true, RetryAt: time.Now().Add(-time.Minute).UnixMilli(), Settings: raw}
+			if tc.manual {
+				hold.Recheck = false
+				hold.RetryAt = 0
+			}
 			if err = m.ChangeQuotaProtection(ctx, a, inspectionQuotaSource, 0, &hold); err != nil {
 				t.Fatal(err)
 			}
@@ -1079,7 +1088,29 @@ func TestQuotaRecoveryRechecksWithoutFullInspection(t *testing.T) {
 			defer func() { http.DefaultTransport = old; transport.CloseIdleConnections() }()
 			s := newAccountInspectionScheduler(&Handler{authManager: m}, nil)
 			s.schedule.Settings = settings
-			s.recoverQuotaProtections(ctx)
+			if tc.manual {
+				checkCtx, cancel := context.WithCancel(ctx)
+				defer cancel()
+				if tc.cancelBefore {
+					cancel()
+				}
+				err := s.checkQuotaRecoveryNow(checkCtx, a)
+				if (err != nil) != tc.wantError {
+					t.Fatalf("manual error=%v wantError=%v", err, tc.wantError)
+				}
+				if tc.cancelBefore {
+					if requests.Load() != 0 {
+						t.Fatal("canceled check sent an upstream request")
+					}
+					return
+				}
+				if requests.Load() == 0 {
+					t.Fatal("completed manual check did not contact upstream")
+				}
+
+			} else {
+				s.recoverQuotaProtections(ctx)
+			}
 			current, _ := m.GetByID(a.ID)
 			after, exists := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]
 			if exists == tc.recovered || current.Disabled != tc.disabled {
@@ -1088,7 +1119,7 @@ func TestQuotaRecoveryRechecksWithoutFullInspection(t *testing.T) {
 			if tc.disabled && requests.Load() != 0 {
 				t.Fatal("manually disabled account was probed")
 			}
-			if !tc.recovered && !tc.disabled && after.RetryAt <= time.Now().UnixMilli() {
+			if !tc.recovered && !tc.disabled && !tc.manual && after.RetryAt <= time.Now().UnixMilli() {
 				t.Fatal("failed/unknown quota caused hot-loop retry")
 			}
 			if tc.replace && after.RetryAt < time.Now().Add(50*time.Minute).UnixMilli() {
@@ -1210,5 +1241,31 @@ func TestQuotaRecoveryRunsOneOfficialXAIProbeWhenAutoRecheckDisabled(t *testing.
 				t.Fatal("completed probe ran more than once")
 			}
 		})
+	}
+}
+
+func TestManualQuotaRecoveryRejectsReplacementBeforeProbe(t *testing.T) {
+	ctx := startProQuotaTestService(t)
+	manager := coreauth.NewManager(nil, nil, nil)
+	old, err := manager.Register(ctx, &coreauth.Auth{ID: "replacement-quota-check", Provider: "claude", FileName: "same.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := manager.Register(ctx, &coreauth.Auth{ID: old.ID, Provider: old.Provider, FileName: old.FileName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.EnsureIndex() != old.EnsureIndex() || current.RegistrationEpoch == old.RegistrationEpoch {
+		t.Fatal("fixture is not a same-index replacement")
+	}
+	raw, _ := json.Marshal(proinspection.DefaultSettings())
+	if err := manager.ChangeQuotaProtection(ctx, current, inspectionQuotaSource, 0, &prorouting.QuotaProtection{Settings: raw}); err != nil {
+		t.Fatal(err)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	scheduler := newAccountInspectionScheduler(&Handler{authManager: manager}, nil)
+	if err := scheduler.checkQuotaRecoveryNow(canceled, old); !errors.Is(err, errAccountInspectionResultStale) {
+		t.Fatalf("old request was not rejected: %v", err)
 	}
 }

@@ -36,7 +36,9 @@ import {
   schedulingBoardResumeTone,
   type SchedulingBoardAccount,
   type SchedulingBoardResponse,
+  type SchedulingRecoveryResult,
 } from '@/pro/modules/routing/routingPolicy';
+import { SchedulingRecoveryActions } from './SchedulingRecoveryActions';
 import { useRoutingAccountPlans } from './useRoutingAccountPlans';
 import { createLatestRequestGate } from '@/pro/modules/routing/latestRequestGate';
 import { buildInspectionFocusLocationState } from '@/pro/shared/inspectionNavigation';
@@ -283,12 +285,14 @@ function SchedulingBoardDetailPanel({
   t,
   language,
   onOpenInspection,
+  onRecovered,
 }: {
   account: SchedulingBoardAccount;
   planLabel: string;
   t: ReturnType<typeof useTranslation>['t'];
   language: string;
   onOpenInspection?: (account: SchedulingBoardAccount) => void;
+  onRecovered: (result: SchedulingRecoveryResult) => void | Promise<void>;
 }) {
   const accountName = account.fileName || account.authIndex || account.authId || '-';
   const tone: ProInformationDetailsTone =
@@ -433,9 +437,10 @@ function SchedulingBoardDetailPanel({
           })}
         </div>
       </section>
+      <SchedulingRecoveryActions account={account} onResult={onRecovered} />
       {account.inspection && onOpenInspection ? (
         <div className={styles.detailActionFooter}>
-          <Button variant="primary" size="sm" onClick={() => onOpenInspection(account)}>
+          <Button variant="secondary" size="sm" onClick={() => onOpenInspection(account)}>
             {t('routing_policy.runtime.open_inspection')}
           </Button>
         </div>
@@ -456,6 +461,7 @@ export function RoutingPolicyPage() {
   const [loading, setLoading] = useState(true);
   const [runtimeError, setRuntimeError] = useState('');
   const [selectedAuthId, setSelectedAuthId] = useState<string | null>(null);
+  const [recoveryOutcome, setRecoveryOutcome] = useState<SchedulingRecoveryResult | null>(null);
 
   const [keyword, setKeyword] = useState('');
   const [providerFilter, setProviderFilter] = useState('all');
@@ -471,6 +477,7 @@ export function RoutingPolicyPage() {
   const setSelectedAccount = useCallback(
     (account: SchedulingBoardAccount | null) => {
       if (account) {
+        setRecoveryOutcome(null);
         setSelectedAuthId(account.authId);
         openSurface('runtime-detail');
       } else if (activeSurface === 'runtime-detail') {
@@ -982,10 +989,16 @@ export function RoutingPolicyPage() {
               t={t}
               language={i18n.language}
               onOpenInspection={openInspection}
+              onRecovered={async (result) => {
+                setRecoveryOutcome(result);
+                await loadBoard();
+              }}
             />
           ) : selectedAuthId ? (
             <p>
-              {t(
+              {recoveryOutcome && !recoveryOutcome.after?.authId
+                ? t('routing_policy.recovery.restored')
+                : t(
                 data
                   ? 'routing_policy.runtime.no_longer_listed'
                   : 'routing_policy.runtime.unavailable'

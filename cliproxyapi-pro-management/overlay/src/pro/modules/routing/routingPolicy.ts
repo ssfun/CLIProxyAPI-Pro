@@ -36,12 +36,14 @@ export interface SchedulingBoardDetail {
   retryAt?: number;
   reason: string;
   httpStatus?: number;
+  revision?: string;
 }
 
 export interface SchedulingBoardAccount {
   provider: string;
   authId: string;
   authIndex: string;
+  registrationEpoch?: string;
   fileName: string;
   scope: SchedulingBoardScope | string;
   models?: string[];
@@ -65,6 +67,35 @@ export interface SchedulingBoardResponse {
   summary: SchedulingBoardSummary;
   accounts: SchedulingBoardAccount[];
 }
+
+export interface SchedulingRecoveryRequest {
+  authId: string;
+  authIndex: string;
+  registrationEpoch: string;
+  source?: 'upstream' | 'inspection';
+  model?: string;
+  revision?: string;
+}
+
+export interface SchedulingRecoveryResult {
+  before?: SchedulingBoardAccount;
+  after?: SchedulingBoardAccount;
+  steps?: string[];
+  test?: {
+    success: boolean;
+    model?: string;
+    latency_ms?: number;
+    error?: string;
+    error_code?: string;
+    http_status?: number;
+  } | null;
+}
+
+export const schedulingRecoveryResultTone = (result: SchedulingRecoveryResult) => {
+  if (result.test?.success === false) return 'error' as const;
+  if (result.after?.authId) return 'warning' as const;
+  return 'success' as const;
+};
 
 type SchedulingBoardRawResponse = {
   generatedAt?: number;
@@ -107,6 +138,10 @@ export const routingPolicyApi = {
       await apiClient.get<SchedulingBoardRawResponse>('/routing-policy', { signal })
     );
   },
+  check: (request: SchedulingRecoveryRequest) =>
+    apiClient.post<SchedulingRecoveryResult>('/routing-policy/check', request, { timeout: 65000 }),
+  release: (request: SchedulingRecoveryRequest) =>
+    apiClient.post<SchedulingRecoveryResult>('/routing-policy/restrictions/release', request),
 };
 
 export const schedulingBoardModelsLabel = (

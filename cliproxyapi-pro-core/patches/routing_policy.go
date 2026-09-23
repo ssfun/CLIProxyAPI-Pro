@@ -2,9 +2,11 @@ package management
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +20,32 @@ import (
 var routingPolicyControllers sync.Map
 
 type routingPolicyController struct {
-	h *Handler
+	h      *Handler
+	mu     sync.Mutex
+	active map[string]struct{}
+}
+
+func beginRoutingRecovery(h *Handler, authID string) (func(), bool) {
+	if h == nil || authID == "" {
+		return nil, false
+	}
+	value, _ := routingPolicyControllers.LoadOrStore(h, &routingPolicyController{h: h})
+	controller := value.(*routingPolicyController)
+	controller.mu.Lock()
+	if _, busy := controller.active[authID]; busy {
+		controller.mu.Unlock()
+		return nil, false
+	}
+	if controller.active == nil {
+		controller.active = make(map[string]struct{})
+	}
+	controller.active[authID] = struct{}{}
+	controller.mu.Unlock()
+	return func() {
+		controller.mu.Lock()
+		delete(controller.active, authID)
+		controller.mu.Unlock()
+	}, true
 }
 
 type routingBoardSummary struct {
@@ -42,28 +69,30 @@ type routingBoardDetail struct {
 	RetryAt    int64  `json:"retryAt,omitempty"`
 	Reason     string `json:"reason"`
 	HTTPStatus int    `json:"httpStatus,omitempty"`
+	Revision   string `json:"revision,omitempty"`
 }
 
 type routingBoardAccount struct {
-	Provider         string               `json:"provider"`
-	AuthID           string               `json:"authId"`
-	AuthIndex        string               `json:"authIndex"`
-	FileName         string               `json:"fileName"`
-	Scope            string               `json:"scope"`
-	Models           []string             `json:"models,omitempty"`
-	Kind             string               `json:"kind"`
-	Bucket           string               `json:"bucket"`
-	Sources          []string             `json:"sources"`
-	Resume           string               `json:"resume"`
-	RetryAt          int64                `json:"retryAt,omitempty"`
-	NextActionAt     int64                `json:"nextActionAt,omitempty"`
-	NextTransitionAt int64                `json:"nextTransitionAt,omitempty"`
-	RemainingSeconds int64                `json:"remainingSeconds,omitempty"`
-	Reason           string               `json:"reason"`
-	HTTPStatus       int                  `json:"httpStatus,omitempty"`
-	Inspection       bool                 `json:"inspection"`
-	Overlap          bool                 `json:"overlap"`
-	Details          []routingBoardDetail `json:"details"`
+	Provider          string               `json:"provider"`
+	AuthID            string               `json:"authId"`
+	AuthIndex         string               `json:"authIndex"`
+	RegistrationEpoch string               `json:"registrationEpoch"`
+	FileName          string               `json:"fileName"`
+	Scope             string               `json:"scope"`
+	Models            []string             `json:"models,omitempty"`
+	Kind              string               `json:"kind"`
+	Bucket            string               `json:"bucket"`
+	Sources           []string             `json:"sources"`
+	Resume            string               `json:"resume"`
+	RetryAt           int64                `json:"retryAt,omitempty"`
+	NextActionAt      int64                `json:"nextActionAt,omitempty"`
+	NextTransitionAt  int64                `json:"nextTransitionAt,omitempty"`
+	RemainingSeconds  int64                `json:"remainingSeconds,omitempty"`
+	Reason            string               `json:"reason"`
+	HTTPStatus        int                  `json:"httpStatus,omitempty"`
+	Inspection        bool                 `json:"inspection"`
+	Overlap           bool                 `json:"overlap"`
+	Details           []routingBoardDetail `json:"details"`
 }
 
 type routingPolicyResponse struct {
@@ -105,6 +134,8 @@ func (h *Handler) RegisterRoutingPolicyRoutes(group *gin.RouterGroup) {
 	group.PATCH("/routing-policy", h.PutRoutingPolicy)
 	group.PUT("/routing-policy/request-protection", h.PutRoutingRequestProtection)
 	group.POST("/routing-policy/release", h.ReleaseRoutingProtectedAuth)
+	group.POST("/routing-policy/check", h.CheckRoutingAccount)
+	group.POST("/routing-policy/restrictions/release", h.ReleaseRoutingRestriction)
 }
 
 func (h *Handler) GetRoutingPolicy(c *gin.Context) {
@@ -124,7 +155,210 @@ func (h *Handler) ReleaseRoutingProtectedAuth(c *gin.Context) {
 }
 
 func writeRetiredRoutingPolicy(c *gin.Context) {
-	c.JSON(http.StatusGone, gin.H{"error": "scheduling board is read-only; inspect and release quota protection from account inspection"})
+	c.JSON(http.StatusGone, gin.H{"error": "routing policy writes are retired; use the scheduling recovery endpoints for directed checks and releases"})
+}
+
+type routingRecoveryRequest struct {
+	AuthID            string `json:"authId"`
+	AuthIndex         string `json:"authIndex"`
+	RegistrationEpoch string `json:"registrationEpoch"`
+	Source            string `json:"source,omitempty"`
+	Model             string `json:"model,omitempty"`
+	Revision          string `json:"revision,omitempty"`
+}
+
+func (h *Handler) routingRecoveryAuth(request routingRecoveryRequest) (*coreauth.Auth, int) {
+	if h == nil || h.authManager == nil {
+		return nil, http.StatusServiceUnavailable
+	}
+	epoch, err := strconv.ParseUint(request.RegistrationEpoch, 10, 64)
+	if request.AuthID == "" || request.AuthIndex == "" || err != nil || epoch == 0 {
+		return nil, http.StatusBadRequest
+	}
+	auth, ok := h.authManager.GetByID(request.AuthID)
+	if !ok || auth == nil || auth.EnsureIndex() != request.AuthIndex || auth.RegistrationEpoch != epoch {
+		return nil, http.StatusConflict
+	}
+	if auth.Disabled || auth.Status == coreauth.StatusDisabled {
+		return nil, http.StatusConflict
+	}
+	return auth, http.StatusOK
+}
+
+func routingRecoveryModel(auth *coreauth.Auth, requested string, details []routingBoardDetail) (string, error) {
+	if requested != "" {
+		return resolveAuthFileConnectionTestModel(auth, requested)
+	}
+	hasModelBlock := false
+	for _, detail := range details {
+		if detail.Source == "upstream" && detail.Scope == "model" && detail.Model != "" {
+			hasModelBlock = true
+			if model, err := resolveAuthFileConnectionTestModel(auth, detail.Model); err == nil {
+				return model, nil
+			}
+		}
+	}
+	if hasModelBlock {
+		return "", errors.New("restricted model has no supported text diagnostic request")
+	}
+	return resolveAuthFileConnectionTestModel(auth, "")
+}
+
+// CheckRoutingAccount operates on the live restriction. Inspection-owned holds
+// use the existing directed quota recovery; upstream failures use a pinned real
+// request whose result is recorded by the native manager.
+func (h *Handler) CheckRoutingAccount(c *gin.Context) {
+	var request routingRecoveryRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	request.AuthID = strings.TrimSpace(request.AuthID)
+	request.AuthIndex = strings.TrimSpace(request.AuthIndex)
+	request.Source = strings.TrimSpace(request.Source)
+	request.Model = strings.TrimSpace(request.Model)
+	auth, status := h.routingRecoveryAuth(request)
+	if status != http.StatusOK {
+		c.JSON(status, gin.H{"error": "account is unavailable or has changed"})
+		return
+	}
+	finish, acquired := beginRoutingRecovery(h, request.AuthID)
+	if !acquired {
+		c.JSON(http.StatusConflict, gin.H{"error": "recovery is already running for this account"})
+		return
+	}
+	defer finish()
+	observedEpoch := auth.RegistrationEpoch
+	before := schedulingBoardAccount(auth, time.Now())
+	if before.AuthID == "" {
+		c.JSON(http.StatusConflict, gin.H{"error": "account is no longer restricted"})
+		return
+	}
+	if request.Source != "" && request.Source != "inspection" && request.Source != "upstream" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid restriction source"})
+		return
+	}
+
+	if request.Source != "" && !containsString(before.Sources, request.Source) {
+		c.JSON(http.StatusConflict, gin.H{"error": "restriction source is no longer active"})
+		return
+	}
+
+	steps := make([]string, 0, 2)
+	var test *authFileConnectionTestResponse
+	if request.Source == "" || request.Source == "inspection" {
+		if _, exists := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]; exists {
+			scheduler := schedulerForHandler(h)
+			if scheduler == nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "quota recovery is unavailable"})
+				return
+			}
+			if err := scheduler.checkQuotaRecoveryNow(c.Request.Context(), auth); err != nil {
+				c.JSON(accountInspectionHTTPStatus(err), gin.H{"error": err.Error()})
+				return
+			}
+			steps = append(steps, "inspection")
+			auth, _ = h.authManager.GetByID(request.AuthID)
+			if auth == nil || auth.EnsureIndex() != request.AuthIndex || auth.RegistrationEpoch != observedEpoch {
+				c.JSON(http.StatusConflict, gin.H{"error": "account changed during recovery"})
+				return
+			}
+		}
+	}
+	// When the quota hold remains, a paid request cannot establish quota
+	// recovery. A caller may explicitly select the upstream source separately.
+	_, stillHeld := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
+	currentBoard := schedulingBoardAccount(auth, time.Now())
+	if (request.Source == "" && !stillHeld || request.Source == "upstream") && containsString(currentBoard.Sources, "upstream") {
+		model, err := routingRecoveryModel(auth, request.Model, currentBoard.Details)
+		if err != nil {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+			return
+		}
+		result := h.testAuthConnection(c.Request.Context(), auth, model)
+		test = &result
+		steps = append(steps, "upstream")
+	}
+	current, ok := h.authManager.GetByID(request.AuthID)
+	if !ok || current == nil || current.EnsureIndex() != request.AuthIndex || current.RegistrationEpoch != observedEpoch {
+		c.JSON(http.StatusConflict, gin.H{"error": "account changed during recovery"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"before": before,
+		"after":  schedulingBoardAccount(current, time.Now()),
+		"steps":  steps,
+		"test":   test,
+	})
+}
+
+func (h *Handler) ReleaseRoutingRestriction(c *gin.Context) {
+	var request routingRecoveryRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	request.AuthID = strings.TrimSpace(request.AuthID)
+	request.AuthIndex = strings.TrimSpace(request.AuthIndex)
+	request.Source = strings.TrimSpace(request.Source)
+	request.Model = strings.TrimSpace(request.Model)
+	auth, status := h.routingRecoveryAuth(request)
+	if status != http.StatusOK {
+		c.JSON(status, gin.H{"error": "account is unavailable or has changed"})
+		return
+	}
+	finish, acquired := beginRoutingRecovery(h, request.AuthID)
+	if !acquired {
+		c.JSON(http.StatusConflict, gin.H{"error": "recovery is already running for this account"})
+		return
+	}
+	defer finish()
+	revision, parseErr := strconv.ParseInt(request.Revision, 10, 64)
+	if parseErr != nil || revision <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "restriction revision is required"})
+		return
+	}
+	var err error
+	switch request.Source {
+	case "inspection":
+		hold, ok := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
+		if !ok || hold.Revision != revision || request.Model != strings.TrimSpace(hold.Model) {
+			c.JSON(http.StatusConflict, gin.H{"error": "restriction changed; refresh and retry"})
+			return
+		}
+		scheduler := schedulerForHandler(h)
+		if scheduler != nil {
+			release, lifecycleErr := scheduler.beginLifecycle()
+			if lifecycleErr != nil {
+				c.JSON(accountInspectionHTTPStatus(lifecycleErr), gin.H{"error": lifecycleErr.Error()})
+				return
+			}
+			defer release()
+		}
+		err = h.authManager.ChangeQuotaProtection(c.Request.Context(), auth, inspectionQuotaSource, revision, nil)
+		if err == nil && scheduler != nil {
+			scheduler.publishQuotaProtectionState(auth.ID, "已手动解除额度保护")
+		}
+	case "upstream":
+		err = h.authManager.ClearSchedulingBlock(c.Request.Context(), auth, request.Model, revision)
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid restriction source"})
+		return
+	}
+	if err != nil {
+		if errors.Is(err, coreauth.ErrQuotaProtectionChanged) || errors.Is(err, coreauth.ErrSchedulingBlockChanged) {
+			c.JSON(http.StatusConflict, gin.H{"error": "restriction changed; refresh and retry"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	current, ok := h.authManager.GetByID(request.AuthID)
+	if !ok || current == nil || current.RegistrationEpoch != auth.RegistrationEpoch {
+		c.JSON(http.StatusConflict, gin.H{"error": "account changed during release"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"after": schedulingBoardAccount(current, time.Now())})
 }
 
 func (h *Handler) routingPolicyResponse() routingPolicyResponse {
@@ -230,23 +464,24 @@ func schedulingBoardAccount(auth *coreauth.Auth, now time.Time) routingBoardAcco
 	upstream := containsString(sources, "upstream")
 	overlap := inspection && upstream
 	account := routingBoardAccount{
-		Provider:         strings.ToLower(strings.TrimSpace(auth.Provider)),
-		AuthID:           auth.ID,
-		AuthIndex:        auth.Index,
-		FileName:         routingProtectionAuthFileName(auth),
-		Scope:            scope,
-		Models:           models,
-		Kind:             kind,
-		Sources:          sources,
-		Resume:           resume,
-		RetryAt:          retryAt,
-		NextActionAt:     nextActionAt,
-		NextTransitionAt: nextTransitionAt,
-		Reason:           reason,
-		HTTPStatus:       httpStatus,
-		Inspection:       inspection,
-		Overlap:          overlap,
-		Details:          details,
+		Provider:          strings.ToLower(strings.TrimSpace(auth.Provider)),
+		AuthID:            auth.ID,
+		AuthIndex:         auth.Index,
+		RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10),
+		FileName:          routingProtectionAuthFileName(auth),
+		Scope:             scope,
+		Models:            models,
+		Kind:              kind,
+		Sources:           sources,
+		Resume:            resume,
+		RetryAt:           retryAt,
+		NextActionAt:      nextActionAt,
+		NextTransitionAt:  nextTransitionAt,
+		Reason:            reason,
+		HTTPStatus:        httpStatus,
+		Inspection:        inspection,
+		Overlap:           overlap,
+		Details:           details,
 	}
 	if retryAt > now.UnixMilli() {
 		remaining := time.UnixMilli(retryAt).Sub(now)
@@ -271,18 +506,25 @@ func schedulingBoardDetails(auth *coreauth.Auth, now time.Time) []routingBoardDe
 		details = append(details, inspectionBoardDetail(hold))
 	}
 	for _, view := range coreauth.SchedulingBlockSnapshotForAuth(auth, now) {
-		details = append(details, upstreamBoardDetail(view))
+		detail := upstreamBoardDetail(view)
+		if detail.Scope == "credential" {
+			detail.Revision = strconv.FormatInt(auth.UpdatedAt.UnixNano(), 10)
+		} else if state := auth.ModelStates[view.ModelKey]; state != nil {
+			detail.Revision = strconv.FormatInt(state.UpdatedAt.UnixNano(), 10)
+		}
+		details = append(details, detail)
 	}
 	return details
 }
 
 func inspectionBoardDetail(hold prorouting.QuotaProtection) routingBoardDetail {
 	detail := routingBoardDetail{
-		Source: "inspection",
-		Scope:  "credential",
-		Kind:   "quota",
-		Resume: "recheck-quota",
-		Reason: strings.TrimSpace(hold.Reason),
+		Source:   "inspection",
+		Scope:    "credential",
+		Kind:     "quota",
+		Resume:   "recheck-quota",
+		Reason:   strings.TrimSpace(hold.Reason),
+		Revision: strconv.FormatInt(hold.Revision, 10),
 	}
 	if hold.Model != "" {
 		detail.Scope = "model"

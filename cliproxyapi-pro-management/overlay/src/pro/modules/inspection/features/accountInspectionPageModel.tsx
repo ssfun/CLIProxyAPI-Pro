@@ -920,6 +920,14 @@ export const buildManualActionItem = (
   actionReason: item.actionReason || action,
 });
 
+export const isSchedulingRecoveryAction = (item: AccountInspectionResultItem) =>
+  item.action === 'enable' && item.quotaCooling === true && !item.disabled;
+
+export const partitionInspectionActionTargets = (items: AccountInspectionResultItem[]) => ({
+  executable: items.filter((item) => !isSchedulingRecoveryAction(item)),
+  recovery: items.filter(isSchedulingRecoveryAction),
+});
+
 export const summaryToneClass: Record<NonNullable<SummaryCard['tone']>, string> = {
   neutral: '',
   good: styles.summaryGood,
