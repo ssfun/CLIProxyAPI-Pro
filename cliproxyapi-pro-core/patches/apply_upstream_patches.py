@@ -5957,16 +5957,15 @@ replace_once(
 ''',
     'coreusage.SkipMonitoringFromContext(ctx)',
 )
+# Anchor on the literal, since new upstream fields change gofmt alignment.
 replace_once(
     redisqueue_plugin,
-    '''\t\tUserAgent:       clientRequestMetadata.UserAgent,
-\t\tTokens:          tokens,
+    '''\tdetail := requestDetail{
 ''',
-    '''\t\tUserAgent:       clientRequestMetadata.UserAgent,
-\t\tAttemptIndex:    record.AttemptIndex,
-\t\tTokens:          tokens,
+    '''\tdetail := requestDetail{
+\t\tAttemptIndex: record.AttemptIndex,
 ''',
-    'AttemptIndex:    record.AttemptIndex',
+    'record.AttemptIndex,',
 )
 replace_once(
     redisqueue_plugin,
