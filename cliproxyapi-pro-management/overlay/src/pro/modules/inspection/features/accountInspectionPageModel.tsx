@@ -134,13 +134,12 @@ export type InspectionSettingsDraft = {
   autoExecuteQuotaLimitDisable: boolean;
   autoExecuteQuotaRecoveryEnable: boolean;
   autoExecuteAccountInvalidAction: AccountInspectionAutoErrorAction;
-  autoExecuteRequestErrorAction: AccountInspectionAutoErrorAction;
   autoExecuteConfirmations: string;
 };
 
 export type InspectionSettingsDraftField = Exclude<
   keyof InspectionSettingsDraft,
-  'antigravityDeepProbeEnabled' | 'antigravityQuotaMode' | 'xaiDeepProbeEnabled' | 'autoExecuteQuotaLimitDisable' | 'autoExecuteQuotaRecoveryEnable' | 'autoExecuteAccountInvalidAction' | 'autoExecuteRequestErrorAction'
+  'antigravityDeepProbeEnabled' | 'antigravityQuotaMode' | 'xaiDeepProbeEnabled' | 'autoExecuteQuotaLimitDisable' | 'autoExecuteQuotaRecoveryEnable' | 'autoExecuteAccountInvalidAction'
 >;
 
 export type ScheduleDraft = {
@@ -1048,7 +1047,6 @@ export const toSettingsDraft = (settings: AccountInspectionConfigurableSettings)
   autoExecuteQuotaLimitDisable: settings.autoExecuteQuotaLimitDisable,
   autoExecuteQuotaRecoveryEnable: settings.autoExecuteQuotaRecoveryEnable,
   autoExecuteAccountInvalidAction: settings.autoExecuteAccountInvalidAction,
-  autoExecuteRequestErrorAction: settings.autoExecuteRequestErrorAction,
   autoExecuteConfirmations: String(settings.autoExecuteConfirmations),
 });
 
@@ -1395,7 +1393,6 @@ const INSPECTION_SETTINGS_DRAFT_KEYS = [
   'autoExecuteQuotaLimitDisable',
   'autoExecuteQuotaRecoveryEnable',
   'autoExecuteAccountInvalidAction',
-  'autoExecuteRequestErrorAction',
   'autoExecuteConfirmations',
 ] as const satisfies readonly (keyof InspectionSettingsDraft)[];
 

@@ -300,6 +300,9 @@ func (s *accountInspectionScheduler) inspectAntigravity(ctx context.Context, acc
 	urls := s.probeCache.antigravityQuotaURLs(time.Now())
 	var priorityStatus *int
 	var priorityDetail string
+	var parseStatus *int
+	var parseError error
+	probeFailed := false
 	for _, url := range urls {
 		resp, err := s.withRetry(ctx, settings.Retries, func() (accountInspectionHTTPResult, error) {
 			return s.apiCall(ctx, account.Auth, http.MethodPost, url, map[string]string{
@@ -309,6 +312,7 @@ func (s *accountInspectionScheduler) inspectAntigravity(ctx context.Context, acc
 			}, body, settings.Timeout)
 		})
 		if err != nil {
+			probeFailed = true
 			continue
 		}
 		status := intPtr(resp.StatusCode)
@@ -322,11 +326,15 @@ func (s *accountInspectionScheduler) inspectAntigravity(ctx context.Context, acc
 			if proinspection.IsAccountErrorStatus(resp.StatusCode) {
 				priorityStatus = status
 				priorityDetail = resp.Body
+			} else {
+				probeFailed = true
 			}
 			continue
 		}
 		groups, err := proinspection.BuildAntigravityGroups(resp.Body)
 		if err != nil {
+			parseStatus = status
+			parseError = err
 			continue
 		}
 		s.probeCache.rememberAntigravityEndpoint(url, time.Now())
@@ -352,6 +360,9 @@ func (s *accountInspectionScheduler) inspectAntigravity(ctx context.Context, acc
 	}
 	if priorityStatus != nil {
 		return proinspection.WithHTTPErrorDetail(authErrorDecision(account, *priorityStatus), priorityDetail), priorityStatus, nil
+	}
+	if parseError != nil && !probeFailed {
+		return accountInspectionDecision{Action: accountInspectionActionKeep, ActionReason: "Antigravity 额度数据无法解析，保留账号", QuotaUnknown: true, Error: parseError.Error()}, parseStatus, nil
 	}
 	return accountInspectionDecision{}, priorityStatus, fmt.Errorf("antigravity quota unavailable")
 }
@@ -742,20 +753,34 @@ func (s *accountInspectionScheduler) inspectXAICLI(ctx context.Context, account 
 	if monthlyResp.StatusCode == http.StatusTooManyRequests && !proinspection.IsXAIQuotaFailure(monthlyResp.Body) {
 		return rateLimitedDecision(monthlyResp.Body), intPtr(monthlyResp.StatusCode), nil
 	}
+	if proinspection.IsAccountErrorStatus(weeklyResp.StatusCode) {
+		return proinspection.WithHTTPErrorDetail(authErrorDecision(account, weeklyResp.StatusCode), weeklyResp.Body), intPtr(weeklyResp.StatusCode), nil
+	}
+	if proinspection.IsAccountErrorStatus(monthlyResp.StatusCode) {
+		return proinspection.WithHTTPErrorDetail(authErrorDecision(account, monthlyResp.StatusCode), monthlyResp.Body), intPtr(monthlyResp.StatusCode), nil
+	}
+	if weeklyErr != nil || monthlyErr != nil {
+		// One parsed window can prove exhaustion, but cannot prove that an
+		// unreadable or unavailable companion window is healthy.
+		used := proquota.XAISummaryUsedPercent(billing)
+		quota := quotaDecision(account, used, used != nil, settings.UsedPercentThreshold)
+		if quota.IsQuota {
+			return quota, status, nil
+		}
+		if weeklyErr != nil && (weeklyResp.StatusCode < 200 || weeklyResp.StatusCode >= 300) {
+			return accountInspectionDecision{}, intPtr(weeklyResp.StatusCode), weeklyErr
+		}
+		if monthlyErr != nil && (monthlyResp.StatusCode < 200 || monthlyResp.StatusCode >= 300) {
+			return accountInspectionDecision{}, intPtr(monthlyResp.StatusCode), monthlyErr
+		}
+		parseError := weeklyErr
+		if parseError == nil {
+			parseError = monthlyErr
+		}
+		return accountInspectionDecision{Action: accountInspectionActionKeep, ActionReason: "xAI billing 数据无法解析，保留账号", QuotaUnknown: true, Error: parseError.Error()}, status, nil
+	}
 	if billing == nil {
-		if proinspection.IsAccountErrorStatus(weeklyResp.StatusCode) {
-			return proinspection.WithHTTPErrorDetail(authErrorDecision(account, weeklyResp.StatusCode), weeklyResp.Body), status, nil
-		}
-		if proinspection.IsAccountErrorStatus(monthlyResp.StatusCode) {
-			return proinspection.WithHTTPErrorDetail(authErrorDecision(account, monthlyResp.StatusCode), monthlyResp.Body), status, nil
-		}
-		if weeklyErr != nil {
-			return accountInspectionDecision{}, status, weeklyErr
-		}
-		if monthlyErr != nil {
-			return accountInspectionDecision{}, status, monthlyErr
-		}
-		return accountInspectionDecision{}, status, fmt.Errorf("empty xai billing config")
+		return accountInspectionDecision{Action: accountInspectionActionKeep, ActionReason: "xAI billing 数据不足，保留账号", QuotaUnknown: true, Error: "empty xai billing config"}, status, nil
 	}
 	if planType, known := xaiPlanTypeFromAccessToken(account.Auth); known {
 		billing["planType"] = planType
@@ -820,8 +845,12 @@ func (s *accountInspectionScheduler) inspectXAICLI(ctx context.Context, account 
 	}))
 	decision := quotaDecision(account, used, used != nil, settings.UsedPercentThreshold)
 	if !freeQuotaCurrent {
-		// A successful Responses request without quota headers confirms only
-		// request health; it cannot turn a stale percentage into quota evidence.
+		// Current Responses auth, quota and health evidence still matters even
+		// when it has no quota headers. A transport failure provides no new
+		// evidence, so retain the incomplete decision without using old quota.
+		if freeProbe != nil && freeProbe.err == nil {
+			return s.applyXAIDeepProbeOutcome(ctx, account, decision, status, *freeProbe)
+		}
 		return decision, status, nil
 	}
 	if settings.XAIDeepProbeEnabled && (freeProbeConfirm || shouldConfirmInspection(ctx, decision)) {

@@ -358,15 +358,6 @@ func IsRequestErrorResult(result Result) bool {
 		result.Error != ""
 }
 
-// AutoActionableRequestError requires evidence attributable to the account before
-// applying the destructive request-error policy. Current request errors only
-// establish that inspection failed (including refresh, transport, schema and
-// provider failures). Account authentication evidence is handled separately by
-// IsAccountInvalidResult; UI request-error classification remains unchanged.
-func AutoActionableRequestError(result Result) bool {
-	return false
-}
-
 func AutoActionForResult(result Result, settings Settings) Action {
 	if result.ErrorCode == "inspection_rate_limited" {
 		return ActionNone
@@ -385,9 +376,6 @@ func AutoActionForResult(result Result, settings Settings) Action {
 	}
 	if IsAccountInvalidResult(result) {
 		return AutoActionForError(result, settings.AutoExecuteAccountInvalidAction)
-	}
-	if AutoActionableRequestError(result) {
-		return AutoActionForError(result, settings.AutoExecuteRequestErrorAction)
 	}
 	if result.Action == ActionDisable && result.IsQuota && settings.AutoExecuteQuotaLimitDisable {
 		return ActionDisable

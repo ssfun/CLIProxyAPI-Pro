@@ -1316,10 +1316,6 @@ export function AccountInspectionPage() {
     AUTO_ERROR_ACTION_OPTIONS.find((option) => option.value === inspectionSettings.autoExecuteAccountInvalidAction)?.labelKey
       ?? 'monitoring.account_inspection_settings_account_error_action_none'
   );
-  const requestErrorActionLabel = t(
-    AUTO_ERROR_ACTION_OPTIONS.find((option) => option.value === inspectionSettings.autoExecuteRequestErrorAction)?.labelKey
-      ?? 'monitoring.account_inspection_settings_account_error_action_none'
-  );
   const scheduleStatusLabel = schedule?.enabled
     ? formatInspectionInterval(schedule.intervalMinutes, i18n.language)
     : settingDisabledLabel;
@@ -1496,15 +1492,6 @@ export function AccountInspectionPage() {
     });
   }, []);
 
-  const handleAutoExecuteRequestErrorActionChange = useCallback((value: string) => {
-    dispatchBackendState({
-      type: 'updateSettingsDraft',
-      values: {
-        autoExecuteRequestErrorAction: normalizeAutoErrorAction(value),
-      },
-    });
-  }, []);
-
   const parseIntegerInRange = useCallback(
     (value: string, label: string, min: number, max?: number) => {
       const parsed = Number(value.trim());
@@ -1584,7 +1571,6 @@ export function AccountInspectionPage() {
         autoExecuteQuotaLimitDisable: settingsDraft.autoExecuteQuotaLimitDisable,
         autoExecuteQuotaRecoveryEnable: settingsDraft.autoExecuteQuotaRecoveryEnable,
         autoExecuteAccountInvalidAction: settingsDraft.autoExecuteAccountInvalidAction,
-        autoExecuteRequestErrorAction: settingsDraft.autoExecuteRequestErrorAction,
         autoExecuteConfirmations: parseIntegerInRange(
           settingsDraft.autoExecuteConfirmations,
           t('monitoring.account_inspection_settings_auto_execute_confirmations_label'),
@@ -1827,10 +1813,6 @@ export function AccountInspectionPage() {
                   <span>
                     <small>{t('monitoring.account_inspection_account_invalid_action_short')}</small>
                     <strong>{accountInvalidActionLabel}</strong>
-                  </span>
-                  <span>
-                    <small>{t('monitoring.account_inspection_request_error_action_short')}</small>
-                    <strong>{requestErrorActionLabel}</strong>
                   </span>
                 </div>
                 <div className={styles.inspectionNextRunText}>
@@ -2794,21 +2776,6 @@ export function AccountInspectionPage() {
                   />
                   <span>{t('monitoring.account_inspection_settings_auto_execute_account_invalid_action_hint')}</span>
                   {settingsDraft.autoExecuteAccountInvalidAction === 'delete' ? (
-                    <div className={styles.settingsDangerNote}>
-                      {t('monitoring.account_inspection_delete_irreversible_warning')}
-                    </div>
-                  ) : null}
-                </div>
-                <div className={styles.settingsRiskPanel}>
-                  <label className={styles.settingsLabel}>{t('monitoring.account_inspection_settings_auto_execute_request_error_action_label')}</label>
-                  <Select
-                    value={settingsDraft.autoExecuteRequestErrorAction}
-                    options={AUTO_ERROR_ACTION_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
-                    onChange={handleAutoExecuteRequestErrorActionChange}
-                    ariaLabel={t('monitoring.account_inspection_settings_auto_execute_request_error_action_label')}
-                  />
-                  <span>{t('monitoring.account_inspection_settings_auto_execute_request_error_action_hint')}</span>
-                  {settingsDraft.autoExecuteRequestErrorAction === 'delete' ? (
                     <div className={styles.settingsDangerNote}>
                       {t('monitoring.account_inspection_delete_irreversible_warning')}
                     </div>

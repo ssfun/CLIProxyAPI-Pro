@@ -24,6 +24,7 @@ import type { TFunction } from 'i18next';
 import {
   buildAccountInspectionBackendViewState,
   DEFAULT_ACCOUNT_INSPECTION_SETTINGS,
+  hasAccountInspectionAutoExecutePolicies,
   isAccountInspectionBackendResponse,
   saveAccountInspectionConfigurableSettings,
   type AccountInspectionResultItem,
@@ -50,6 +51,17 @@ const result = (overrides: Partial<AccountInspectionResultItem> = {}): AccountIn
 });
 
 describe('account inspection page model', () => {
+  test('retires legacy request-error policy from imported and locally saved settings', () => {
+    // Failure matrix: an old delete value alone must not enable automation or survive
+    // save/restore; explicit account-invalid and quota policies must still count.
+    const legacy = { ...DEFAULT_ACCOUNT_INSPECTION_SETTINGS, autoExecuteRequestErrorAction: 'delete' };
+    const settings = saveAccountInspectionConfigurableSettings(legacy);
+    expect(settings).not.toHaveProperty('autoExecuteRequestErrorAction');
+    expect(hasAccountInspectionAutoExecutePolicies(settings)).toBe(false);
+    expect(hasAccountInspectionAutoExecutePolicies({ ...settings, autoExecuteAccountInvalidAction: 'disable' })).toBe(true);
+    expect(hasAccountInspectionAutoExecutePolicies({ ...settings, autoExecuteQuotaLimitDisable: true })).toBe(true);
+  });
+
   test('formats the completed inspection duration from backend run timestamps', () => {
     const labels: Record<string, string> = {
       'monitoring.account_inspection_duration_day': '天',

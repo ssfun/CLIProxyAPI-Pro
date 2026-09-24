@@ -27,7 +27,6 @@ export interface AccountInspectionConfigurableSettings {
   autoExecuteQuotaLimitDisable: boolean;
   autoExecuteQuotaRecoveryEnable: boolean;
   autoExecuteAccountInvalidAction: AccountInspectionAutoErrorAction;
-  autoExecuteRequestErrorAction: AccountInspectionAutoErrorAction;
   autoExecuteConfirmations: number;
 }
 
@@ -326,7 +325,6 @@ export const DEFAULT_ACCOUNT_INSPECTION_SETTINGS: AccountInspectionConfigurableS
   autoExecuteQuotaLimitDisable: false,
   autoExecuteQuotaRecoveryEnable: true,
   autoExecuteAccountInvalidAction: 'none',
-  autoExecuteRequestErrorAction: 'none',
   autoExecuteConfirmations: 1,
 };
 
@@ -456,7 +454,6 @@ const normalizeConfigurableSettings = (
     xaiDeepProbeModel: readStringValue(merged.xaiDeepProbeModel) ||
       DEFAULT_ACCOUNT_INSPECTION_SETTINGS.xaiDeepProbeModel,
     autoExecuteAccountInvalidAction: normalizeAutoErrorAction(merged.autoExecuteAccountInvalidAction),
-    autoExecuteRequestErrorAction: normalizeAutoErrorAction(merged.autoExecuteRequestErrorAction),
     autoExecuteConfirmations: clampInteger(
       normalizeNumberValue(merged.autoExecuteConfirmations),
       DEFAULT_ACCOUNT_INSPECTION_SETTINGS.autoExecuteConfirmations,
@@ -708,5 +705,4 @@ export const isSuggestedAction = (item: AccountInspectionResultItem) => item.sug
 
 export const hasAccountInspectionAutoExecutePolicies = (settings: AccountInspectionConfigurableSettings) =>
   settings.autoExecuteQuotaLimitDisable ||
-  settings.autoExecuteAccountInvalidAction !== 'none' ||
-  settings.autoExecuteRequestErrorAction !== 'none';
+  settings.autoExecuteAccountInvalidAction !== 'none';

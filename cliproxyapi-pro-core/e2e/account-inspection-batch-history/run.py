@@ -229,6 +229,11 @@ try:
     schedule["settings"]["workers"] = 4
     schedule["settings"]["providerWorkers"] = 2
     ok("PUT", "/schedule", schedule)
+    # Legacy schedule and restored backup values must be retired at the HTTP boundary.
+    normalized_schedule = ok("GET", "/status?details=1")["schedule"]
+    assert normalized_schedule["settings"]["autoExecuteRequestErrorAction"] == "none", normalized_schedule
+    assert normalized_schedule["settings"]["autoExecuteAccountInvalidAction"] == "none", normalized_schedule
+    note("legacy_request_error_policy_retired", requested="delete", effective="none")
     ok("POST", "/run", {}, 202)
     initial = wait_until("initial inspection", lambda: ok("GET", "/status?details=1"), lambda body: body["status"]["state"] == "completed")
     a, b, c, d, e, f = (row(f"xai-{letter}.json") for letter in "abcdef")
@@ -244,7 +249,7 @@ try:
     xai_stats = stats["providers"]["xai"]
     assert xai_stats["accounts"] == 10 and xai_stats["httpRequests"] == 10, stats
     assert xai_stats["realProbeRequests"] == 10 and stats["wallTimeMs"] >= 0, stats
-    note("provider_metrics_and_rate_limit", wallTimeMs=stats["wallTimeMs"], provider=xai_stats, rateLimited=limited["errorCode"], autoRequestErrorAction="delete", retained=["xai-i.json", "xai-j.json"])
+    note("provider_metrics_and_rate_limit", wallTimeMs=stats["wallTimeMs"], provider=xai_stats, rateLimited=limited["errorCode"], autoRequestErrorAction="none", retained=["xai-i.json", "xai-j.json"])
 
     # A manual confirmation uses one Responses request for official xAI.
     deep_schedule = ok("GET", "/status?details=1")["schedule"]

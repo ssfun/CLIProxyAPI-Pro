@@ -101,7 +101,7 @@ func (e *xaiInspectionRoutingExecutor) HttpRequest(_ context.Context, _ *coreaut
 	status := http.StatusOK
 	header := make(http.Header)
 	if strings.Contains(req.URL.RawQuery, "format=credits") {
-		body = `{"config":{"period_type":"weekly","usage_percent":10}}`
+		body = `{"config":{"credit_usage_percent":10}}`
 	} else if strings.HasSuffix(req.URL.Path, "/billing") {
 		body = `{"config":{"monthly_limit":0,"used":0}}`
 	} else if strings.HasSuffix(req.URL.Path, "/responses") {

@@ -44,6 +44,7 @@ type Settings struct {
 	AutoExecuteQuotaLimitDisable    bool                 `json:"autoExecuteQuotaLimitDisable"`
 	AutoExecuteQuotaRecoveryEnable  bool                 `json:"autoExecuteQuotaRecoveryEnable"`
 	AutoExecuteAccountInvalidAction Action               `json:"autoExecuteAccountInvalidAction"`
+	// Retained in JSON for old schedules and backups; always normalized to none.
 	AutoExecuteRequestErrorAction   Action               `json:"autoExecuteRequestErrorAction"`
 	AutoExecuteConfirmations        int                  `json:"autoExecuteConfirmations,omitempty"`
 }
@@ -166,7 +167,7 @@ func NormalizeSchedule(input Schedule, now time.Time) Schedule {
 		settings.XAIDeepProbeModel = defaults.XAIDeepProbeModel
 	}
 	settings.AutoExecuteAccountInvalidAction = NormalizeAutoAction(settings.AutoExecuteAccountInvalidAction)
-	settings.AutoExecuteRequestErrorAction = NormalizeAutoAction(settings.AutoExecuteRequestErrorAction)
+	settings.AutoExecuteRequestErrorAction = ActionNone
 	input.Settings = settings
 	if input.IntervalMinutes <= 0 {
 		input.IntervalMinutes = DefaultIntervalMin
