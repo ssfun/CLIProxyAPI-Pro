@@ -6708,13 +6708,74 @@ write(
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_cooldown.go'
 replace_once(
     auth_conductor,
+    '''func (m *Manager) MarkResult(ctx context.Context, result Result) {
+	if result.AuthID == "" {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if m != nil {
+		if policy := m.ResultPolicy(); policy != nil {
+			result = policy.ApplyResultPolicy(ctx, result)
+			if result.AuthID == "" {
+				return
+			}
+		}
+	}
+	modelKey := canonicalModelKey(result.Model)
+''',
+    '''func (m *Manager) markResult(ctx context.Context, result Result) bool {
+	if result.AuthID == "" {
+		return false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// A result policy may alter outcome classification, but cannot discard or
+	// replace a diagnostic's original identity/restriction binding.
+	pinnedIdentity, hasPin := result.Options.Metadata[pinnedResultIdentityKey]
+	pinnedSnapshot := result.Options.Metadata[pinnedResultIdentityKey+".snapshot"]
+	if m != nil {
+		if policy := m.ResultPolicy(); policy != nil {
+			result = policy.ApplyResultPolicy(ctx, result)
+			if result.AuthID == "" {
+				return false
+			}
+		}
+	}
+	if hasPin {
+		identity, validIdentity := pinnedIdentity.(string)
+		snapshot, validSnapshot := pinnedSnapshot.(string)
+		currentIdentity, _ := result.Options.Metadata[pinnedResultIdentityKey].(string)
+		currentSnapshot, _ := result.Options.Metadata[pinnedResultIdentityKey+".snapshot"].(string)
+		if !validIdentity || !validSnapshot || identity == "" || snapshot == "" || identity != currentIdentity || snapshot != currentSnapshot {
+			return false
+		}
+	}
+	modelKey := canonicalModelKey(result.Model)
+''',
+    'func (m *Manager) markResult(ctx context.Context, result Result) bool',
+)
+replace_once(
+    auth_conductor,
+    '\tm.updateSessionAffinity(result)\n}\n\nfunc (m *Manager) updateSessionAffinity',
+    '\tm.updateSessionAffinity(result)\n\treturn authSnapshot != nil\n}\n\nfunc (m *Manager) updateSessionAffinity',
+    'return authSnapshot != nil',
+)
+replace_once(
+    auth_conductor,
     '''\tm.mu.Lock()
 \tif auth, ok := m.auths[result.AuthID]; ok && auth != nil {
 \t\tif modelKey == ""''',
     '''\tm.mu.Lock()
-\tif auth, ok := m.auths[result.AuthID]; ok && auth != nil && pinnedResultIdentityMatches(result, auth) {
+\tif !pinnedResultIdentityMatches(result, m.auths[result.AuthID]) {
+\t\tm.mu.Unlock()
+\t\treturn false
+\t}
+\tif auth, ok := m.auths[result.AuthID]; ok && auth != nil {
 \t\tif modelKey == ""''',
-    'pinnedResultIdentityMatches(result, auth)',
+    'pinnedResultIdentityMatches(result, m.auths[result.AuthID])',
 )
 replace_once(
     auth_conductor,

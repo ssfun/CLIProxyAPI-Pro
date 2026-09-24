@@ -30,6 +30,34 @@ func (m *Manager) pinnedCurrentIdentityMatches(auth *Auth) bool {
 
 const pinnedResultIdentityKey = "pro.pinned_auth_identity"
 
+// BindPinnedResult captures the observed identity and restrictions before I/O.
+// Only digests enter result metadata; never rebuild this binding after a probe.
+func BindPinnedResult(observed *Auth, result Result) Result {
+	if observed != nil {
+		result.AuthID = observed.ID
+		result.Provider = observed.Provider
+	}
+	result.Options = pinnedResultOptions(result.Options, observed)
+	return result
+}
+
+// MarkResult retains the upstream API for ordinary request accounting.
+func (m *Manager) MarkResult(ctx context.Context, result Result) {
+	m.markResult(ctx, result)
+}
+
+// MarkPinnedResult reports whether the bound result was accepted atomically.
+// Recovery must not release its protection when the observed state is stale.
+func (m *Manager) MarkPinnedResult(ctx context.Context, result Result) bool {
+	if m == nil {
+		return false
+	}
+	if _, bound := result.Options.Metadata[pinnedResultIdentityKey]; !bound {
+		return false
+	}
+	return m.markResult(ctx, result)
+}
+
 func pinnedResultOptions(opts cliproxyexecutor.Options, auth *Auth) cliproxyexecutor.Options {
 	result := opts
 	result.Metadata = make(map[string]any, len(opts.Metadata)+1)

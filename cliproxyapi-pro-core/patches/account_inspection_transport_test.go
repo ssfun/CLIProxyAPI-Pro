@@ -1237,11 +1237,10 @@ func TestQuotaRecoveryRunsOneOfficialXAIProbeWhenAutoRecheckDisabled(t *testing.
 		name, body   string
 		status       int
 		requestError error
-		wantQuota    bool
 		wantRetained bool
 	}{
 		{name: "success", status: http.StatusOK, body: `{"id":"chatcmpl-test","choices":[]}`},
-		{name: "quota", status: http.StatusTooManyRequests, body: `{"error":{"message":"quota exceeded"}}`, wantQuota: true},
+		{name: "quota", status: http.StatusTooManyRequests, body: `{"error":{"message":"quota exceeded"}}`, wantRetained: true},
 		{name: "transport error", requestError: errors.New("probe unavailable"), wantRetained: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1270,12 +1269,14 @@ func TestQuotaRecoveryRunsOneOfficialXAIProbeWhenAutoRecheckDisabled(t *testing.
 			if retained != tc.wantRetained {
 				t.Fatalf("inspection protection retained = %v, want %v", retained, tc.wantRetained)
 			}
+			if retained {
+				hold := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]
+				if hold.RetryAt <= time.Now().UnixMilli() || hold.Model != "" || !prorouting.ProtectionBlocks(hold, "grok-3", time.Now()) {
+					t.Fatalf("retained account-wide hold has no future retry or lost model coverage: %+v", hold)
+				}
+			}
 			if len(executor.requests) != 1 || !strings.HasSuffix(executor.requests[0].URL.Path, "/chat/completions") {
 				t.Fatalf("probe requests = %#v", executor.requests)
-			}
-			state := current.ModelStates["grok-4.5"]
-			if tc.wantQuota && (state == nil || !state.Quota.Exceeded || !state.NextRetryAfter.After(time.Now())) {
-				t.Fatalf("upstream quota cooldown = %+v", state)
 			}
 			scheduler.recoverQuotaProtections(ctx)
 			if len(executor.requests) != 1 {

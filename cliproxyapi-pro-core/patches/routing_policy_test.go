@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -737,6 +738,248 @@ func TestRoutingRecoveryPreservesQuotaSuccessWhenUpstreamTimesOut(t *testing.T) 
 	current, _ := manager.GetByID(auth.ID)
 	if _, held := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]; held {
 		t.Fatal("successful quota stage did not release its protection")
+	}
+}
+
+type xaiRecoveryResultHook struct {
+	coreauth.NoopHook
+	results atomic.Int32
+}
+
+func (h *xaiRecoveryResultHook) OnResult(context.Context, coreauth.Result) { h.results.Add(1) }
+
+type controlledXAIRecoveryExecutor struct {
+	xaiInspectionRoutingExecutor
+	started chan struct{}
+	release chan struct{}
+}
+
+func (e *controlledXAIRecoveryExecutor) HttpRequest(ctx context.Context, auth *coreauth.Auth, req *http.Request) (*http.Response, error) {
+	if strings.HasSuffix(req.URL.Path, "/chat/completions") && e.started != nil {
+		e.started <- struct{}{}
+		select {
+		case <-e.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return e.xaiInspectionRoutingExecutor.HttpRequest(ctx, auth, req)
+}
+
+type xaiRoutingRecoveryFixture struct {
+	ctx      context.Context
+	manager  *coreauth.Manager
+	auth     *coreauth.Auth
+	executor *controlledXAIRecoveryExecutor
+	hook     *xaiRecoveryResultHook
+	router   *gin.Engine
+}
+
+func newXAIRoutingRecoveryFixture(t *testing.T, status int, body string, blocked bool) xaiRoutingRecoveryFixture {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	ctx := startProQuotaTestService(t)
+	hook := &xaiRecoveryResultHook{}
+	manager := coreauth.NewManager(nil, nil, hook)
+	executor := &controlledXAIRecoveryExecutor{}
+	executor.officialStatus = status
+	executor.officialBody = body
+	if blocked {
+		executor.started = make(chan struct{}, 1)
+		executor.release = make(chan struct{})
+	}
+	manager.RegisterExecutor(executor)
+	auth, err := manager.Register(ctx, &coreauth.Auth{
+		ID: "xai-recovery-" + t.Name(), FileName: "xai-recovery.json", Provider: "xai",
+		Attributes: map[string]string{"api_key": "test-token", "base_url": "https://api.x.ai/v1", "using_api": "true"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := proinspection.DefaultSettings()
+	settings.AutoExecuteQuotaRecoveryEnable = false
+	settings.XAIDeepProbeModel = "grok-4.5"
+	raw, _ := json.Marshal(settings)
+	if err := manager.ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, 0, &prorouting.QuotaProtection{
+		Recheck: false, RetryAt: time.Now().Add(-time.Minute).UnixMilli(), Settings: raw,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	auth, _ = manager.GetByID(auth.ID)
+	h := &Handler{authManager: manager}
+	scheduler := newAccountInspectionScheduler(h, nil)
+	scheduler.schedule.Settings = settings
+	accountInspectionSchedulers.Store(h, scheduler)
+	t.Cleanup(func() { accountInspectionSchedulers.Delete(h) })
+	router := gin.New()
+	h.RegisterRoutingPolicyRoutes(router.Group("/"))
+	return xaiRoutingRecoveryFixture{ctx: ctx, manager: manager, auth: auth, executor: executor, hook: hook, router: router}
+}
+
+func (f xaiRoutingRecoveryFixture) check() *httptest.ResponseRecorder {
+	request := routingRecoveryRequest{AuthID: f.auth.ID, AuthIndex: f.auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(f.auth.RegistrationEpoch, 10), Source: "inspection"}
+	body, _ := json.Marshal(request)
+	recorder := httptest.NewRecorder()
+	f.router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/routing-policy/check", strings.NewReader(string(body))))
+	return recorder
+}
+
+func (f xaiRoutingRecoveryFixture) startCheck(t *testing.T) <-chan *httptest.ResponseRecorder {
+	t.Helper()
+	finished := make(chan *httptest.ResponseRecorder, 1)
+	go func() { finished <- f.check() }()
+	select {
+	case <-f.executor.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("official xAI recovery probe did not start")
+	}
+	return finished
+}
+
+func finishXAIRoutingCheck(t *testing.T, f xaiRoutingRecoveryFixture, finished <-chan *httptest.ResponseRecorder) *httptest.ResponseRecorder {
+	t.Helper()
+	close(f.executor.release)
+	select {
+	case response := <-finished:
+		return response
+	case <-time.After(2 * time.Second):
+		t.Fatal("official xAI recovery probe did not finish")
+		return nil
+	}
+}
+
+func TestXAIRoutingRecoveryKeepsNewerModelCooldown(t *testing.T) {
+	for _, stripMetadata := range []bool{false, true} {
+		name := "default policy"
+		if stripMetadata {
+			name = "result policy strips metadata"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newXAIRoutingRecoveryFixture(t, http.StatusOK, `{"id":"chatcmpl-test","choices":[]}`, true)
+			finished := f.startCheck(t)
+			f.manager.MarkResult(f.ctx, coreauth.Result{AuthID: f.auth.ID, Provider: "xai", Model: "grok-4.5", Success: false, Error: &coreauth.Error{HTTPStatus: http.StatusTooManyRequests, Message: "newer quota failure"}})
+			before, _ := f.manager.GetByID(f.auth.ID)
+			state := before.ModelStates["grok-4.5"]
+			if state == nil || !state.NextRetryAfter.After(time.Now()) {
+				t.Fatalf("newer native cooldown was not established: %+v", state)
+			}
+			resultCount := f.hook.results.Load()
+			if stripMetadata {
+				f.manager.SetResultPolicy(coreauth.ResultPolicyFunc(func(_ context.Context, result coreauth.Result) coreauth.Result {
+					result.Options.Metadata = nil
+					return result
+				}))
+			}
+			response := finishXAIRoutingCheck(t, f, finished)
+			after, _ := f.manager.GetByID(f.auth.ID)
+			hold, held := prorouting.QuotaProtections(after.Metadata)[inspectionQuotaSource]
+			if response.Code != http.StatusOK || after.ModelStates["grok-4.5"] == nil || !after.ModelStates["grok-4.5"].NextRetryAfter.Equal(state.NextRetryAfter) || f.hook.results.Load() != resultCount || !held || hold.Revision == 0 {
+				t.Fatalf("old success changed newer failure, emitted result or released hold: response=%s state=%+v hold=%+v hooks=%d/%d", response.Body.String(), after.ModelStates["grok-4.5"], hold, f.hook.results.Load(), resultCount)
+			}
+		})
+	}
+}
+
+func TestXAIRoutingRecoveryRejectsReplacementIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		apiKey string
+	}{
+		{name: "new credential", apiKey: "replacement-token"},
+		{name: "same credential new registration", apiKey: "test-token"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newXAIRoutingRecoveryFixture(t, http.StatusOK, `{"id":"chatcmpl-test","choices":[]}`, true)
+			finished := f.startCheck(t)
+			replacement, err := f.manager.Register(f.ctx, &coreauth.Auth{
+				ID: f.auth.ID, FileName: f.auth.FileName, Provider: "xai",
+				Attributes:  map[string]string{"api_key": tc.apiKey, "base_url": "https://api.x.ai/v1", "using_api": "true"},
+				ModelStates: map[string]*coreauth.ModelState{"grok-4.5": {Unavailable: true, Status: coreauth.StatusError, NextRetryAfter: time.Now().Add(time.Hour)}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if replacement.RegistrationEpoch == f.auth.RegistrationEpoch {
+				t.Fatal("fixture did not replace registration identity")
+			}
+			replacement, _ = f.manager.GetByID(f.auth.ID)
+			existing := prorouting.QuotaProtections(replacement.Metadata)[inspectionQuotaSource]
+			if existing.Revision == 0 {
+				t.Fatal("replacement lost the test protection before the old probe returned")
+			}
+			newHold := prorouting.QuotaProtection{RetryAt: time.Now().Add(time.Hour).UnixMilli(), Reason: "replacement hold"}
+			if err := f.manager.ChangeQuotaProtection(f.ctx, replacement, inspectionQuotaSource, existing.Revision, &newHold); err != nil {
+				t.Fatal(err)
+			}
+			before, _ := f.manager.GetByID(f.auth.ID)
+			count := f.hook.results.Load()
+			response := finishXAIRoutingCheck(t, f, finished)
+			after, _ := f.manager.GetByID(f.auth.ID)
+			oldHold := prorouting.QuotaProtections(before.Metadata)[inspectionQuotaSource]
+			remaining := prorouting.QuotaProtections(after.Metadata)[inspectionQuotaSource]
+			if response.Code != http.StatusConflict || remaining.Revision != oldHold.Revision || !reflect.DeepEqual(after.ModelStates, before.ModelStates) || after.Generation != before.Generation || f.hook.results.Load() != count {
+				t.Fatalf("old probe changed replacement: response=%s before=%+v after=%+v hooks=%d/%d", response.Body.String(), before, after, f.hook.results.Load(), count)
+			}
+		})
+	}
+}
+
+func TestXAIRoutingRecoveryRetainsChangedHoldRevision(t *testing.T) {
+	f := newXAIRoutingRecoveryFixture(t, http.StatusOK, `{"id":"chatcmpl-test","choices":[]}`, true)
+	finished := f.startCheck(t)
+	current, _ := f.manager.GetByID(f.auth.ID)
+	previous := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]
+	newHold := previous
+	newHold.RetryAt = time.Now().Add(time.Hour).UnixMilli()
+	if err := f.manager.ChangeQuotaProtection(f.ctx, current, inspectionQuotaSource, previous.Revision, &newHold); err != nil {
+		t.Fatal(err)
+	}
+	current, _ = f.manager.GetByID(f.auth.ID)
+	newHold = prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]
+	response := finishXAIRoutingCheck(t, f, finished)
+	current, _ = f.manager.GetByID(f.auth.ID)
+	remaining := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]
+	if response.Code != http.StatusOK || remaining.Revision != newHold.Revision || remaining.RetryAt != newHold.RetryAt {
+		t.Fatalf("old probe released newer hold: response=%s hold=%+v", response.Body.String(), remaining)
+	}
+}
+
+func TestXAIRoutingRecoveryRetainsAccountHoldOnFailedProbe(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+	}{
+		{name: "quota 429", status: http.StatusTooManyRequests},
+		{name: "unsupported model 400", status: http.StatusBadRequest},
+		{name: "unsupported model 404", status: http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newXAIRoutingRecoveryFixture(t, tc.status, `{"error":{"message":"model unavailable"}}`, false)
+			response := f.check()
+			current, _ := f.manager.GetByID(f.auth.ID)
+			hold, exists := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]
+			if response.Code != http.StatusOK || !exists || hold.RetryAt <= time.Now().UnixMilli() || hold.Failures == 0 || hold.Model != "" || !prorouting.ProtectionBlocks(hold, "grok-4.5", time.Now()) || !prorouting.ProtectionBlocks(hold, "grok-3", time.Now()) {
+				t.Fatalf("failed probe narrowed account hold: response=%s hold=%+v", response.Body.String(), hold)
+			}
+			if current.Quota.Exceeded && current.Quota.Reason == "credential_quota" {
+				t.Fatalf("model/request error escalated credential quota: %+v", current.Quota)
+			}
+		})
+	}
+}
+
+func TestXAIRoutingRecoveryReleasesObservedHoldOnSuccess(t *testing.T) {
+	f := newXAIRoutingRecoveryFixture(t, http.StatusOK, `{"id":"chatcmpl-test","choices":[]}`, false)
+	response := f.check()
+	current, _ := f.manager.GetByID(f.auth.ID)
+	if response.Code != http.StatusOK || len(f.executor.requests) != 1 {
+		t.Fatalf("official success did not complete: %s requests=%d", response.Body.String(), len(f.executor.requests))
+	}
+	if _, exists := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]; exists {
+		t.Fatalf("successful probe did not release observed hold: %s", response.Body.String())
+	}
+	if current.Quota.Exceeded {
+		t.Fatalf("successful probe changed native credential quota: %+v", current.Quota)
 	}
 }
 

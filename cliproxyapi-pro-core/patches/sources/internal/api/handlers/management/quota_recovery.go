@@ -400,11 +400,16 @@ func (s *accountInspectionScheduler) recoverQuotaWithProbeRequest(ctx context.Co
 		return err
 	}
 	defer release()
+	model := strings.TrimSpace(settings.XAIDeepProbeModel)
+	if model == "" {
+		model = "grok-4.5"
+	}
+	probeResult := coreauth.BindPinnedResult(auth, coreauth.Result{Model: model})
 	result := s.inspectAccount(probeCtx, accountFromAuth(auth), settings)
 	if probeCtx.Err() != nil {
 		return probeCtx.Err()
 	}
-	current, err := s.actionAuthForResult(result)
+	_, err = s.actionAuthForResult(result)
 	if err != nil {
 		return err
 	}
@@ -414,26 +419,25 @@ func (s *accountInspectionScheduler) recoverQuotaWithProbeRequest(ctx context.Co
 	}
 	succeeded := statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices && result.Error == "" && result.ErrorCode == "" && !result.IsQuota
 	failedWithResponse := statusCode >= http.StatusMultipleChoices
-	completed := succeeded || failedWithResponse
 	var next *prorouting.QuotaProtection
-	if completed {
-		model := strings.TrimSpace(settings.XAIDeepProbeModel)
-		if model == "" {
-			model = "grok-4.5"
-		}
-		probeResult := coreauth.Result{AuthID: current.ID, Provider: current.Provider, Model: model, Success: succeeded}
+	if succeeded || failedWithResponse {
+		probeResult.Success = succeeded
 		if !succeeded {
 			message := firstNonEmptyStringValue(result.ErrorCode, result.Error, result.ActionReason, http.StatusText(statusCode))
 			probeResult.Error = &coreauth.Error{HTTPStatus: statusCode, Message: message}
 		}
-		s.inspectionAuthManager().MarkResult(ctx, probeResult)
-		current, _ = s.inspectionAuthManager().GetByID(auth.ID)
-	} else {
+		if !s.inspectionAuthManager().MarkPinnedResult(ctx, probeResult) {
+			return coreauth.ErrSchedulingBlockChanged
+		}
+	}
+	// A failed request is not evidence that account-wide quota recovered.
+	// Keep the original scope even when native accounting adds a model cooldown.
+	if !succeeded {
 		hold.Failures++
 		hold.RetryAt = prorouting.NextRecheckAt(0, auth.ID, hold.Failures, time.Now())
 		next = &hold
 	}
-	if err := s.inspectionAuthManager().ChangeQuotaProtection(ctx, current, inspectionQuotaSource, hold.Revision, next); err != nil {
+	if err := s.inspectionAuthManager().ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, hold.Revision, next); err != nil {
 		return err
 	}
 	updated, _ := s.inspectionAuthManager().GetByID(auth.ID)
@@ -444,9 +448,9 @@ func (s *accountInspectionScheduler) recoverQuotaWithProbeRequest(ctx context.Co
 	case succeeded:
 		result.ActionReason = "真实请求验证成功，解除额度保护"
 		s.appendLog("success", fmt.Sprintf("%s 真实请求验证成功，已解除调度保护", proinspection.ResultIdentity(result)))
-	case completed:
-		result.ActionReason = "真实请求验证失败，已交由上游冷却"
-		s.appendLog("warning", fmt.Sprintf("%s 真实请求验证失败，已转入上游冷却", proinspection.ResultIdentity(result)))
+	case failedWithResponse:
+		result.ActionReason = "真实请求验证失败，保留额度保护并等待下次重试"
+		s.appendLog("warning", fmt.Sprintf("%s 真实请求验证失败，保留额度保护", proinspection.ResultIdentity(result)))
 	default:
 		result.ActionReason = "真实请求验证未完成，等待下次重试"
 	}
