@@ -66,7 +66,7 @@ export const formatAccountInspectionDuration = (
   return parts.map((part) => t(part.key, { count: part.value })).join('');
 };
 
-export type ResultHealthStatus = 'healthy' | 'disabled' | 'authInvalid' | 'quotaExhausted' | 'inspectionError' | 'recoverable' | 'unknown' | 'deleted';
+export type ResultHealthStatus = 'healthy' | 'disabled' | 'authInvalid' | 'quotaExhausted' | 'inspectionError' | 'recoverable' | 'unknown';
 
 export type ResultStatusFilter = 'all' | 'accountIssues' | 'quotaChanges' | 'highAvailable' | 'unknown';
 
@@ -88,7 +88,6 @@ export type HealthCounts = {
   inspectionError: number;
   recoverable: number;
   unknown: number;
-  deleted: number;
 };
 
 export type InspectionLogEntry = {
@@ -283,7 +282,6 @@ export const healthToneClass: Record<ResultHealthStatus, string> = {
   inspectionError: styles.healthError,
   recoverable: styles.healthRecoverable,
   unknown: styles.healthQuota,
-  deleted: styles.healthDisabled,
 };
 
 const healthLabelKey: Record<ResultHealthStatus, string> = {
@@ -294,7 +292,6 @@ const healthLabelKey: Record<ResultHealthStatus, string> = {
   inspectionError: 'monitoring.account_inspection_account_request_error',
   recoverable: 'monitoring.account_inspection_health_recoverable',
   unknown: 'monitoring.account_inspection_health_unknown',
-  deleted: 'monitoring.account_inspection_effect_delete',
 };
 
 const extractHealthHttpStatusCode = (item: AccountInspectionResultItem) => {
@@ -314,10 +311,12 @@ export const buildHealthStatusLabel = (
   healthStatus: ResultHealthStatus,
   t: TFunction
 ) => {
-  if (healthStatus === 'deleted') return t('monitoring.account_inspection_effect_delete');
   const label = t(healthLabelKey[healthStatus]);
   const code = buildHealthStatusCodeText(item);
-  return code ? `${label} · ${code}` : label;
+  const observed = code ? `${label} · ${code}` : label;
+  return item.executedEffect === 'delete'
+    ? `${observed} · ${t('monitoring.account_inspection_effect_delete')}`
+    : observed;
 };
 
 const parseInspectionErrorPayload = (value: string): unknown => {
@@ -382,7 +381,6 @@ export const isResultRequestError = (item: AccountInspectionResultItem) => {
 };
 
 export const resolveResultHealthStatus = (item: AccountInspectionResultItem): ResultHealthStatus => {
-  if (item.executedEffect === 'delete') return 'deleted';
   if (item.errorCode === 'inspection_incomplete') return 'unknown';
   if (item.isQuota) return 'quotaExhausted';
   if (isResultAccountInvalid(item)) return 'authInvalid';
@@ -460,7 +458,6 @@ export function InspectionErrorDetailsPanel({
     authInvalid: 'danger',
     inspectionError: 'danger',
     unknown: 'warning',
-    deleted: 'neutral',
   };
 
   return (
@@ -484,7 +481,7 @@ export function InspectionErrorDetailsPanel({
   );
 }
 
-const ACCOUNT_INVALID_ERROR_STATUSES = new Set([400, 401, 403, 404]);
+const ACCOUNT_INVALID_ERROR_STATUSES = new Set([401, 403]);
 export const ACCOUNT_INSPECTION_SUPPORTED_PROVIDER_SET = new Set<string>(ACCOUNT_INSPECTION_SUPPORTED_PROVIDERS);
 
 const readAuthFileField = (file: AuthFileItem, key: string) =>
@@ -840,7 +837,6 @@ const emptyHealthCounts = (): HealthCounts => ({
   inspectionError: 0,
   recoverable: 0,
   unknown: 0,
-  deleted: 0,
 });
 
 const getManualActionsByHealthStatus = (
@@ -937,9 +933,6 @@ export const buildInspectionResultsViewState = (items: AccountInspectionResultIt
         healthCounts.unknown += 1;
         filterRowCounts.unknown += 1;
         row = pushResultRow(filterRows.unknown, item, healthStatus, row);
-        break;
-      case 'deleted':
-        healthCounts.deleted += 1;
         break;
     }
 
@@ -1135,7 +1128,6 @@ const formatInspectionVerdictPrimary = (
   healthStatus: ResultHealthStatus,
   t: TFunction
 ) => {
-  if (healthStatus === 'deleted') return t('monitoring.account_inspection_effect_delete');
   if (item.tokenRefreshStatus === 'failed') return t('monitoring.account_inspection_verdict_token_refresh_failed');
 
   switch (healthStatus) {

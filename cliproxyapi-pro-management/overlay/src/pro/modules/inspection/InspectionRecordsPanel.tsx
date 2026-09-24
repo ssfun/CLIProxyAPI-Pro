@@ -13,6 +13,20 @@ const KNOWN_OPERATION_ACTIONS = new Set([
   'delete', 'recovery_check', 'unknown',
 ]);
 
+type RestrictionEvidence = { source: string; model?: string; revision?: string; active: boolean };
+
+function RestrictionSnapshot({ restriction }: { restriction: RestrictionEvidence }) {
+  const { t } = useTranslation();
+  return <p className={styles.recordEvidence}>{t('monitoring.account_inspection_operation_restriction_scope', {
+    source: restriction.source,
+    model: restriction.model || '-',
+    revision: restriction.revision || '-',
+    state: t(restriction.active
+      ? 'monitoring.account_inspection_operation_restriction_active'
+      : 'monitoring.account_inspection_operation_restriction_cleared'),
+  })}</p>;
+}
+
 const formatRecordTime = (timestamp: number | undefined, language: string, missing: string) =>
   timestamp && Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString(language) : missing;
 
@@ -139,6 +153,8 @@ export function InspectionRecordsPanel({ item }: { item: AccountInspectionResult
               <summary>
                 <strong>{record.effect === 'token_refresh' || record.action === 'token_refresh' || record.action === 'refresh'
                   ? t('monitoring.account_inspection_operation_refresh')
+                  : record.effect === 'manual_release_inspection' || record.effect === 'manual_release_upstream'
+                    ? t('routing_policy.recovery.manual_title')
                   : record.effect === 'recover' || record.action === 'recover'
                     ? t('monitoring.account_inspection_batch_group_recovery_check')
                     : KNOWN_OPERATION_ACTIONS.has(record.effect || record.action)
@@ -153,9 +169,11 @@ export function InspectionRecordsPanel({ item }: { item: AccountInspectionResult
                 {record.batchOperationId ? <p>{t('monitoring.account_inspection_operation_batch_id')}: {record.batchOperationId}</p> : null}
                 {record.error ? <p className={styles.inspectionStatusError}>{record.error}</p> : null}
                 <strong>{t('monitoring.account_inspection_operation_before')}</strong>
+                {record.restrictionBefore ? <RestrictionSnapshot restriction={record.restrictionBefore} /> : null}
                 {record.before?.resultRef || record.before?.key
                   ? <EvidenceSnapshot item={record.before} /> : <p>{t('monitoring.account_inspection_record_evidence_missing')}</p>}
                 <strong>{t('monitoring.account_inspection_operation_after')}</strong>
+                {record.restrictionAfter ? <RestrictionSnapshot restriction={record.restrictionAfter} /> : null}
                 {record.after?.resultRef || record.after?.key
                   ? <EvidenceSnapshot item={record.after} /> : <p>{t('monitoring.account_inspection_operation_after_missing')}</p>}
               </div>

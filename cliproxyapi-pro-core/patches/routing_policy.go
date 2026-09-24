@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	proinspection "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/inspection"
 	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
@@ -263,7 +264,7 @@ func (h *Handler) CheckRoutingAccount(c *gin.Context) {
 	if request.Source != "" && (request.Model != "" || request.Revision != "") {
 		found := false
 		for _, detail := range before.Details {
-			if detail.Source == request.Source && detail.Model == request.Model && (request.Revision == "" || detail.Revision == request.Revision) {
+			if detail.Source == request.Source && (request.Model == "" && request.Revision == "" || detail.Model == request.Model) && (request.Revision == "" || detail.Revision == request.Revision) {
 				found = true
 				break
 			}
@@ -290,7 +291,7 @@ func (h *Handler) CheckRoutingAccount(c *gin.Context) {
 				after := scheduler.currentInspectionEvidence(evidence.Key)
 				var operationErr error
 				current, ok := h.authManager.GetByID(request.AuthID)
-				if !ok || current == nil || current.RegistrationEpoch != observedEpoch || schedulingBoardAccount(current, time.Now()).AuthID != "" || c.Writer.Status() >= 400 {
+				if !ok || current == nil || current.RegistrationEpoch != observedEpoch || routingRecoveryScopeActive(schedulingBoardAccount(current, time.Now()), request) || c.Writer.Status() >= 400 {
 					operationErr = errors.New("recovery did not complete")
 				}
 				for _, phase := range phases {
@@ -365,6 +366,51 @@ func (h *Handler) CheckRoutingAccount(c *gin.Context) {
 	writeResult()
 }
 
+// A directed recovery only owns the observed restriction; unrelated model or
+// source restrictions must not change the result of that operation.
+func routingRecoveryScopeActive(board routingBoardAccount, request routingRecoveryRequest) bool {
+	if request.Source == "" {
+		return board.AuthID != ""
+	}
+	for _, detail := range board.Details {
+		if detail.Source == request.Source && (request.Model == "" && request.Revision == "" || detail.Model == request.Model) && (request.Revision == "" || detail.Revision == request.Revision) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *accountInspectionScheduler) setRoutingOperationScope(id string, request routingRecoveryRequest, before, after *routingBoardAccount) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.operations {
+		if s.operations[i].OperationID != id {
+			continue
+		}
+		state := func(board *routingBoardAccount) *proinspection.OperationRestriction {
+			state := &proinspection.OperationRestriction{Source: inspectionEvidenceText(request.Source, 32), Model: inspectionEvidenceText(request.Model, 256), Revision: inspectionEvidenceText(request.Revision, 32)}
+			for _, detail := range board.Details {
+				if detail.Source == request.Source && detail.Model == request.Model {
+					state.Active = true
+					if after != nil {
+						state.Revision = detail.Revision
+					}
+					break
+				}
+			}
+			return state
+		}
+		if before != nil {
+			s.operations[i].RestrictionBefore = state(before)
+		}
+		if after != nil {
+			s.operations[i].RestrictionAfter = state(after)
+		}
+		break
+	}
+	return s.saveEvidenceLocked()
+}
+
 func (h *Handler) ReleaseRoutingRestriction(c *gin.Context) {
 	var request routingRecoveryRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -390,6 +436,45 @@ func (h *Handler) ReleaseRoutingRestriction(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "restriction revision is required"})
 		return
 	}
+	if request.Source != "inspection" && request.Source != "upstream" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid restriction source"})
+		return
+	}
+	scheduler := schedulerForHandler(h)
+	if scheduler == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "operation audit is unavailable"})
+		return
+	}
+	before := scheduler.currentInspectionEvidence(accountFromAuth(auth).Key)
+	auditID, auditErr := scheduler.beginInspectionOperation("recovery", "manual_release_"+request.Source, before)
+	if auditErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist release intent"})
+		return
+	}
+	boardBefore := schedulingBoardAccount(auth, time.Now())
+	if err := scheduler.setRoutingOperationScope(auditID, request, &boardBefore, nil); err != nil {
+		_ = scheduler.finishInspectionOperation(auditID, &before, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist release scope"})
+		return
+	}
+	defer func() {
+		after := scheduler.currentInspectionEvidence(before.Key)
+		var operationErr error
+		boardAfter := routingBoardAccount{}
+		current, ok := h.authManager.GetByID(request.AuthID)
+		if ok && current != nil {
+			boardAfter = schedulingBoardAccount(current, time.Now())
+		}
+		if !ok || current == nil || current.RegistrationEpoch != auth.RegistrationEpoch || c.Writer.Status() >= 400 || routingRecoveryScopeActive(boardAfter, request) {
+			operationErr = errors.New("restriction release did not complete")
+		}
+		if err := scheduler.setRoutingOperationScope(auditID, request, nil, &boardAfter); err != nil {
+			scheduler.appendLog("error", "release scope audit persistence failed")
+		}
+		if err := scheduler.finishInspectionOperation(auditID, &after, operationErr); err != nil {
+			scheduler.appendLog("error", "release audit persistence failed")
+		}
+	}()
 	var err error
 	switch request.Source {
 	case "inspection":

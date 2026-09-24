@@ -125,6 +125,8 @@ export type AccountInspectionHistoryResponse = {
 };
 
 export type AccountInspectionOperationRecord = {
+  restrictionBefore?: { source: string; model?: string; revision?: string; active: boolean };
+  restrictionAfter?: { source: string; model?: string; revision?: string; active: boolean };
   batchOperationId?: string;
   operationId: string;
   source: 'manual' | 'automatic' | 'batch' | 'recovery';

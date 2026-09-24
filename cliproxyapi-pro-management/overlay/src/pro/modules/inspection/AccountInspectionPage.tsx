@@ -18,7 +18,6 @@ import { getAuthFileIcon } from '@/features/authFiles/constants';
 import {
   ACCOUNT_INSPECTION_ALL_PROVIDER_TYPE,
   accountInspectionBackendResultToItem,
-  buildAccountInspectionBackendViewState,
   buildExecutionFailureMessage,
   DEFAULT_ACCOUNT_INSPECTION_SETTINGS,
   hasAccountInspectionAutoExecutePolicies,
@@ -37,7 +36,6 @@ import { InspectionRecordsPanel } from './InspectionRecordsPanel';
 import { ProDetailDialog, ProSettingsSheet } from '@/pro/shared/ProSurface';
 import { useProSurfaceState } from '@/pro/shared/useProSurfaceState';
 import {
-  ACCOUNT_INSPECTION_ACTION_PAGE_SIZE,
   ACCOUNT_INSPECTION_AUTH_FILES_IDLE_DELAY_MS,
   ACCOUNT_INSPECTION_EXPORT_DOWNLOAD_CONCURRENCY,
   ACCOUNT_INSPECTION_LOG_PAGE_SIZE,
@@ -61,8 +59,6 @@ import {
   buildHighAvailabilityBarStyle,
   buildInspectionResultsViewState,
   buildManualActionItem,
-  collectActionableInspectionResults,
-  countActions,
   createEmptyAuthFileAccountStats,
   createInspectionBackendState,
   formatActionLabel,
@@ -85,7 +81,6 @@ import {
   isInspectableAccountInspectionAuthFile,
   isSchedulingRecoveryAction,
   levelClassMap,
-  partitionInspectionActionTargets,
   resolveAccountInspectionAccountLabel,
   resolveAccountInspectionPlanLabel,
   resolveResultHealthStatus,
@@ -224,7 +219,6 @@ export function AccountInspectionPage() {
   const [authFileStats, setAuthFileStats] = useState<AuthFileAccountStats>(() => createEmptyAuthFileAccountStats());
   const [authFileStatsReady, setAuthFileStatsReady] = useState(false);
   const [executing, setExecuting] = useState(false);
-  const [loadingFullInspectionDetails, setLoadingFullInspectionDetails] = useState(false);
   const [recheckingKey, setRecheckingKey] = useState<string | null>(null);
   const [selectedResultKeys, setSelectedResultKeys] = useState<Set<string>>(() => new Set());
   const [resultBulkAction, setResultBulkAction] = useState<ResultBulkAction>('suggested');
@@ -867,70 +861,6 @@ export function AccountInspectionPage() {
     }
   }, [activeResultFilter, resultPage, resultPageSize, resultPendingOnly, resultSearch, selectedResultProvider]);
 
-  const handleExecutePlanned = useCallback(() => {
-    if (!result) return;
-
-    const confirmTargets = (targets: AccountInspectionResultItem[]) => {
-      const { executable, recovery } = partitionInspectionActionTargets(targets);
-      if (recovery.length > 0) {
-        showNotification(t(executable.length > 0
-          ? 'routing_policy.recovery.bulk_skipped'
-          : 'routing_policy.recovery.bulk_notice', { count: recovery.length }), 'info');
-      }
-      if (executable.length === 0) return;
-      const counts = countActions(executable);
-      showConfirmation({
-        dedupeKey: `account-inspection:execute:${executable.map((item) => `${item.key}:${item.action}`).sort().join('|')}`,
-        title: t('monitoring.account_inspection_execute_confirm_title'),
-        message: buildExecuteConfirmationMessage(
-          executable,
-          t
-        ),
-        confirmText: t('monitoring.account_inspection_execute_confirm_button', {
-          count: executable.length,
-        }),
-        cancelText: t('common.cancel'),
-        variant: counts.delete > 0 ? 'danger' : 'primary',
-        onConfirm: () => executeItems(executable),
-      });
-    };
-
-    const loadPendingTargets = async () => {
-      const targets: AccountInspectionResultItem[] = [];
-      let page = 1;
-      for (;;) {
-        const response = await accountInspectionApi.getStatus({
-          includeDetails: true,
-          resultFilter: 'pending',
-          resultProvider: selectedResultProvider,
-          resultPage: page,
-          resultPageSize: ACCOUNT_INSPECTION_ACTION_PAGE_SIZE,
-          logPage: 1,
-          logPageSize: 1,
-        });
-        const pageResult = buildAccountInspectionBackendViewState(response).result;
-        targets.push(...collectActionableInspectionResults(pageResult?.results ?? []));
-        const pageInfo = response.status.resultsPage;
-        if (!pageInfo?.hasMore) break;
-        page += 1;
-      }
-      return targets;
-    };
-
-    setLoadingFullInspectionDetails(true);
-    void loadPendingTargets()
-      .then((targets) => {
-        const counts = countActions(targets);
-        if (counts.delete + counts.disable + counts.enable <= 0) {
-          showNotification(t('monitoring.account_inspection_no_pending_actions'), 'info');
-          return;
-        }
-        confirmTargets(targets);
-      })
-      .catch((error) => handleAccountInspectionControlError(error, appendLog, showNotification, t('common.unknown_error')))
-      .finally(() => setLoadingFullInspectionDetails(false));
-  }, [appendLog, executeItems, result, selectedResultProvider, showConfirmation, showNotification, t]);
-
   const handleExecuteSingle = useCallback(
     (item: AccountInspectionResultItem, manualAction?: ManualAccountInspectionAction, isSuggestedOverride = false) => {
       const target = manualAction
@@ -1165,6 +1095,33 @@ export function AccountInspectionPage() {
     }
   }, [activeResultFilter, batchOperations, confirmBatch, connectionStatus, restoredSnapshot, resultBulkAction, resultBulkScope, resultPendingOnly, resultSearch, runStatus, selectedResultProvider, selectedVisibleResultRows, showNotification, t]);
 
+  const handleExecutePlanned = useCallback(async () => {
+    if (!result || restoredSnapshot || runStatus === 'running' || batchOperations.some((operation) => operation.state === 'running')) return;
+    if (connectionStatus !== 'connected') {
+      showNotification(t('notification.connection_required'), 'warning');
+      return;
+    }
+    setBulkActionLoading(true);
+    setBatchError('');
+    try {
+      const operation = await accountInspectionApi.preflightBatch('action', {
+        type: 'filtered',
+        filter: activeResultFilter,
+        provider: selectedResultProvider,
+        search: resultSearch,
+        pendingOnly: true,
+        suggested: true,
+      });
+      confirmBatch([operation], 'filtered');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setBatchError(message);
+      showNotification(message, 'error');
+    } finally {
+      setBulkActionLoading(false);
+    }
+  }, [activeResultFilter, batchOperations, confirmBatch, connectionStatus, restoredSnapshot, result, resultSearch, runStatus, selectedResultProvider, showNotification, t]);
+
   const handleRetryBatchFailures = useCallback(async (operationId: string) => {
     setBulkActionLoading(true);
     setBatchError('');
@@ -1327,7 +1284,7 @@ export function AccountInspectionPage() {
   }, []);
 
   const operationPhase = useMemo(() => {
-    if (executing || loadingFullInspectionDetails) return t('monitoring.account_inspection_phase_executing');
+    if (executing || bulkActionLoading) return t('monitoring.account_inspection_phase_executing');
     if (runStatus === 'paused') return t('monitoring.account_inspection_phase_paused');
     if (runStatus === 'running') {
       if (progress.completed <= 0 && progress.inFlight <= 0) {
@@ -1341,7 +1298,7 @@ export function AccountInspectionPage() {
     if (result && pendingActionCount > 0) return t('monitoring.account_inspection_phase_review');
     if (result) return t('monitoring.account_inspection_phase_completed');
     return t('monitoring.account_inspection_phase_idle');
-  }, [executing, loadingFullInspectionDetails, pendingActionCount, progress.completed, progress.inFlight, result, runStatus, t]);
+  }, [bulkActionLoading, executing, pendingActionCount, progress.completed, progress.inFlight, result, runStatus, t]);
 
   const resultEmptyMessage = runStatus === 'running'
     ? t('monitoring.account_inspection_results_generating')
@@ -1918,12 +1875,13 @@ export function AccountInspectionPage() {
                       <Button
                         variant="primary"
                         size="sm"
-                        onClick={handleExecutePlanned}
-                        loading={executing || loadingFullInspectionDetails}
-                        disabled={restoredSnapshot || !result || runStatus === 'running' || executing || loadingFullInspectionDetails || pendingActionCount === 0}
+                        onClick={() => void handleExecutePlanned()}
+                        loading={bulkActionLoading || executing}
+                        disabled={!batchHydrated || restoredSnapshot || !result || runStatus === 'running' || executing || bulkActionLoading || batchOperations.some((operation) => operation.state === 'running') || pendingActionCount === 0}
                       >
-                        {executing || loadingFullInspectionDetails ? t('monitoring.account_inspection_executing') : t('monitoring.account_inspection_execute_now')}
+                        {bulkActionLoading || executing ? t('monitoring.account_inspection_executing') : t('monitoring.account_inspection_execute_now')}
                       </Button>
+                      <small>{t('monitoring.account_inspection_execute_filtered_hint')}</small>
                     </div>
                   </div>
                 ) : (

@@ -237,19 +237,26 @@ func (s *accountInspectionScheduler) executeRecordedInspectionAction(ctx context
 		return err
 	}
 	err = s.executeResolvedAction(ctx, result, settings, action, suggested, workers)
-	after := *result
+	executed := *result
+	executed.Action = action
 	if err == nil {
-		after.ExecutedAt = time.Now().UnixMilli()
-		after.ExecutedAction = action
-		after.ExecutedEffect = proinspection.EffectForAction(action, suggested && (before.IsQuota && action == accountInspectionActionDisable || before.QuotaCooling && action == accountInspectionActionEnable))
-		after.Executed = true
+		quotaSuggestion := before.IsQuota && action == accountInspectionActionDisable || before.QuotaCooling && action == accountInspectionActionEnable
+		executed.ExecutedAt = time.Now().UnixMilli()
+		executed.ExecutedAction = action
+		executed.ExecutedEffect = proinspection.EffectForAction(action, suggested && quotaSuggestion)
+		executed.ExecutedSuggested = suggested
+		executed.Executed = suggested || action == before.Action && !quotaSuggestion
+		executed.ExecuteError = ""
 		if action == accountInspectionActionDisable && !(suggested && before.IsQuota) {
-			after.Disabled = true
+			executed.Disabled = true
 		}
 		if action == accountInspectionActionEnable && !(suggested && before.QuotaCooling) {
-			after.Disabled = false
+			executed.Disabled = false
 		}
+	} else {
+		executed.ExecuteError = err.Error()
 	}
+	after, _ := proinspection.MergeManualActionResult(before, executed)
 	// A journal write failure must not turn a completed destructive action into a
 	// retryable failure. Its last persisted running record is interrupted on restart.
 	if saveErr := s.finishInspectionOperation(id, &after, err); saveErr != nil {

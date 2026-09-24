@@ -21,18 +21,27 @@ const (
 	RunStateFailed    RunState = "failed"
 )
 
+type OperationRestriction struct {
+	Source   string `json:"source"`
+	Model    string `json:"model,omitempty"`
+	Revision string `json:"revision,omitempty"`
+	Active   bool   `json:"active"`
+}
+
 type OperationRecord struct {
-	BatchOperationID string  `json:"batchOperationId,omitempty"`
-	OperationID      string  `json:"operationId"`
-	Source           string  `json:"source"`
-	Action           string  `json:"action"`
-	Effect           string  `json:"effect"`
-	Status           string  `json:"status"`
-	StartedAt        int64   `json:"startedAt"`
-	FinishedAt       int64   `json:"finishedAt,omitempty"`
-	Before           Result  `json:"before"`
-	After            *Result `json:"after,omitempty"`
-	Error            string  `json:"error,omitempty"`
+	RestrictionBefore *OperationRestriction `json:"restrictionBefore,omitempty"`
+	RestrictionAfter  *OperationRestriction `json:"restrictionAfter,omitempty"`
+	BatchOperationID  string                `json:"batchOperationId,omitempty"`
+	OperationID       string                `json:"operationId"`
+	Source            string                `json:"source"`
+	Action            string                `json:"action"`
+	Effect            string                `json:"effect"`
+	Status            string                `json:"status"`
+	StartedAt         int64                 `json:"startedAt"`
+	FinishedAt        int64                 `json:"finishedAt,omitempty"`
+	Before            Result                `json:"before"`
+	After             *Result               `json:"after,omitempty"`
+	Error             string                `json:"error,omitempty"`
 }
 
 type ResultSnapshot struct {

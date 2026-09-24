@@ -91,6 +91,10 @@ func TestRoutingRecoveryReleaseOnlySelectedSourceAndRejectsStaleRevision(t *test
 		t.Fatalf("missing revisions: %+v", before.Details)
 	}
 	h := &Handler{authManager: manager}
+	t.Setenv("ACCOUNT_INSPECTION_SNAPSHOT_PATH", t.TempDir()+"/snapshot.json")
+	scheduler := newAccountInspectionScheduler(h, nil)
+	accountInspectionSchedulers.Store(h, scheduler)
+	t.Cleanup(func() { accountInspectionSchedulers.Delete(h) })
 	router := gin.New()
 	h.RegisterRoutingPolicyRoutes(router.Group("/"))
 	send := func(request routingRecoveryRequest) *httptest.ResponseRecorder {
@@ -535,6 +539,7 @@ func TestRoutingInspectionReleaseImmediatelyUpdatesStatus(t *testing.T) {
 	auth, _ = manager.GetByID(auth.ID)
 	hold := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
 	h := &Handler{authManager: manager}
+	t.Setenv("ACCOUNT_INSPECTION_SNAPSHOT_PATH", t.TempDir()+"/snapshot.json")
 	scheduler := newAccountInspectionScheduler(h, nil)
 	accountInspectionSchedulers.Store(h, scheduler)
 	t.Cleanup(func() { accountInspectionSchedulers.Delete(h) })
@@ -606,6 +611,10 @@ func TestRoutingReleaseUsesNormalizedHistoricalModelStateKey(t *testing.T) {
 		t.Fatalf("details=%+v", board.Details)
 	}
 	h := &Handler{authManager: manager}
+	t.Setenv("ACCOUNT_INSPECTION_SNAPSHOT_PATH", t.TempDir()+"/snapshot.json")
+	scheduler := newAccountInspectionScheduler(h, nil)
+	accountInspectionSchedulers.Store(h, scheduler)
+	t.Cleanup(func() { accountInspectionSchedulers.Delete(h) })
 	router := gin.New()
 	h.RegisterRoutingPolicyRoutes(router.Group("/"))
 	body, _ := json.Marshal(routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10), Source: "upstream", Model: board.Details[0].Model, Revision: board.Details[0].Revision})
@@ -708,6 +717,7 @@ func TestRoutingRecoveryPreservesQuotaSuccessWhenUpstreamTimesOut(t *testing.T) 
 	http.DefaultTransport = transport
 	defer func() { http.DefaultTransport = previousTransport; transport.CloseIdleConnections() }()
 	h := &Handler{authManager: manager, configFilePath: t.TempDir() + "/config.yaml"}
+	t.Setenv("ACCOUNT_INSPECTION_SNAPSHOT_PATH", t.TempDir()+"/snapshot.json")
 	scheduler := newAccountInspectionScheduler(h, nil)
 	accountInspectionSchedulers.Store(h, scheduler)
 	t.Cleanup(func() { accountInspectionSchedulers.Delete(h) })
@@ -807,6 +817,7 @@ func newXAIRoutingRecoveryFixture(t *testing.T, status int, body string, blocked
 	}
 	auth, _ = manager.GetByID(auth.ID)
 	h := &Handler{authManager: manager, configFilePath: t.TempDir() + "/config.yaml"}
+	t.Setenv("ACCOUNT_INSPECTION_SNAPSHOT_PATH", t.TempDir()+"/snapshot.json")
 	scheduler := newAccountInspectionScheduler(h, nil)
 	scheduler.schedule.Settings = settings
 	accountInspectionSchedulers.Store(h, scheduler)
@@ -1008,6 +1019,10 @@ func TestRoutingTargetedModelCheckPreservesOtherRestrictions(t *testing.T) {
 	auth, _ = manager.GetByID(auth.ID)
 	hold := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
 	h := &Handler{authManager: manager}
+	t.Setenv("ACCOUNT_INSPECTION_SNAPSHOT_PATH", t.TempDir()+"/snapshot.json")
+	scheduler := newAccountInspectionScheduler(h, nil)
+	accountInspectionSchedulers.Store(h, scheduler)
+	t.Cleanup(func() { accountInspectionSchedulers.Delete(h) })
 	router := gin.New()
 	h.RegisterRoutingPolicyRoutes(router.Group("/"))
 	body, _ := json.Marshal(routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10), Source: "upstream", Model: modelB, Revision: strconv.FormatInt(now.UnixNano(), 10)})
@@ -1016,5 +1031,59 @@ func TestRoutingTargetedModelCheckPreservesOtherRestrictions(t *testing.T) {
 	current, _ := manager.GetByID(auth.ID)
 	if recorder.Code != 200 || executor.lastModel != modelB || current.ModelStates[modelB].Unavailable || !current.ModelStates[modelA].Unavailable || prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource].Revision != hold.Revision {
 		t.Fatalf("targeted result=%s model=%s", recorder.Body.String(), executor.lastModel)
+	}
+	if len(scheduler.operations) != 1 || scheduler.operations[0].Status != "succeeded" {
+		t.Fatalf("targeted successful recovery audit = %+v", scheduler.operations)
+	}
+}
+
+// Failure cases: stale revision must record failure without mutation; successful
+// release must retain scope/version evidence; journal intent failure must prevent
+// release; a completed release must never become retryable on journal failure.
+func TestRoutingReleaseOperationAudit(t *testing.T) {
+	for _, source := range []string{"inspection", "upstream"} {
+		for _, stale := range []bool{false, true} {
+			t.Run(source+strconv.FormatBool(stale), func(t *testing.T) {
+				ctx := startProQuotaTestService(t)
+				manager := coreauth.NewManager(nil, nil, nil)
+				now := time.Now()
+				auth, err := manager.Register(ctx, &coreauth.Auth{ID: "release-audit", Provider: "codex", ModelStates: map[string]*coreauth.ModelState{"model-b": {Status: coreauth.StatusError, Unavailable: true, NextRetryAfter: now.Add(time.Hour), UpdatedAt: now}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				model, revision := "model-b", now.UnixNano()
+				if source == "inspection" {
+					if err := manager.ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, 0, &prorouting.QuotaProtection{RetryAt: now.Add(time.Hour).UnixMilli()}); err != nil {
+						t.Fatal(err)
+					}
+					auth, _ = manager.GetByID(auth.ID)
+					model, revision = "", prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource].Revision
+				}
+				if stale {
+					revision++
+				}
+				h := &Handler{authManager: manager}
+				t.Setenv("ACCOUNT_INSPECTION_SNAPSHOT_PATH", t.TempDir()+"/snapshot.json")
+				scheduler := newAccountInspectionScheduler(h, nil)
+				accountInspectionSchedulers.Store(h, scheduler)
+				t.Cleanup(func() { accountInspectionSchedulers.Delete(h) })
+				router := gin.New()
+				h.RegisterRoutingPolicyRoutes(router.Group("/"))
+				body, _ := json.Marshal(routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10), Source: source, Model: model, Revision: strconv.FormatInt(revision, 10)})
+				recorder := httptest.NewRecorder()
+				router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/routing-policy/restrictions/release", strings.NewReader(string(body))))
+				wantCode, wantStatus := http.StatusOK, "succeeded"
+				if stale {
+					wantCode, wantStatus = http.StatusConflict, "failed"
+				}
+				if recorder.Code != wantCode || len(scheduler.operations) != 1 {
+					t.Fatalf("response=%s operations=%+v", recorder.Body.String(), scheduler.operations)
+				}
+				record := scheduler.operations[0]
+				if record.Status != wantStatus || record.Effect != "manual_release_"+source || record.RestrictionBefore == nil || record.RestrictionBefore.Model != model || record.RestrictionBefore.Revision != strconv.FormatInt(revision, 10) || record.RestrictionAfter == nil {
+					t.Fatalf("audit=%+v", record)
+				}
+			})
+		}
 	}
 }
