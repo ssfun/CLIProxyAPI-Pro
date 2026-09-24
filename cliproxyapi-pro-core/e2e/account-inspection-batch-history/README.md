@@ -6,6 +6,15 @@ Build the server from a clean Core upstream checkout with this repository's curr
 INSPECTION_SERVER=/absolute/path/to/server python3 cliproxyapi-pro-core/e2e/account-inspection-batch-history/run.py
 ```
 
+Core Validate runs the bounded HTTP subset after building the patched server:
+
+```sh
+INSPECTION_SERVER=/absolute/path/to/server INSPECTION_E2E_OUTPUT=/absolute/path/to/output \
+  python3 cliproxyapi-pro-core/e2e/account-inspection-batch-history/run.py --ci-fast
+```
+
+The CI subset checks old `ResultRef` rejection, execute-time staleness, retry rebinding, quota protection, explicit quota override resolution, an old delete batch blocked by a newer manual disable, administrative disable, completion after an HTTP disconnect, retained delete evidence, bounded concurrent reinspection, and evidence redaction. Quota recovery probing, restart recovery, and journal write-failure injection remain in the full run. In Validate, `result.json` and `server.log` are uploaded with Core validation diagnostics.
+
 The script uses four disposable xAI auth files and a local fake upstream. It allocates local ports, starts and stops Core, resets only its own output directory's `auth/` and `usage/`, and writes a repeatable receipt to `/private/tmp/inspection-batch-history-e2e/result.json`. Set `INSPECTION_E2E_OUTPUT` to use another output directory. It requires no live provider credentials.
 
 ## Failure cases checked
@@ -19,6 +28,7 @@ The script uses four disposable xAI auth files and a local fake upstream. It all
 7. Killing Core during a blocked provider probe and restarting marks the running batch `interrupted`; the same operation cannot replay.
 8. Making the evidence journal unwritable prevents a direct delete; restoring it permits exactly one delete and one operation record.
 9. The persisted evidence omits test credentials and uses mode `0600`.
+10. Three held probes for one provider overlap at two concurrent requests and never exceed the configured per-provider limit.
 
 The output directory contains `server.log`, the generated fixture, and `result.json`. The result records step receipts, operation IDs, the binary SHA256, and any coverage gaps. Tests do not depend on the browser or the full repository E2E suite.
 

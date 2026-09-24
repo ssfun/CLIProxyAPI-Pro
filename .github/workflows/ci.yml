@@ -354,6 +354,7 @@ jobs:
           VALIDATION_ARTIFACT_DIR: ${{ runner.temp }}/core-validation-artifacts
           VALIDATION_RACE: "1"
           VALIDATION_STATICCHECK: "1"
+          VALIDATION_INSPECTION_E2E: "1"
         run: bash customizations-repo/scripts/validation/core.sh upstream-core
 
       - name: Upload Core validation diagnostics

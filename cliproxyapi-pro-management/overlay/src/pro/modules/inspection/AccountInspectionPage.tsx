@@ -178,14 +178,6 @@ export function AccountInspectionPage() {
   const [selectedDetailResult, setSelectedDetailResultState] = useState<AccountInspectionResultItem | null>(null);
   const [selectedRecoveryResult, setSelectedRecoveryResult] = useState<AccountInspectionResultItem | null>(null);
   const { activeSurface, openSurface, closeSurface } = useProSurfaceState<'settings' | 'detail' | 'recovery'>();
-  const openRecoveryForItem = useCallback((item: AccountInspectionResultItem) => {
-    if (!item.authId || !item.authIndex) {
-      showNotification(t('routing_policy.recovery.unavailable_version'), 'info');
-      return;
-    }
-    setSelectedRecoveryResult(item);
-    openSurface('recovery');
-  }, [openSurface, showNotification, t]);
   const isSettingsModalOpen = activeSurface === 'settings';
   const setIsSettingsModalOpen = useCallback((open: boolean) => {
     if (open) openSurface('settings');
@@ -227,6 +219,18 @@ export function AccountInspectionPage() {
   const [batchOperations, setBatchOperations] = useState<AccountInspectionBatchOperation[]>([]);
   const [batchError, setBatchError] = useState('');
   const [batchHydrated, setBatchHydrated] = useState(false);
+  const [scopedPending, setScopedPending] = useState<{ key: string; count: number } | null>(null);
+  const batchRunning = batchOperations.some((operation) => operation.state === 'running');
+  const singleMutationBlocked = !batchHydrated || batchRunning;
+  const openRecoveryForItem = useCallback((item: AccountInspectionResultItem) => {
+    if (singleMutationBlocked) return;
+    if (!item.authId || !item.authIndex) {
+      showNotification(t('routing_policy.recovery.unavailable_version'), 'info');
+      return;
+    }
+    setSelectedRecoveryResult(item);
+    openSurface('recovery');
+  }, [openSurface, showNotification, singleMutationBlocked, t]);
   const batchStorageKey = useMemo(() => {
     let hash = 2166136261;
     for (const char of `${apiBase}\0${managementKey}`) {
@@ -721,6 +725,7 @@ export function AccountInspectionPage() {
 
   const executeItems = useCallback(
     async (items: AccountInspectionResultItem[]) => {
+      if (singleMutationBlocked) return;
       if (restoredSnapshot) {
         showNotification(t('monitoring.account_inspection_restored_snapshot_action_blocked'), 'warning');
         return;
@@ -782,7 +787,7 @@ export function AccountInspectionPage() {
         setExecuting(false);
       }
     },
-    [appendLog, applyBackendResponse, currentInspectionDetailOptions, loadAuthFiles, restoredSnapshot, result, showNotification, t]
+    [appendLog, applyBackendResponse, currentInspectionDetailOptions, loadAuthFiles, restoredSnapshot, result, showNotification, singleMutationBlocked, t]
   );
 
   const allResults = useMemo(
@@ -847,6 +852,34 @@ export function AccountInspectionPage() {
   const visibleLogs = filteredLogs;
   const resultPagination = getPaginationRange(resultPageInfo, visibleResultRows.length);
   const logPagination = getPaginationRange(logPageInfo, visibleLogs.length);
+  const scopedPendingKey = JSON.stringify([
+    activeResultFilter, selectedResultProvider, resultSearch,
+    result?.finishedAt, result?.summary.pendingActionCount,
+  ]);
+  const scopedPendingCount = scopedPending?.key === scopedPendingKey ? scopedPending.count : null;
+  const hasResult = Boolean(result);
+
+  useEffect(() => {
+    if (!hasResult || connectionStatus !== 'connected') return;
+    const controller = new AbortController();
+    void accountInspectionApi.getStatus({
+      includeDetails: true,
+      resultPage: 1,
+      resultPageSize: 1,
+      logPageSize: 1,
+      resultFilter: activeResultFilter,
+      resultProvider: selectedResultProvider,
+      resultSearch,
+      resultPendingOnly: true,
+    }, controller.signal).then((response) => {
+      if (!controller.signal.aborted && response.status.resultsPage) {
+        setScopedPending({ key: scopedPendingKey, count: response.status.resultsPage.total });
+      }
+    }).catch(() => {
+      // The button performs its own fresh count check; a transient read failure need not block it.
+    });
+    return () => controller.abort();
+  }, [activeResultFilter, connectionStatus, hasResult, resultSearch, scopedPendingKey, selectedResultProvider]);
 
   useEffect(() => {
     if (!selectAllResultsRef.current) return;
@@ -865,6 +898,7 @@ export function AccountInspectionPage() {
 
   const handleExecuteSingle = useCallback(
     (item: AccountInspectionResultItem, manualAction?: ManualAccountInspectionAction, isSuggestedOverride = false) => {
+      if (singleMutationBlocked) return;
       const target = manualAction
         ? { ...buildManualActionItem(item, manualAction), suggested: isSuggestedOverride }
         : { ...item, suggested: true };
@@ -887,11 +921,12 @@ export function AccountInspectionPage() {
         onConfirm: () => executeItems([target]),
       });
     },
-    [executeItems, showConfirmation, t]
+    [executeItems, showConfirmation, singleMutationBlocked, t]
   );
 
   const handleRecheckSingle = useCallback(
     async (item: AccountInspectionResultItem) => {
+      if (singleMutationBlocked) return;
       if (restoredSnapshot) {
         showNotification(t('monitoring.account_inspection_restored_snapshot_action_blocked'), 'warning');
         return;
@@ -920,7 +955,7 @@ export function AccountInspectionPage() {
         setRecheckingKey(null);
       }
     },
-    [appendLog, applyBackendResponse, connectionStatus, currentInspectionDetailOptions, restoredSnapshot, showNotification, t]
+    [appendLog, applyBackendResponse, connectionStatus, currentInspectionDetailOptions, restoredSnapshot, showNotification, singleMutationBlocked, t]
   );
 
   const toggleResultSelection = useCallback((key: string, selected: boolean) => {
@@ -1117,6 +1152,21 @@ export function AccountInspectionPage() {
     setBulkActionLoading(true);
     setBatchError('');
     try {
+      const current = await accountInspectionApi.getStatus({
+        includeDetails: true,
+        resultPage: 1,
+        resultPageSize: 1,
+        logPageSize: 1,
+        resultFilter: activeResultFilter,
+        resultProvider: selectedResultProvider,
+        resultSearch,
+        resultPendingOnly: true,
+      });
+      if (current.status.resultsPage?.total === 0) {
+        setScopedPending({ key: scopedPendingKey, count: 0 });
+        showNotification(t('monitoring.account_inspection_batch_no_ready'), 'info');
+        return;
+      }
       const operation = await accountInspectionApi.preflightBatch('action', {
         type: 'filtered',
         filter: activeResultFilter,
@@ -1133,7 +1183,7 @@ export function AccountInspectionPage() {
     } finally {
       setBulkActionLoading(false);
     }
-  }, [activeResultFilter, batchOperations, confirmBatch, connectionStatus, restoredSnapshot, result, resultSearch, runStatus, selectedResultProvider, showNotification, t]);
+  }, [activeResultFilter, batchOperations, confirmBatch, connectionStatus, restoredSnapshot, result, resultSearch, runStatus, scopedPendingKey, selectedResultProvider, showNotification, t]);
 
   const handleRetryBatchFailures = useCallback(async (operationId: string) => {
     setBulkActionLoading(true);
@@ -1885,12 +1935,13 @@ export function AccountInspectionPage() {
                     <span>{`${t('monitoring.account_inspection_action_disable')}: ${actionStats.manualDisable}`}</span>
                     <span>{`${t('monitoring.account_inspection_action_enable')}: ${actionStats.manualEnable}`}</span>
                     <div className={styles.manualPendingActions}>
+                      <small>{t('monitoring.account_inspection_filtered_pending_count', { count: scopedPendingCount ?? '—' })}</small>
                       <Button
                         variant="primary"
                         size="sm"
                         onClick={() => void handleExecutePlanned()}
                         loading={bulkActionLoading || executing}
-                        disabled={!batchHydrated || restoredSnapshot || !result || runStatus === 'running' || executing || bulkActionLoading || batchOperations.some((operation) => operation.state === 'running') || pendingActionCount === 0}
+                        disabled={!batchHydrated || restoredSnapshot || !result || runStatus === 'running' || executing || bulkActionLoading || batchRunning || pendingActionCount === 0 || scopedPendingCount === 0}
                       >
                         {bulkActionLoading || executing ? t('monitoring.account_inspection_executing') : t('monitoring.account_inspection_execute_now')}
                       </Button>
@@ -2224,6 +2275,7 @@ export function AccountInspectionPage() {
                                   size="sm"
                                   variant="secondary"
                                   onClick={() => openRecoveryForItem(item)}
+                                  disabled={singleMutationBlocked || restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
                                 >
                                   {t('routing_policy.recovery.open')}
                                 </Button>
@@ -2232,7 +2284,7 @@ export function AccountInspectionPage() {
                                 type="button"
                                 className={styles.iconActionButton}
                                 onClick={() => void handleRecheckSingle(item)}
-                                disabled={restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
+                                disabled={singleMutationBlocked || restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
                                 title={t('monitoring.account_inspection_recheck_account')}
                                 aria-label={t('monitoring.account_inspection_recheck_account')}
                               >
@@ -2249,7 +2301,7 @@ export function AccountInspectionPage() {
                                       handleExecuteSingle(item, suggestedAction, true);
                                     }
                                   }}
-                                  disabled={restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
+                                  disabled={singleMutationBlocked || restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
                                 >
                                   {isSchedulingRecoveryAction(buildManualActionItem(item, suggestedAction))
                                     ? t('monitoring.account_inspection_release_quota')
@@ -2268,7 +2320,7 @@ export function AccountInspectionPage() {
                                       handleExecuteSingle(item, action);
                                     }
                                   }}
-                                  disabled={restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
+                                  disabled={singleMutationBlocked || restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
                                 >
                                   {isSchedulingRecoveryAction(buildManualActionItem(item, action))
                                     ? t('monitoring.account_inspection_release_quota')
@@ -2448,6 +2500,7 @@ export function AccountInspectionPage() {
 
       <SchedulingRecoveryDialog
         open={activeSurface === 'recovery' && Boolean(selectedRecoveryResult)}
+        actionsDisabled={singleMutationBlocked}
         authId={selectedRecoveryResult?.authId || ''}
         authIndex={selectedRecoveryResult?.authIndex || ''}
         accountName={selectedRecoveryResult ? resolveAccountInspectionAccountLabel(selectedRecoveryResult) : ''}

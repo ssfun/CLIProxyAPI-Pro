@@ -11,6 +11,7 @@ import {
 
 type Props = {
   open: boolean;
+  actionsDisabled?: boolean;
   authId: string;
   authIndex: string;
   accountName: string;
@@ -18,7 +19,7 @@ type Props = {
   onResult?: (result?: SchedulingRecoveryResult) => void | Promise<void>;
 };
 
-export function SchedulingRecoveryDialog({ open, authId, authIndex, accountName, onClose, onResult }: Props) {
+export function SchedulingRecoveryDialog({ open, actionsDisabled = false, authId, authIndex, accountName, onClose, onResult }: Props) {
   const { t } = useTranslation();
   // A close/reopen of the same account is a new operation session.
   const session = useMemo(() => ({ open, authId, authIndex }), [open, authId, authIndex]);
@@ -85,7 +86,7 @@ export function SchedulingRecoveryDialog({ open, authId, authIndex, accountName,
         <>
           <p>{t('routing_policy.recovery.current_reason')}: {currentAccount.reason || '-'}</p>
           <p>{t('routing_policy.runtime.models')}: {currentAccount.models?.join(', ') || t('routing_policy.runtime.all_models')}</p>
-          <SchedulingRecoveryActions account={currentAccount} onResult={handleResult} />
+          <SchedulingRecoveryActions account={currentAccount} onResult={handleResult} disabled={actionsDisabled} />
         </>
       ) : currentOutcome
         ? <SchedulingRecoveryOutcome result={currentOutcome} />

@@ -691,6 +691,10 @@ func (s *accountInspectionScheduler) applyManualActionResultLocked(result accoun
 }
 
 func (s *accountInspectionScheduler) executeManualActions(ctx context.Context, items []accountInspectionActionItem) ([]accountInspectionActionOutcome, error) {
+	return s.executeManualActionsWithExpected(ctx, items, nil)
+}
+
+func (s *accountInspectionScheduler) executeManualActionsWithExpected(ctx context.Context, items []accountInspectionActionItem, expected *accountInspectionResult) ([]accountInspectionActionOutcome, error) {
 	release, err := s.beginLifecycle()
 	if err != nil {
 		return nil, err
@@ -725,6 +729,14 @@ func (s *accountInspectionScheduler) executeManualActions(ctx context.Context, i
 	if running {
 		return nil, errAccountInspectionAlreadyRunning
 	}
+	// This check shares manualActionMu with every direct manual action. A newer
+	// decision cannot slip between the batch's processing-state check and its
+	// destructive mutation.
+	if expected != nil {
+		if err := s.inspectionBatchProcessingStateUnchanged(expected); err != nil {
+			return nil, err
+		}
+	}
 	boundItems := make([]accountInspectionActionItem, 0, len(items))
 	for _, item := range items {
 		if item.Action == accountInspectionActionNone || item.Action == accountInspectionActionKeep || item.Action == "" {
@@ -753,7 +765,6 @@ func (s *accountInspectionScheduler) executeManualActions(ctx context.Context, i
 		}
 		result.OperationAction = action
 		quotaAction := item.Suggested && (result.IsQuota && action == accountInspectionActionDisable || result.QuotaCooling && action == accountInspectionActionEnable)
-		quotaSuggestion := result.IsQuota && action == accountInspectionActionDisable || result.QuotaCooling && action == accountInspectionActionEnable
 		outcome := accountInspectionActionOutcome{Action: action, FileName: item.FileName, DisplayName: item.DisplayName, Email: item.Email, Name: item.Name, Provider: item.Provider, AuthIndex: item.AuthIndex}
 		if err := s.executeRecordedInspectionAction(ctx, &result, actionSettings, action, item.Suggested, workers, "manual"); err != nil {
 			outcome.Error = err.Error()
@@ -761,7 +772,7 @@ func (s *accountInspectionScheduler) executeManualActions(ctx context.Context, i
 			s.appendLog("error", fmt.Sprintf("%s -> %s 执行失败：%s", proinspection.ResultIdentity(result), accountInspectionActionLogLabel(action, quotaAction), err.Error()))
 		} else {
 			outcome.Success = true
-			result.Executed = item.Suggested || (action == item.RecommendedAction && !quotaSuggestion)
+			result.Executed = true
 			result.ExecutedAction = action
 			result.ExecutedEffect = proinspection.EffectForAction(action, quotaAction)
 			result.ExecutedAt = time.Now().UnixMilli()

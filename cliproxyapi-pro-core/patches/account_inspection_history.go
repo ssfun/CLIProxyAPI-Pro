@@ -245,7 +245,7 @@ func (s *accountInspectionScheduler) executeRecordedInspectionAction(ctx context
 		executed.ExecutedAction = action
 		executed.ExecutedEffect = proinspection.EffectForAction(action, suggested && quotaSuggestion)
 		executed.ExecutedSuggested = suggested
-		executed.Executed = suggested || action == before.Action && !quotaSuggestion
+		executed.Executed = true
 		executed.ExecuteError = ""
 		if action == accountInspectionActionDisable && !(suggested && before.IsQuota) {
 			executed.Disabled = true

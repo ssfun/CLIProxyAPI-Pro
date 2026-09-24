@@ -923,7 +923,16 @@ func (s *accountInspectionScheduler) inspectOneUnrecorded(ctx context.Context, i
 	return result, nil
 }
 
+type inspectionManyHooks struct {
+	before func(int) error
+	after  func(int, accountInspectionOutcome)
+}
+
 func (s *accountInspectionScheduler) inspectMany(ctx context.Context, items []accountInspectionActionItem) ([]accountInspectionOutcome, error) {
+	return s.inspectManyWithHooks(ctx, items, nil)
+}
+
+func (s *accountInspectionScheduler) inspectManyWithHooks(ctx context.Context, items []accountInspectionActionItem, hooks *inspectionManyHooks) ([]accountInspectionOutcome, error) {
 	release, err := s.beginLifecycle()
 	if err != nil {
 		return nil, err
@@ -960,13 +969,17 @@ func (s *accountInspectionScheduler) inspectMany(ctx context.Context, items []ac
 	boundItems := make([]accountInspectionActionItem, 0, len(items))
 	outcomes := make([]accountInspectionOutcome, 0, len(items))
 	workOutcomeIndexes := make([]int, 0, len(items))
+	workItemIndexes := make([]int, 0, len(items))
 	seen := make(map[string]struct{}, len(items))
-	for _, item := range items {
+	for itemIndex, item := range items {
 		outcome := accountInspectionOutcome{Key: item.Key, FileName: item.FileName, DisplayName: item.DisplayName, Email: item.Email, Name: item.Name, Provider: item.Provider, AuthIndex: item.AuthIndex}
 		bound, bindErr := s.bindActionItemToSnapshot(item)
 		if bindErr != nil {
 			outcome.Error = bindErr.Error()
 			outcomes = append(outcomes, outcome)
+			if hooks != nil {
+				hooks.after(itemIndex, outcome)
+			}
 			continue
 		}
 		if _, ok := seen[bound.Key]; ok {
@@ -975,6 +988,7 @@ func (s *accountInspectionScheduler) inspectMany(ctx context.Context, items []ac
 		seen[bound.Key] = struct{}{}
 		outcome = accountInspectionOutcome{Key: bound.Key, FileName: bound.FileName, DisplayName: bound.DisplayName, Email: bound.Email, Name: bound.Name, Provider: bound.Provider, AuthIndex: bound.AuthIndex}
 		workOutcomeIndexes = append(workOutcomeIndexes, len(outcomes))
+		workItemIndexes = append(workItemIndexes, itemIndex)
 		outcomes = append(outcomes, outcome)
 		boundItems = append(boundItems, bound)
 	}
@@ -985,13 +999,42 @@ func (s *accountInspectionScheduler) inspectMany(ctx context.Context, items []ac
 		item := boundItems[index]
 		outcomeIndex := workOutcomeIndexes[index]
 		outcome := outcomes[outcomeIndex]
-		result, _, inspectErr := s.executeSingleInspection(ctx, settings, item)
+		var result accountInspectionResult
+		var inspectErr error
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					inspectErr = errors.New("inspection failed unexpectedly")
+				}
+			}()
+			if hooks != nil {
+				inspectErr = hooks.before(workItemIndexes[index])
+			}
+			if inspectErr == nil {
+				result, _, inspectErr = s.executeSingleInspection(ctx, settings, item)
+			}
+		}()
 		if inspectErr != nil {
 			outcome.Error = inspectErr.Error()
 			s.appendLog("error", fmt.Sprintf("%s 重新检查失败：%s", item.FileName, inspectErr.Error()))
 		} else {
 			outcome.Success = true
 			outcome.Result = &result
+		}
+		if hooks != nil {
+			if outcome.Success && outcome.Result != nil {
+				s.mu.Lock()
+				s.mergeSingleInspectionResultLocked(*outcome.Result)
+				s.status.Results = proinspection.SortResults(s.status.Results)
+				saveErr := s.saveResultSnapshotLocked()
+				broadcast := s.statusBroadcastLocked()
+				s.mu.Unlock()
+				broadcast.send()
+				if saveErr != nil {
+					outcome.Error = fmt.Sprintf("inspection completed but snapshot persistence failed: %v", saveErr)
+				}
+			}
+			hooks.after(workItemIndexes[index], outcome)
 		}
 		outcomes[outcomeIndex] = outcome
 		processed[index] = true
@@ -1004,9 +1047,15 @@ func (s *accountInspectionScheduler) inspectMany(ctx context.Context, items []ac
 			}
 			outcomeIndex := workOutcomeIndexes[index]
 			outcomes[outcomeIndex].Error = fmt.Sprintf("recheck canceled before execution: %v", ctxErr)
+			if hooks != nil {
+				hooks.after(workItemIndexes[index], outcomes[outcomeIndex])
+			}
 		}
 	}
 
+	if hooks != nil {
+		return outcomes, ctx.Err()
+	}
 	s.mu.Lock()
 	for _, outcome := range outcomes {
 		if outcome.Success && outcome.Result != nil {

@@ -13,6 +13,7 @@ import styles from './SchedulingRecoveryActions.module.scss';
 type Props = {
   account: SchedulingBoardAccount;
   onResult: (result?: SchedulingRecoveryResult) => void | Promise<void>;
+  disabled?: boolean;
 };
 
 const restrictionKey = (detail: SchedulingBoardDetail) =>
@@ -47,7 +48,7 @@ export function SchedulingRecoveryOutcome({ result }: { result: SchedulingRecove
   );
 }
 
-export function SchedulingRecoveryActions({ account, onResult }: Props) {
+export function SchedulingRecoveryActions({ account, onResult, disabled = false }: Props) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -64,6 +65,7 @@ export function SchedulingRecoveryActions({ account, onResult }: Props) {
     registrationEpoch: account.registrationEpoch || '',
   };
   const run = async (operation: () => Promise<SchedulingRecoveryResult>) => {
+    if (disabled || busy) return;
     setBusy(true);
     setError('');
     setResult(null);
@@ -92,7 +94,7 @@ export function SchedulingRecoveryActions({ account, onResult }: Props) {
         variant="primary"
         size="sm"
         loading={busy}
-        disabled={busy}
+        disabled={busy || disabled}
         onClick={() => void run(() => routingPolicyApi.check(requestBase))}
       >
         {t('routing_policy.recovery.check')}
@@ -114,7 +116,7 @@ export function SchedulingRecoveryActions({ account, onResult }: Props) {
               <Button
                 variant="secondary"
                 size="sm"
-                disabled={busy}
+                disabled={busy || disabled}
                 onClick={() => void run(() => routingPolicyApi.check({
                   ...requestBase,
                   source: detail.source as 'inspection' | 'upstream',
@@ -146,7 +148,7 @@ export function SchedulingRecoveryActions({ account, onResult }: Props) {
                   <Button
                     variant="danger"
                     size="sm"
-                    disabled={busy}
+                    disabled={busy || disabled}
                     loading={busy}
                     onClick={() => void run(() => routingPolicyApi.release({
                       ...requestBase,
@@ -162,7 +164,7 @@ export function SchedulingRecoveryActions({ account, onResult }: Props) {
                   </Button>
                 </span>
               ) : (
-                <Button variant="secondary" size="sm" disabled={busy} onClick={() => setConfirmKey(key)}>
+                <Button variant="secondary" size="sm" disabled={busy || disabled} onClick={() => setConfirmKey(key)}>
                   {t('routing_policy.recovery.release')}
                 </Button>
               )}

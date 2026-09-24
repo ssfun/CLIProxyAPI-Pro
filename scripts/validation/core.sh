@@ -340,6 +340,12 @@ build_candidate() {
   CGO_ENABLED=0 go -C "${upstream_root}" build -buildvcs=false -o "${build_tmp}/cli-proxy-api-no-plugin" ./cmd/server/ || return
 }
 
+run_inspection_e2e() {
+  INSPECTION_SERVER="${build_tmp}/cli-proxy-api" \
+    INSPECTION_E2E_OUTPUT="${validation_tmp}/inspection-batch-history-e2e" \
+    python3 "${repo_root}/cliproxyapi-pro-core/e2e/account-inspection-batch-history/run.py" --ci-fast
+}
+
 run_timed "patch preflight guard" validate_late_patch_guard
 run_timed "apply customization and dependencies" apply_candidate_customization
 if [[ "${VALIDATION_STATICCHECK:-0}" == "1" ]]; then
@@ -375,3 +381,6 @@ else
 fi
 
 run_timed "CGO and non-CGO builds" build_candidate
+if [[ "${VALIDATION_INSPECTION_E2E:-0}" == "1" ]]; then
+  run_timed "inspection batch and history HTTP E2E" run_inspection_e2e
+fi

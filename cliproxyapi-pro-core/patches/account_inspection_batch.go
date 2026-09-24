@@ -414,6 +414,10 @@ func (h *Handler) runInspectionBatch(store *inspectionBatchStore, operation *ins
 			operation.PersistenceError = "failed to persist completed receipt"
 		}
 	}()
+	if operation.Kind == "inspect" {
+		h.runInspectionRecheckBatch(ctx, store, operation)
+		return
+	}
 	// Existing scheduler methods serialize manual mutation and enforce lifecycle
 	// fences; running items sequentially avoids holding those locks across recovery.
 	for index := range operation.Items {
@@ -463,6 +467,117 @@ func (h *Handler) runInspectionBatch(store *inspectionBatchStore, operation *ins
 		store.Unlock()
 	}
 }
+
+// Rechecks share the scheduler's lifecycle and manual-action lock while its
+// provider workers perform probes concurrently. Batch store locks never span a
+// scheduler call, so intent and receipt persistence cannot invert scheduler locks.
+func (h *Handler) runInspectionRecheckBatch(ctx context.Context, store *inspectionBatchStore, operation *inspectionBatchOperation) {
+	scheduler := schedulerForHandler(h)
+	if scheduler == nil {
+		return
+	}
+	indices := make([]int, 0, len(operation.Items))
+	items := make([]accountInspectionActionItem, 0, len(operation.Items))
+	store.Lock()
+	for index, entry := range operation.Items {
+		if entry.Status == "ready" {
+			indices = append(indices, index)
+			items = append(items, entry.Item)
+		}
+	}
+	store.Unlock()
+	auditIDs := make([]string, len(items))
+	hooks := &inspectionManyHooks{
+		before: func(index int) error {
+			store.Lock()
+			entry := operation.Items[indices[index]]
+			operation.Items[indices[index]].Status = "running"
+			if err := store.save(); err != nil {
+				store.Unlock()
+				return errors.New("failed to persist execution intent")
+			}
+			store.Unlock()
+			if err := scheduler.inspectionBatchProcessingStateUnchanged(entry.Before); err != nil {
+				return err
+			}
+			bound, err := scheduler.bindActionItemToSnapshot(entry.Item)
+			if err != nil {
+				return err
+			}
+			auth, err := scheduler.actionAuthForResult(bound.ToResult())
+			if err != nil || auth.RegistrationEpoch != entry.epoch {
+				return errAccountInspectionResultStale
+			}
+			before := accountInspectionResult{Key: entry.Key}
+			if entry.Before != nil {
+				before = *entry.Before
+			}
+			auditIDs[index], err = scheduler.beginInspectionOperation("batch", entry.Effect, before, operation.OperationID)
+			return err
+		},
+		after: func(index int, outcome accountInspectionOutcome) {
+			var outcomeErr error
+			if !outcome.Success {
+				outcomeErr = errors.New(outcome.Error)
+			}
+			if auditIDs[index] != "" {
+				after := scheduler.currentInspectionEvidence(items[index].Key)
+				if err := scheduler.finishInspectionOperation(auditIDs[index], &after, outcomeErr); err != nil {
+					scheduler.appendLog("error", "batch audit persistence failed")
+				}
+			}
+			store.Lock()
+			defer store.Unlock()
+			entry := &operation.Items[indices[index]]
+			entry.Outcome = outcome
+			entry.Status = "succeeded"
+			if !outcome.Success {
+				entry.Status, entry.Error = "failed", outcome.Error
+				if outcome.Error == errAccountInspectionResultStale.Error() {
+					entry.Status = "stale"
+				}
+			}
+			if err := store.save(); err != nil {
+				operation.PersistenceError = "failed to persist item receipt"
+			}
+		},
+	}
+	_, err := scheduler.inspectManyWithHooks(ctx, items, hooks)
+	if err != nil {
+		store.Lock()
+		for _, index := range indices {
+			if operation.Items[index].Status == "ready" || operation.Items[index].Status == "running" {
+				operation.Items[index].Status, operation.Items[index].Error = "failed", err.Error()
+			}
+		}
+		store.Unlock()
+	}
+}
+
+// A result reference binds the observation, while these fields bind its
+// processing decision. Both must still match the preflight evidence.
+func (s *accountInspectionScheduler) inspectionBatchProcessingStateUnchanged(before *accountInspectionResult) error {
+	if before == nil || before.Key == "" || before.ResultRef == "" {
+		return errAccountInspectionResultStale
+	}
+	current := s.currentInspectionEvidence(before.Key)
+	if current.ResultRef != before.ResultRef ||
+		current.Executed != before.Executed ||
+		current.ExecutedAt != before.ExecutedAt ||
+		current.ExecutedAction != before.ExecutedAction ||
+		current.ExecutedEffect != before.ExecutedEffect ||
+		current.ExecutedSuggested != before.ExecutedSuggested ||
+		current.OperationAction != before.OperationAction ||
+		(current.ExecuteError == "") != (before.ExecuteError == "") ||
+		current.Disabled != before.Disabled ||
+		current.QuotaCooling != before.QuotaCooling ||
+		current.QuotaRetryAt != before.QuotaRetryAt ||
+		current.QuotaRevision != before.QuotaRevision {
+		return errAccountInspectionResultStale
+	}
+	return nil
+}
+
 func (h *Handler) executeInspectionBatchItem(ctx context.Context, kind string, entry inspectionBatchItem) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -470,6 +585,9 @@ func (h *Handler) executeInspectionBatchItem(ctx context.Context, kind string, e
 	scheduler := schedulerForHandler(h)
 	if scheduler == nil {
 		return nil, errors.New("scheduler unavailable")
+	}
+	if err := scheduler.inspectionBatchProcessingStateUnchanged(entry.Before); err != nil {
+		return nil, err
 	}
 	bound, err := scheduler.bindActionItemToSnapshot(entry.Item)
 	if err != nil {
@@ -496,7 +614,7 @@ func (h *Handler) executeInspectionBatchItem(ctx context.Context, kind string, e
 		}
 		return outcomes[0], nil
 	case "action":
-		outcomes, err := scheduler.executeManualActions(ctx, []accountInspectionActionItem{entry.Item})
+		outcomes, err := scheduler.executeManualActionsWithExpected(ctx, []accountInspectionActionItem{entry.Item}, entry.Before)
 		// A successful mutation remains successful if only snapshot persistence fails;
 		// return the warning in its receipt so retry cannot repeat the side effect.
 		if len(outcomes) == 1 && outcomes[0].Success {
