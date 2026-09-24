@@ -494,7 +494,7 @@ func (h *Handler) ReleaseRoutingRestriction(c *gin.Context) {
 		}
 		err = h.authManager.ChangeQuotaProtection(c.Request.Context(), auth, inspectionQuotaSource, revision, nil)
 		if err == nil && scheduler != nil {
-			scheduler.publishQuotaProtectionState(auth.ID, "已手动解除额度保护")
+			scheduler.publishManualQuotaRelease(auth.ID, before.ResultRef)
 		}
 	case "upstream":
 		err = h.authManager.ClearSchedulingBlock(c.Request.Context(), auth, request.Model, revision)

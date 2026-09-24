@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	proinspection "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/inspection"
+	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
 )
 
 // Receipts are persisted for audit and never replayed on restart. A prepared operation
@@ -25,6 +26,7 @@ import (
 const inspectionBatchRetention = 24 * time.Hour
 const inspectionBatchPreparationTTL = 10 * time.Minute
 const inspectionBatchCapacity = 256
+const inspectionRecoveryBatchMaxItems = 20
 
 type inspectionBatchItem struct {
 	Key      string                      `json:"key"`
@@ -88,8 +90,12 @@ func (h *Handler) preflightInspectionBatch(kind string, items []accountInspectio
 	if kind != "inspect" && kind != "action" && kind != "recover" {
 		return nil, errors.New("invalid batch kind")
 	}
-	if len(items) == 0 || len(items) > 500 {
-		return nil, errors.New("batch requires 1 to 500 items")
+	maxItems := 500
+	if kind == "recover" {
+		maxItems = inspectionRecoveryBatchMaxItems
+	}
+	if len(items) == 0 || len(items) > maxItems {
+		return nil, fmt.Errorf("%s batch requires 1 to %d items", kind, maxItems)
 	}
 	scheduler := schedulerForHandler(h)
 	if scheduler == nil {
@@ -102,6 +108,7 @@ func (h *Handler) preflightInspectionBatch(kind string, items []accountInspectio
 	now := time.Now()
 	operation := &inspectionBatchOperation{OperationID: hex.EncodeToString(token[:]), Kind: kind, State: "prepared", CreatedAt: now.UnixMilli(), ExpiresAt: now.Add(inspectionBatchPreparationTTL).UnixMilli(), Items: make([]inspectionBatchItem, 0, len(items))}
 	seen := make(map[string]bool)
+	recoveryCheckCount := 0
 	for _, requested := range items {
 		entry := inspectionBatchItem{Key: requested.Key, Item: requested, Status: "ready", Effect: "unknown"}
 		suggested := requested.Suggested
@@ -164,7 +171,16 @@ func (h *Handler) preflightInspectionBatch(kind string, items []accountInspectio
 			if _, supported := accountInspectionSupportedProviders[bound.Provider]; kind == "inspect" && !supported {
 				entry.Status, entry.Error = "unsupported", "provider does not support inspection"
 			}
-			if kind == "recover" || kind == "action" && bound.Suggested && bound.Action == accountInspectionActionEnable && bound.QuotaCooling {
+			quotaSuggestion := kind == "action" && bound.Suggested && bound.Action == accountInspectionActionEnable && bound.QuotaCooling
+			if quotaSuggestion {
+				hold, exists := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
+				if !exists || hold.Revision != bound.QuotaRevision {
+					entry.Status, entry.Error = "stale", errAccountInspectionResultStale.Error()
+				} else {
+					detail := inspectionBoardDetail(hold)
+					entry.recovery = append(entry.recovery, routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10), Source: detail.Source, Model: detail.Model, Revision: detail.Revision})
+				}
+			} else if kind == "recover" {
 				board := schedulingBoardAccount(auth, now)
 				for _, detail := range board.Details {
 					if detail.Source != "inspection" && detail.Source != "upstream" {
@@ -172,15 +188,19 @@ func (h *Handler) preflightInspectionBatch(kind string, items []accountInspectio
 					}
 					entry.recovery = append(entry.recovery, routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10), Source: detail.Source, Model: detail.Model, Revision: detail.Revision})
 				}
-				if auth.Disabled || len(entry.recovery) == 0 {
-					entry.Status, entry.Error = "unsupported", "account has no active recoverable restriction"
-				}
+			}
+			if entry.Status == "ready" && (quotaSuggestion || kind == "recover") && (auth.Disabled || len(entry.recovery) == 0) {
+				entry.Status, entry.Error = "unsupported", "account has no active recoverable restriction"
 			}
 		}
 		if entry.Status == "ready" {
 			entry.Effect = inspectionBatchEffect(kind, bound)
+			recoveryCheckCount += len(entry.recovery)
 		}
 		operation.Items = append(operation.Items, entry)
+	}
+	if recoveryCheckCount > inspectionRecoveryBatchMaxItems {
+		return nil, fmt.Errorf("batch supports at most %d recovery checks; narrow the scope", inspectionRecoveryBatchMaxItems)
 	}
 	return operation, nil
 }
@@ -266,8 +286,12 @@ func (h *Handler) PreflightAccountInspectionBatch(c *gin.Context) {
 				request.Items = append(request.Items, item)
 			}
 			scheduler.mu.Unlock()
-			if info.Total > 500 {
-				c.JSON(400, gin.H{"error": "filtered scope exceeds 500 targets; narrow the filters"})
+			maxItems := 500
+			if request.Kind == "recover" {
+				maxItems = inspectionRecoveryBatchMaxItems
+			}
+			if info.Total > maxItems {
+				c.JSON(400, gin.H{"error": fmt.Sprintf("filtered scope exceeds %d targets; narrow the filters", maxItems)})
 				return
 			}
 		default:
@@ -597,7 +621,8 @@ func (h *Handler) executeInspectionBatchItem(ctx context.Context, kind string, e
 	if err != nil || auth.RegistrationEpoch != entry.epoch {
 		return nil, errAccountInspectionResultStale
 	}
-	if kind == "action" && entry.Item.Suggested && entry.Item.Action == accountInspectionActionEnable && entry.Item.QuotaCooling {
+	suggestedQuotaRecovery := kind == "action" && entry.Item.Suggested && entry.Item.Action == accountInspectionActionEnable && entry.Item.QuotaCooling
+	if suggestedQuotaRecovery {
 		kind = "recover"
 	}
 	switch kind {
@@ -685,8 +710,19 @@ func (h *Handler) executeInspectionBatchItem(ctx context.Context, kind string, e
 			return receipts, errAccountInspectionResultStale
 		}
 		after := schedulingBoardAccount(current, time.Now())
-		if after.AuthID != "" && failure == nil {
-			failure = errors.New("check completed; account remains restricted")
+		if failure == nil {
+			if suggestedQuotaRecovery {
+				for _, request := range entry.recovery {
+					for _, detail := range after.Details {
+						if detail.Source == request.Source && detail.Model == request.Model {
+							failure = errors.New("check completed; suggested restriction remains active")
+							break
+						}
+					}
+				}
+			} else if after.AuthID != "" {
+				failure = errors.New("check completed; account remains restricted")
+			}
 		}
 		return gin.H{"receipts": receipts, "after": after}, failure
 	}

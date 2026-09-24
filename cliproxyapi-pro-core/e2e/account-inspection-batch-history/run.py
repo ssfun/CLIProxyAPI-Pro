@@ -228,6 +228,12 @@ try:
     a, b, c, d, e, f = (row(f"xai-{letter}.json") for letter in "abcdef")
     assert a["isQuota"] and b["statusCode"] == 401 and e["isQuota"] and f["statusCode"] == 401
 
+    capacity_status, capacity = call("POST", "/batches/preflight", {
+        "kind": "recover", "scope": {"type": "selected", "items": [item(c) for _ in range(21)]},
+    })
+    assert capacity_status == 400 and "1 to 20" in capacity.get("error", ""), (capacity_status, capacity)
+    note("serial_recovery_batch_capacity", maxTargets=20)
+
     pending_before = ok("GET", "/status")["status"]["summary"]["pendingActionCount"]
     override = ok("POST", "/actions", {"items": [item(e, "disable")]})
     assert override["summary"]["success"] == 1, override

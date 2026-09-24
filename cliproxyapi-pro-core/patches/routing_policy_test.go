@@ -546,15 +546,18 @@ func TestRoutingInspectionReleaseImmediatelyUpdatesStatus(t *testing.T) {
 	result := accountFromAuth(auth).baseResult()
 	scheduler.fillQuotaProtectionResult(auth, &result)
 	result.IsQuota = true
-	result.Action = accountInspectionActionDisable
+	result.Action = accountInspectionActionEnable
+	result.ResultRef = "manual-release-observation"
 	result.ActionReason = "最近探测额度不足"
 	used := 99.0
 	result.UsedPercent = &used
 	scheduler.status.Results = []accountInspectionResult{result}
+	scheduler.status.Summary = proinspection.SummarizeResults(1, 1, 0, 1, scheduler.status.Results)
 	updates := make(chan accountInspectionLogStreamMessage, 4)
 	scheduler.subscribers[updates] = struct{}{}
 	router := gin.New()
 	h.RegisterRoutingPolicyRoutes(router.Group("/"))
+	h.RegisterAccountInspectionBatchRoutes(router.Group("/"))
 	router.GET("/account-inspection/status", h.GetAccountInspectionStatus)
 	statusResult := func() accountInspectionResult {
 		t.Helper()
@@ -574,7 +577,7 @@ func TestRoutingInspectionReleaseImmediatelyUpdatesStatus(t *testing.T) {
 		}
 		return response.Status.Results[0]
 	}
-	if !statusResult().QuotaCooling {
+	if !statusResult().QuotaCooling || scheduler.status.Summary.PendingActionCount != 1 {
 		t.Fatal("fixture has no inspection hold")
 	}
 	body, _ := json.Marshal(routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10), Source: "inspection", Revision: strconv.FormatInt(hold.Revision, 10)})
@@ -584,8 +587,13 @@ func TestRoutingInspectionReleaseImmediatelyUpdatesStatus(t *testing.T) {
 		t.Fatalf("release=%d %s", recorder.Code, recorder.Body.String())
 	}
 	updated := statusResult()
-	if updated.QuotaCooling || updated.QuotaRetryAt != 0 || updated.QuotaRevision != 0 || !updated.IsQuota || updated.Action != result.Action || updated.ActionReason != result.ActionReason || updated.UsedPercent == nil || *updated.UsedPercent != used {
+	if updated.QuotaCooling || updated.QuotaRetryAt != 0 || updated.QuotaRevision != 0 || !updated.IsQuota || updated.Action != result.Action || updated.ActionReason != result.ActionReason || updated.UsedPercent == nil || *updated.UsedPercent != used || !updated.Executed || updated.ExecutedSuggested || updated.ExecutedAction != accountInspectionActionEnable || updated.ExecutedEffect != proinspection.EffectQuotaRecovery || updated.ExecutedAt == 0 || scheduler.status.Summary.PendingActionCount != 0 {
 		t.Fatalf("stale status after release: %+v", updated)
+	}
+	preflight := httptest.NewRecorder()
+	router.ServeHTTP(preflight, httptest.NewRequest(http.MethodPost, "/account-inspection/batches/preflight", strings.NewReader(`{"kind":"action","scope":{"type":"filtered","provider":"codex","pendingOnly":true,"suggested":true}}`)))
+	if preflight.Code != http.StatusBadRequest || !strings.Contains(preflight.Body.String(), "1 to 500") {
+		t.Fatalf("released result remained pending: %d %s", preflight.Code, preflight.Body.String())
 	}
 	select {
 	case <-updates:
@@ -777,12 +785,14 @@ func (e *controlledXAIRecoveryExecutor) HttpRequest(ctx context.Context, auth *c
 }
 
 type xaiRoutingRecoveryFixture struct {
-	ctx      context.Context
-	manager  *coreauth.Manager
-	auth     *coreauth.Auth
-	executor *controlledXAIRecoveryExecutor
-	hook     *xaiRecoveryResultHook
-	router   *gin.Engine
+	ctx       context.Context
+	manager   *coreauth.Manager
+	auth      *coreauth.Auth
+	h         *Handler
+	scheduler *accountInspectionScheduler
+	executor  *controlledXAIRecoveryExecutor
+	hook      *xaiRecoveryResultHook
+	router    *gin.Engine
 }
 
 func newXAIRoutingRecoveryFixture(t *testing.T, status int, body string, blocked bool) xaiRoutingRecoveryFixture {
@@ -824,7 +834,54 @@ func newXAIRoutingRecoveryFixture(t *testing.T, status int, body string, blocked
 	t.Cleanup(func() { accountInspectionSchedulers.Delete(h) })
 	router := gin.New()
 	h.RegisterRoutingPolicyRoutes(router.Group("/"))
-	return xaiRoutingRecoveryFixture{ctx: ctx, manager: manager, auth: auth, executor: executor, hook: hook, router: router}
+	return xaiRoutingRecoveryFixture{ctx: ctx, manager: manager, auth: auth, h: h, scheduler: scheduler, executor: executor, hook: hook, router: router}
+}
+
+func TestSuggestedQuotaRecoveryBatchKeepsUnrelatedUpstreamRestriction(t *testing.T) {
+	f := newXAIRoutingRecoveryFixture(t, http.StatusOK, `{"id":"chatcmpl-test","choices":[]}`, false)
+	auth := f.auth.Clone()
+	auth.ModelStates = map[string]*coreauth.ModelState{
+		"other-model": {Status: coreauth.StatusError, Unavailable: true, NextRetryAfter: time.Now().Add(time.Hour), UpdatedAt: time.Now()},
+	}
+	var err error
+	auth, err = f.manager.Update(f.ctx, auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := accountFromAuth(auth).baseResult()
+	f.scheduler.fillQuotaProtectionResult(auth, &result)
+	result.ResultRef = "suggested-quota-recovery"
+	result.Action = accountInspectionActionEnable
+	f.scheduler.status.Results = []accountInspectionResult{result}
+	f.scheduler.status.Summary = proinspection.SummarizeResults(1, 1, 0, 1, f.scheduler.status.Results)
+	item := proinspection.ActionItemFromResult(result, accountInspectionActionEnable)
+	item.Suggested = true
+	operation, err := f.h.preflightInspectionBatch("action", []accountInspectionActionItem{item}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(operation.Items) != 1 || operation.Items[0].Status != "ready" || operation.Items[0].Effect != "quota_recovery" || len(operation.Items[0].recovery) != 1 || operation.Items[0].recovery[0].Source != "inspection" {
+		t.Fatalf("suggested recovery exceeded inspection scope: %+v", operation.Items)
+	}
+	all, err := f.h.preflightInspectionBatch("recover", []accountInspectionActionItem{item}, false)
+	if err != nil || len(all.Items[0].recovery) != 2 {
+		t.Fatalf("explicit recovery lost all-restriction scope: %+v err=%v", all, err)
+	}
+	if _, err := f.h.executeInspectionBatchItem(f.ctx, "action", operation.Items[0]); err != nil {
+		t.Fatalf("inspection recovery failed because another model remains restricted: %v", err)
+	}
+	after, _ := f.manager.GetByID(auth.ID)
+	if _, held := prorouting.QuotaProtections(after.Metadata)[inspectionQuotaSource]; held || after.ModelStates["other-model"] == nil || !after.ModelStates["other-model"].NextRetryAfter.After(time.Now()) {
+		t.Fatalf("suggested recovery changed the wrong restriction: %+v", schedulingBoardAccount(after, time.Now()))
+	}
+}
+
+func TestRecoveryBatchRejectsUnserviceableSerialCapacity(t *testing.T) {
+	f := newXAIRoutingRecoveryFixture(t, http.StatusOK, `{"id":"chatcmpl-test","choices":[]}`, false)
+	items := make([]accountInspectionActionItem, 21)
+	if _, err := f.h.preflightInspectionBatch("recover", items, false); err == nil {
+		t.Fatal("serial recovery accepted 21 targets")
+	}
 }
 
 func (f xaiRoutingRecoveryFixture) check() *httptest.ResponseRecorder {

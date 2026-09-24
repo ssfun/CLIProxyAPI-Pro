@@ -473,6 +473,14 @@ func (s *accountInspectionScheduler) saveQuotaRecoveryResult(result accountInspe
 }
 
 func (s *accountInspectionScheduler) publishQuotaProtectionState(authID, reason string) {
+	s.publishQuotaProtectionStateWithResolution(authID, reason, "", false)
+}
+
+func (s *accountInspectionScheduler) publishManualQuotaRelease(authID, resultRef string) {
+	s.publishQuotaProtectionStateWithResolution(authID, "已手动解除额度保护", resultRef, true)
+}
+
+func (s *accountInspectionScheduler) publishQuotaProtectionStateWithResolution(authID, reason, resultRef string, manualRelease bool) {
 	auth, ok := s.inspectionAuthManager().GetByID(authID)
 	if !ok || auth == nil {
 		return
@@ -481,11 +489,22 @@ func (s *accountInspectionScheduler) publishQuotaProtectionState(authID, reason 
 	s.fillQuotaProtectionResult(auth, &observed)
 	s.mu.Lock()
 	changed := s.updateInspectionResultLocked(observed, false, func(current accountInspectionResult) (accountInspectionResult, bool) {
+		wasCooling := current.QuotaCooling
 		current.QuotaCooling = observed.QuotaCooling
 		current.QuotaRetryAt = observed.QuotaRetryAt
 		current.QuotaRevision = observed.QuotaRevision
-		// This notification only reflects the live scheduling restriction. The
-		// last probe's action, reason and quota conclusion remain observations.
+		// Only an explicit release resolves the matching observation. Routine
+		// scheduling notifications preserve its existing processing decision.
+		if manualRelease && current.ResultRef == resultRef && wasCooling && !observed.QuotaCooling && current.Action == accountInspectionActionEnable && !current.Executed {
+			current.Executed = true
+			current.ExecutedSuggested = false
+			current.ExecutedAction = accountInspectionActionEnable
+			current.ExecutedEffect = proinspection.EffectQuotaRecovery
+			current.ExecutedAt = time.Now().UnixMilli()
+			current.OperationAction = accountInspectionActionEnable
+			current.ExecuteError = ""
+		}
+		// The original probe's action, reason and quota conclusion remain observations.
 		return current, true
 	})
 	var err error
