@@ -1982,15 +1982,29 @@ write(auth_sync_test, auth_sync_text[:batch_test_start] + batch_test + auth_sync
 replace_once(auth_sync_test, '\t"sync/atomic"\n', '\t"sync"\n\t"sync/atomic"\n', '\t"sync"\n')
 
 # Release validation overlays latest models.json. Static SupportsWebSearch must
-# remain; fetched IDs only enhance. Assert the agent model matches the static
-# registry instead of hard-coding false.
+# remain; fetched IDs only enhance. Upstream has asserted both false and true
+# for this model across releases, so compare with the static registry instead.
 excluded_models_test = ROOT / 'sdk/cliproxy/service_excluded_models_test.go'
-replace_once(
-    excluded_models_test,
+agent_web_search_checks = (
     """	if agentModel.SupportsWebSearch {
 		t.Fatal("gemini-pro-agent should not support web search")
 	}
 """,
+    """	if !agentModel.SupportsWebSearch {
+		t.Fatal("gemini-pro-agent should support web search")
+	}
+""",
+)
+agent_web_search_text = read(excluded_models_test)
+if 'gemini-pro-agent web search = %v, want static %v' not in agent_web_search_text:
+    if sum(agent_web_search_text.count(check) for check in agent_web_search_checks) != 1:
+        raise SystemExit(f'expected one upstream gemini-pro-agent web-search assertion in {excluded_models_test}')
+    agent_web_search_old = next(check for check in agent_web_search_checks if check in agent_web_search_text)
+else:
+    agent_web_search_old = agent_web_search_checks[0]
+replace_once(
+    excluded_models_test,
+    agent_web_search_old,
     """	staticAgentModel := staticByID["gemini-pro-agent"]
 	if staticAgentModel == nil {
 		t.Fatal("expected static gemini-pro-agent definition")
