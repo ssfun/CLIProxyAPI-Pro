@@ -137,11 +137,35 @@ export interface AccountInspectionRunResult {
   finishedAt: number;
   healthCounts?: AccountInspectionHealthCounts;
   providerHealthCounts?: Record<string, AccountInspectionHealthCounts>;
+  runStats?: AccountInspectionRunStats;
   resultsPage?: AccountInspectionPageInfo;
   resultsLimited?: boolean;
   settings: AccountInspectionConfigurableSettings;
   state: AccountInspectionBackendRunState;
   lastError: string;
+}
+
+export interface AccountInspectionProviderRunStats {
+  accounts: number;
+  completed: number;
+  failed: number;
+  unknown: number;
+  httpRequests: number;
+  retries: number;
+  realProbeRequests: number;
+  quotaKnown: number;
+  wallTimeMs: number;
+  queueWaitMs: number;
+  networkMs: number;
+  refreshMs: number;
+  primaryProbeMs: number;
+  confirmProbeMs: number;
+  maxAccountMs: number;
+}
+
+export interface AccountInspectionRunStats {
+  wallTimeMs: number;
+  providers: Record<string, AccountInspectionProviderRunStats>;
 }
 
 export interface AccountInspectionProgressSnapshot {
@@ -209,6 +233,7 @@ export type AccountInspectionBackendStatus = {
   };
   healthCounts?: AccountInspectionHealthCounts;
   providerHealthCounts?: Record<string, AccountInspectionHealthCounts>;
+  runStats?: AccountInspectionRunStats;
   logsPage?: AccountInspectionPageInfo;
   resultsPage?: AccountInspectionPageInfo;
   logsLimited?: boolean;
@@ -606,6 +631,7 @@ const buildAccountInspectionBackendRunResult = (
     finishedAt,
     healthCounts: response.status.healthCounts,
     providerHealthCounts: response.status.providerHealthCounts,
+    runStats: response.status.runStats,
     resultsPage: response.status.resultsPage,
     resultsLimited: response.status.resultsLimited ?? false,
     settings,

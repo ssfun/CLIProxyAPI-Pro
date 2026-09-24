@@ -15,6 +15,31 @@ type Progress struct {
 	Pending   int `json:"pending"`
 }
 
+// RunProviderStats contains aggregate timings and counts for one inspection
+// run. It carries no account identifiers or response bodies.
+type RunProviderStats struct {
+	Accounts          int   `json:"accounts"`
+	Completed         int   `json:"completed"`
+	Failed            int   `json:"failed"`
+	Unknown           int   `json:"unknown"`
+	HTTPRequests      int   `json:"httpRequests"`
+	Retries           int   `json:"retries"`
+	RealProbeRequests int   `json:"realProbeRequests"`
+	QuotaKnown        int   `json:"quotaKnown"`
+	WallTimeMs        int64 `json:"wallTimeMs"`
+	QueueWaitMs       int64 `json:"queueWaitMs"`
+	NetworkMs         int64 `json:"networkMs"`
+	RefreshMs         int64 `json:"refreshMs"`
+	PrimaryProbeMs    int64 `json:"primaryProbeMs"`
+	ConfirmProbeMs    int64 `json:"confirmProbeMs"`
+	MaxAccountMs      int64 `json:"maxAccountMs"`
+}
+
+type RunStats struct {
+	WallTimeMs int64                       `json:"wallTimeMs"`
+	Providers  map[string]RunProviderStats `json:"providers"`
+}
+
 type Status struct {
 	State                RunState                `json:"state"`
 	RunSettings          Settings                `json:"runSettings"`
@@ -24,6 +49,7 @@ type Status struct {
 	PersistenceError     string                  `json:"persistenceError,omitempty"`
 	Progress             Progress                `json:"progress"`
 	Summary              Summary                 `json:"summary"`
+	RunStats             *RunStats               `json:"runStats,omitempty"`
 	HealthCounts         *HealthCounts           `json:"healthCounts,omitempty"`
 	ProviderHealthCounts map[string]HealthCounts `json:"providerHealthCounts,omitempty"`
 	LogsPage             *PageInfo               `json:"logsPage,omitempty"`

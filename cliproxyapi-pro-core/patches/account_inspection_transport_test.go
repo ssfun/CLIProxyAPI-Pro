@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -353,6 +354,8 @@ func TestXAIInspectionRoutesByUsingAPI(t *testing.T) {
 					t.Fatalf("inspectXAI() requested forbidden URL %q", request.URL.String())
 				}
 			}
+			sort.Strings(gotURLs)
+			sort.Strings(tt.wantURLs)
 			if strings.Join(gotURLs, "\n") != strings.Join(tt.wantURLs, "\n") {
 				t.Fatalf("inspectXAI() URLs = %#v, want %#v", gotURLs, tt.wantURLs)
 			}
@@ -1309,5 +1312,77 @@ func TestManualQuotaRecoveryRejectsReplacementBeforeProbe(t *testing.T) {
 	scheduler := newAccountInspectionScheduler(&Handler{authManager: manager}, nil)
 	if err := scheduler.checkQuotaRecoveryNow(canceled, old); !errors.Is(err, errAccountInspectionResultStale) {
 		t.Fatalf("old request was not rejected: %v", err)
+	}
+}
+
+func TestInspectionCheapProbeCacheAndAntigravityEndpointFailover(t *testing.T) {
+	ctx := startProQuotaTestService(t)
+	var claudeUsage, claudeProfile, antigravitySubscription atomic.Int32
+	var quotaHosts []string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/oauth/usage":
+			claudeUsage.Add(1)
+			_, _ = w.Write([]byte(`{"five_hour":{"utilization":20}}`))
+		case "/api/oauth/profile":
+			claudeProfile.Add(1)
+			_, _ = w.Write([]byte(`{"account":{"has_claude_pro":true}}`))
+		case "/v1internal:retrieveUserQuotaSummary":
+			quotaHosts = append(quotaHosts, r.Host)
+			if r.Host == "daily-cloudcode-pa.googleapis.com" {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = w.Write([]byte(`{"groups":[{"displayName":"GEMINI Models","buckets":[{"remainingFraction":0.8}]}]}`))
+		case "/v1internal:loadCodeAssist":
+			antigravitySubscription.Add(1)
+			_, _ = w.Write([]byte(`{"paidTier":{"id":"g1-pro-tier"}}`))
+		default:
+			t.Errorf("unexpected inspection path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	transport := server.Client().Transport.(*http.Transport).Clone()
+	transport.TLSClientConfig.ServerName = "example.com"
+	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+	}
+	previous := http.DefaultTransport
+	http.DefaultTransport = transport
+	defer func() { http.DefaultTransport = previous; transport.CloseIdleConnections() }()
+
+	scheduler := &accountInspectionScheduler{h: &Handler{}}
+	settings := proinspection.DefaultSettings()
+	settings.Retries = 0
+	settings.AntigravityDeepProbeEnabled = false
+	claude := accountFromAuth(&coreauth.Auth{ID: "cache-claude", Provider: "claude", RegistrationEpoch: 1, Metadata: map[string]any{"access_token": "test-token"}})
+	antigravity := accountFromAuth(&coreauth.Auth{ID: "cache-antigravity", Provider: "antigravity", RegistrationEpoch: 1, Metadata: map[string]any{"access_token": "test-token"}})
+	for range 2 {
+		if _, _, err := scheduler.inspectClaude(ctx, claude, settings); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := scheduler.inspectAntigravity(ctx, antigravity, settings); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if claudeUsage.Load() != 2 || claudeProfile.Load() != 1 || antigravitySubscription.Load() != 1 {
+		t.Fatalf("cached requests: usage=%d profile=%d subscription=%d", claudeUsage.Load(), claudeProfile.Load(), antigravitySubscription.Load())
+	}
+	wantHosts := []string{"daily-cloudcode-pa.googleapis.com", "daily-cloudcode-pa.sandbox.googleapis.com", "daily-cloudcode-pa.sandbox.googleapis.com"}
+	if !reflect.DeepEqual(quotaHosts, wantHosts) {
+		t.Fatalf("quota host sequence = %v, want %v", quotaHosts, wantHosts)
+	}
+	claude.Auth.RegistrationEpoch++
+	antigravity.Auth.RegistrationEpoch++
+	if _, _, err := scheduler.inspectClaude(ctx, claude, settings); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := scheduler.inspectAntigravity(ctx, antigravity, settings); err != nil {
+		t.Fatal(err)
+	}
+	if claudeProfile.Load() != 2 || antigravitySubscription.Load() != 2 {
+		t.Fatalf("replacement must refresh plan evidence: profile=%d subscription=%d", claudeProfile.Load(), antigravitySubscription.Load())
 	}
 }

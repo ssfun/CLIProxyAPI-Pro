@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/misc"
@@ -28,6 +29,134 @@ func (r accountInspectionHTTPResult) probeResponse() proinspection.ProbeResponse
 
 func intPtr(value int) *int {
 	return &value
+}
+
+const (
+	antigravitySubscriptionTTL = 6 * time.Hour
+	antigravityEndpointTTL     = 30 * time.Minute
+	claudeProfileTTL           = 12 * time.Hour
+)
+
+type inspectionProbeCacheKey struct {
+	authID      string
+	epoch       uint64
+	legacyProof string
+}
+
+func inspectionCacheKey(account accountInspectionAccount) (inspectionProbeCacheKey, bool) {
+	if account.Auth == nil {
+		return inspectionProbeCacheKey{}, false
+	}
+	id := strings.TrimSpace(account.AuthID)
+	if id == "" {
+		id = strings.TrimSpace(account.Auth.ID)
+	}
+	if id == "" {
+		return inspectionProbeCacheKey{}, false
+	}
+	key := inspectionProbeCacheKey{authID: id, epoch: account.Auth.RegistrationEpoch}
+	if key.epoch == 0 {
+		key.legacyProof = accountInspectionCredentialFingerprint(account.Auth)
+	}
+	return key, true
+}
+
+type inspectionCachedSubscription struct {
+	value   map[string]any
+	expires time.Time
+}
+
+type inspectionCachedProfile struct {
+	plan    string
+	expires time.Time
+}
+
+type inspectionProbeCache struct {
+	mu            sync.Mutex
+	subscriptions map[inspectionProbeCacheKey]inspectionCachedSubscription
+	profiles      map[inspectionProbeCacheKey]inspectionCachedProfile
+	endpoint      string
+	endpointUntil time.Time
+}
+
+func (c *inspectionProbeCache) subscription(key inspectionProbeCacheKey, now time.Time) (map[string]any, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.subscriptions[key]
+	if !ok || !now.Before(entry.expires) {
+		delete(c.subscriptions, key)
+		return nil, false
+	}
+	return entry.value, true
+}
+
+func (c *inspectionProbeCache) rememberSubscription(key inspectionProbeCacheKey, value map[string]any, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.subscriptions == nil {
+		c.subscriptions = make(map[inspectionProbeCacheKey]inspectionCachedSubscription)
+	}
+	for staleKey, entry := range c.subscriptions {
+		if !now.Before(entry.expires) {
+			delete(c.subscriptions, staleKey)
+		}
+	}
+	c.subscriptions[key] = inspectionCachedSubscription{value: value, expires: now.Add(antigravitySubscriptionTTL)}
+}
+
+func (c *inspectionProbeCache) profile(key inspectionProbeCacheKey, now time.Time) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.profiles[key]
+	if !ok || !now.Before(entry.expires) {
+		delete(c.profiles, key)
+		return "", false
+	}
+	return entry.plan, true
+}
+
+func (c *inspectionProbeCache) rememberProfile(key inspectionProbeCacheKey, plan string, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.profiles == nil {
+		c.profiles = make(map[inspectionProbeCacheKey]inspectionCachedProfile)
+	}
+	for staleKey, entry := range c.profiles {
+		if !now.Before(entry.expires) {
+			delete(c.profiles, staleKey)
+		}
+	}
+	c.profiles[key] = inspectionCachedProfile{plan: plan, expires: now.Add(claudeProfileTTL)}
+}
+
+func (c *inspectionProbeCache) antigravityQuotaURLs(now time.Time) []string {
+	urls := antigravityQuotaURLs()
+	c.mu.Lock()
+	preferred := c.endpoint
+	valid := preferred != "" && now.Before(c.endpointUntil)
+	c.mu.Unlock()
+	if !valid || urls[0] == preferred {
+		return urls
+	}
+	for _, url := range urls {
+		if url == preferred {
+			ordered := []string{preferred}
+			for _, fallback := range urls {
+				if fallback != preferred {
+					ordered = append(ordered, fallback)
+				}
+			}
+			return ordered
+		}
+	}
+	return urls
+}
+
+func (c *inspectionProbeCache) rememberAntigravityEndpoint(url string, now time.Time) {
+	c.mu.Lock()
+	c.endpoint = url
+	c.endpointUntil = now.Add(antigravityEndpointTTL)
+	c.mu.Unlock()
 }
 
 func (s *accountInspectionScheduler) prepareAntigravityInspectionAccount(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) (accountInspectionAccount, bool, error) {
@@ -111,6 +240,8 @@ func (s *accountInspectionScheduler) apiCall(ctx context.Context, auth *coreauth
 		if s == nil || s.h == nil || s.inspectionAuthManager() == nil {
 			return accountInspectionHTTPResult{}, fmt.Errorf("core auth manager unavailable")
 		}
+		requestStartedAt := time.Now()
+		defer func() { inspectionMetricsRecordRequest(ctx, url, time.Since(requestStartedAt)) }()
 		resp, err := s.inspectionAuthManager().HttpRequest(reqCtx, auth, req)
 		if err != nil {
 			return accountInspectionHTTPResult{}, err
@@ -120,6 +251,8 @@ func (s *accountInspectionScheduler) apiCall(ctx context.Context, auth *coreauth
 		return accountInspectionHTTPResult{StatusCode: resp.StatusCode, Body: string(raw), Header: resp.Header.Clone()}, nil
 	}
 	client := &http.Client{Timeout: time.Duration(timeoutMS) * time.Millisecond, Transport: s.h.apiCallTransport(auth)}
+	requestStartedAt := time.Now()
+	defer func() { inspectionMetricsRecordRequest(ctx, url, time.Since(requestStartedAt)) }()
 	resp, err := client.Do(req)
 	if err != nil {
 		return accountInspectionHTTPResult{}, err
@@ -145,6 +278,9 @@ func (s *accountInspectionScheduler) withRetry(ctx context.Context, retries int,
 	var last accountInspectionHTTPResult
 	var err error
 	for i := 0; i <= retries; i++ {
+		if i > 0 {
+			inspectionMetricsRecordRetry(ctx)
+		}
 		last, err = task()
 		if err == nil {
 			return last, nil
@@ -161,7 +297,7 @@ func (s *accountInspectionScheduler) withRetry(ctx context.Context, retries int,
 func (s *accountInspectionScheduler) inspectAntigravity(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) (accountInspectionDecision, *int, error) {
 	projectID := antigravityProjectID(account.Auth)
 	body := `{"project":"` + escapeJSONString(projectID) + `"}`
-	urls := antigravityQuotaURLs()
+	urls := s.probeCache.antigravityQuotaURLs(time.Now())
 	var priorityStatus *int
 	var priorityDetail string
 	for _, url := range urls {
@@ -180,6 +316,9 @@ func (s *accountInspectionScheduler) inspectAntigravity(ctx context.Context, acc
 			if isQuotaHTTPStatus(resp.StatusCode) || proinspection.IsAntigravityQuotaFailure(resp.Body) {
 				return quotaUnavailableDecision(account, "Antigravity 额度不可用，建议建立额度保护", resp.Body), status, nil
 			}
+			if resp.StatusCode == http.StatusTooManyRequests {
+				return rateLimitedDecision(resp.Body), status, nil
+			}
 			if proinspection.IsAccountErrorStatus(resp.StatusCode) {
 				priorityStatus = status
 				priorityDetail = resp.Body
@@ -190,6 +329,7 @@ func (s *accountInspectionScheduler) inspectAntigravity(ctx context.Context, acc
 		if err != nil {
 			continue
 		}
+		s.probeCache.rememberAntigravityEndpoint(url, time.Now())
 		quotaState := map[string]any{"groups": groups, "rawShapeHash": proquota.JSONShapeHash(resp.Body)}
 		if subscription := s.fetchAntigravitySubscription(ctx, account, settings); subscription != nil {
 			quotaState["subscription"] = subscription
@@ -202,8 +342,11 @@ func (s *accountInspectionScheduler) inspectAntigravity(ctx context.Context, acc
 		used := proinspection.AntigravityUsedPercent(groups, settings.AntigravityQuotaMode)
 		decision := proinspection.WithQuotaWindows(quotaDecision(account, used, used != nil, settings.UsedPercentThreshold), proinspection.AntigravityBlockingWindows(groups, settings.AntigravityQuotaMode), settings.UsedPercentThreshold)
 		decision.QuotaModel = proinspection.AntigravityQuotaModel(groups, settings.AntigravityQuotaMode, settings.UsedPercentThreshold)
-		if settings.AntigravityDeepProbeEnabled && proinspection.ShouldAntigravityDeepProbe(decision) {
-			return s.applyAntigravityDeepProbe(ctx, account, settings, decision, status)
+		if settings.AntigravityDeepProbeEnabled && shouldConfirmInspection(ctx, decision) {
+			stopConfirm := inspectionMetricsStartConfirmation(ctx)
+			confirmed, confirmStatus, confirmErr := s.applyAntigravityDeepProbe(ctx, account, settings, decision, status)
+			stopConfirm()
+			return confirmed, confirmStatus, confirmErr
 		}
 		return decision, status, nil
 	}
@@ -230,6 +373,12 @@ func antigravityGenerateURLs() []string {
 }
 
 func (s *accountInspectionScheduler) fetchAntigravitySubscription(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) map[string]any {
+	key, cacheable := inspectionCacheKey(account)
+	if cacheable {
+		if cached, ok := s.probeCache.subscription(key, time.Now()); ok {
+			return cached
+		}
+	}
 	resp, err := s.withRetry(ctx, settings.Retries, func() (accountInspectionHTTPResult, error) {
 		return s.apiCall(ctx, account.Auth, http.MethodPost, antigravityCodeAssistURL, map[string]string{
 			"Authorization": "Bearer $TOKEN$",
@@ -244,7 +393,11 @@ func (s *accountInspectionScheduler) fetchAntigravitySubscription(ctx context.Co
 	if err != nil {
 		return nil
 	}
-	return proinspection.BuildAntigravitySubscription(payload)
+	subscription := proinspection.BuildAntigravitySubscription(payload)
+	if subscription != nil && cacheable {
+		s.probeCache.rememberSubscription(key, subscription, time.Now())
+	}
+	return subscription
 }
 
 func (s *accountInspectionScheduler) applyAntigravityDeepProbe(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings, decision accountInspectionDecision, quotaStatus *int) (accountInspectionDecision, *int, error) {
@@ -345,8 +498,11 @@ func (s *accountInspectionScheduler) inspectClaude(ctx context.Context, account 
 		return accountInspectionDecision{}, status, err
 	}
 	if usageResp.StatusCode < 200 || usageResp.StatusCode >= 300 {
-		if isQuotaHTTPStatus(usageResp.StatusCode) {
+		if isQuotaHTTPStatus(usageResp.StatusCode) || proinspection.IsExplicitQuotaFailure(usageResp.Body) {
 			return quotaUnavailableDecision(account, "Claude 额度不可用，建议建立额度保护", usageResp.Body), status, nil
+		}
+		if usageResp.StatusCode == http.StatusTooManyRequests {
+			return rateLimitedDecision(usageResp.Body), status, nil
 		}
 		if proinspection.IsAccountErrorStatus(usageResp.StatusCode) {
 			return proinspection.WithHTTPErrorDetail(authErrorDecision(account, usageResp.StatusCode), usageResp.Body), status, nil
@@ -358,9 +514,19 @@ func (s *accountInspectionScheduler) inspectClaude(ctx context.Context, account 
 		return accountInspectionDecision{}, status, err
 	}
 	planType := ""
-	profileResp, profileErr := s.apiCall(ctx, account.Auth, http.MethodGet, "https://api.anthropic.com/api/oauth/profile", s.claudeHeaders(), "", settings.Timeout)
-	if profileErr == nil && profileResp.StatusCode >= 200 && profileResp.StatusCode < 300 {
-		planType = proinspection.ResolveClaudePlan(profileResp.Body)
+	key, cacheable := inspectionCacheKey(account)
+	profileCached := false
+	if cacheable {
+		planType, profileCached = s.probeCache.profile(key, time.Now())
+	}
+	if !profileCached {
+		profileResp, profileErr := s.apiCall(ctx, account.Auth, http.MethodGet, "https://api.anthropic.com/api/oauth/profile", s.claudeHeaders(), "", settings.Timeout)
+		if profileErr == nil && profileResp.StatusCode >= 200 && profileResp.StatusCode < 300 {
+			planType = proinspection.ResolveClaudePlan(profileResp.Body)
+			if cacheable {
+				s.probeCache.rememberProfile(key, planType, time.Now())
+			}
+		}
 	}
 	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"windows": windows, "extraUsage": extraUsage, "planType": emptyStringAsNil(planType), "rawShapeHash": proquota.JSONShapeHash(usageResp.Body)}))
 	used := proinspection.MaxUsedPercentFromWindows(windows)
@@ -387,7 +553,10 @@ func (s *accountInspectionScheduler) inspectCodex(ctx context.Context, account a
 		return accountInspectionDecision{}, status, err
 	}
 	payload, windows, used := proinspection.BuildCodexWindows(resp.Body)
-	isQuota := isQuotaHTTPStatus(resp.StatusCode) || strings.Contains(strings.ToLower(resp.Body), "quota exhausted") || strings.Contains(strings.ToLower(resp.Body), "limit reached") || strings.Contains(strings.ToLower(resp.Body), "payment_required")
+	isQuota := isQuotaHTTPStatus(resp.StatusCode) || proinspection.IsExplicitQuotaFailure(resp.Body)
+	if resp.StatusCode == http.StatusTooManyRequests && !isQuota {
+		return rateLimitedDecision(resp.Body), status, nil
+	}
 	if used != nil && *used >= settings.UsedPercentThreshold {
 		isQuota = true
 	}
@@ -407,11 +576,16 @@ func (s *accountInspectionScheduler) inspectGeminiCLI(ctx context.Context, accou
 		return accountInspectionDecision{}, intPtr(http.StatusServiceUnavailable), fmt.Errorf("quota gateway unavailable")
 	}
 	attemptCtx, cancel := context.WithTimeout(ctx, time.Duration(settings.Timeout)*time.Millisecond)
+	requestStartedAt := time.Now()
 	result, err := s.quota.FetchQuota(attemptCtx, account.AuthIndex)
+	inspectionMetricsRecordRequest(ctx, "quota-gateway", time.Since(requestStartedAt))
 	cancel()
 	for attempt := 0; err != nil && attempt < settings.Retries && ctx.Err() == nil; attempt++ {
+		inspectionMetricsRecordRetry(ctx)
 		attemptCtx, cancel = context.WithTimeout(ctx, time.Duration(settings.Timeout)*time.Millisecond)
+		requestStartedAt = time.Now()
 		result, err = s.quota.FetchQuota(attemptCtx, account.AuthIndex)
+		inspectionMetricsRecordRequest(ctx, "quota-gateway", time.Since(requestStartedAt))
 		cancel()
 	}
 	upstreamStatus := result.UpstreamStatus
@@ -422,6 +596,9 @@ func (s *accountInspectionScheduler) inspectGeminiCLI(ctx context.Context, accou
 		}
 		if isQuotaHTTPStatus(upstreamStatus) {
 			return quotaUnavailableDecision(account, "Gemini CLI 额度不可用，建议建立额度保护", ""), intPtr(upstreamStatus), nil
+		}
+		if upstreamStatus == http.StatusTooManyRequests {
+			return rateLimitedDecision(""), intPtr(upstreamStatus), nil
 		}
 		if proinspection.IsAccountErrorStatus(upstreamStatus) {
 			return authErrorDecision(account, upstreamStatus), intPtr(upstreamStatus), nil
@@ -444,8 +621,11 @@ func (s *accountInspectionScheduler) inspectKimi(ctx context.Context, account ac
 		return accountInspectionDecision{}, status, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if isQuotaHTTPStatus(resp.StatusCode) {
+		if isQuotaHTTPStatus(resp.StatusCode) || proinspection.IsExplicitQuotaFailure(resp.Body) {
 			return quotaUnavailableDecision(account, "Kimi 额度不可用，建议建立额度保护", resp.Body), status, nil
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return rateLimitedDecision(resp.Body), status, nil
 		}
 		if proinspection.IsAccountErrorStatus(resp.StatusCode) {
 			return proinspection.WithHTTPErrorDetail(authErrorDecision(account, resp.StatusCode), resp.Body), status, nil
@@ -474,6 +654,19 @@ func (s *accountInspectionScheduler) inspectXAIOfficialAPI(ctx context.Context, 
 	if model == "" {
 		model = "grok-4.5"
 	}
+	probe := inspectionProbeContextFrom(ctx)
+	confirm := settings.XAIDeepProbeEnabled && (probe.Trigger == inspectionTriggerManual || account.Disabled || probe.Previous != nil && probe.Previous.IsQuota)
+	if confirm {
+		outcome := s.runXAIResponsesProbe(ctx, account, settings, model, true)
+		decision, status, err := s.applyXAIDeepProbeOutcome(ctx, account, healthyDecision(account), nil, outcome)
+		if err == nil && outcome.status == accountInspectionDeepProbeSuccess {
+			s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{
+				"billing":      proquota.XAIPaidHealthSummary(),
+				"rawShapeHash": proquota.JSONShapeHash(outcome.resp.Body),
+			}))
+		}
+		return decision, status, err
+	}
 	resp, err := s.withRetry(ctx, settings.Retries, func() (accountInspectionHTTPResult, error) {
 		return s.apiCall(ctx, account.Auth, http.MethodPost, xaiOfficialChatURL(account.Auth), xaiOfficialAPIHeaders(account.Auth), proinspection.BuildXAIOfficialHealthBody(model), settings.Timeout)
 	})
@@ -484,6 +677,9 @@ func (s *accountInspectionScheduler) inspectXAIOfficialAPI(ctx context.Context, 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if isQuotaHTTPStatus(resp.StatusCode) || proinspection.IsXAIQuotaFailure(resp.Body) {
 			return xaiOfficialAPIQuotaDecision(account, resp.Body), status, nil
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return rateLimitedDecision(resp.Body), status, nil
 		}
 		if proinspection.IsAccountErrorStatus(resp.StatusCode) {
 			return proinspection.WithHTTPErrorDetail(authErrorDecision(account, resp.StatusCode), resp.Body), status, nil
@@ -497,25 +693,56 @@ func (s *accountInspectionScheduler) inspectXAIOfficialAPI(ctx context.Context, 
 		"rawShapeHash": proquota.JSONShapeHash(resp.Body),
 	}))
 	decision := healthyDecision(account)
-	if settings.XAIDeepProbeEnabled {
-		return s.applyXAIDeepProbe(ctx, account, settings, decision, status)
-	}
 	return decision, status, nil
 }
 
 func (s *accountInspectionScheduler) inspectXAICLI(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) (accountInspectionDecision, *int, error) {
 	headers := xaiRequestHeaders(account.Auth)
-	weeklyBilling, weeklyResp, weeklyErr := s.fetchXAIBillingSummary(ctx, account, settings, xaiBillingWeeklyURL(), headers)
-	monthlyBilling, monthlyResp, monthlyErr := s.fetchXAIBillingSummary(ctx, account, settings, xaiBillingURL(), headers)
+	type billingResult struct {
+		weekly  bool
+		billing map[string]any
+		resp    accountInspectionHTTPResult
+		err     error
+	}
+	results := make(chan billingResult, 2)
+	for _, endpoint := range []struct {
+		weekly bool
+		url    string
+	}{
+		{weekly: true, url: xaiBillingWeeklyURL()},
+		{weekly: false, url: xaiBillingURL()},
+	} {
+		go func() {
+			billing, resp, err := s.fetchXAIBillingSummary(ctx, account, settings, endpoint.url, headers)
+			results <- billingResult{weekly: endpoint.weekly, billing: billing, resp: resp, err: err}
+		}()
+	}
+	var weeklyBilling, monthlyBilling map[string]any
+	var weeklyResp, monthlyResp accountInspectionHTTPResult
+	var weeklyErr, monthlyErr error
+	for range 2 {
+		result := <-results
+		if result.weekly {
+			weeklyBilling, weeklyResp, weeklyErr = result.billing, result.resp, result.err
+		} else {
+			monthlyBilling, monthlyResp, monthlyErr = result.billing, result.resp, result.err
+		}
+	}
 	status := proinspection.FirstNonZeroStatus(monthlyResp.StatusCode, weeklyResp.StatusCode)
 	billing := proquota.MergeXAIBillingSummaries(weeklyBilling, monthlyBilling)
+	if weeklyResp.StatusCode >= 400 && (isQuotaHTTPStatus(weeklyResp.StatusCode) || proinspection.IsXAIQuotaFailure(weeklyResp.Body)) {
+		return quotaUnavailableDecision(account, "xAI 额度不可用，建议建立额度保护", weeklyResp.Body), intPtr(weeklyResp.StatusCode), nil
+	}
+	if monthlyResp.StatusCode >= 400 && (isQuotaHTTPStatus(monthlyResp.StatusCode) || proinspection.IsXAIQuotaFailure(monthlyResp.Body)) {
+		return quotaUnavailableDecision(account, "xAI 额度不可用，建议建立额度保护", monthlyResp.Body), intPtr(monthlyResp.StatusCode), nil
+	}
+	if weeklyResp.StatusCode == http.StatusTooManyRequests && !proinspection.IsXAIQuotaFailure(weeklyResp.Body) {
+		return rateLimitedDecision(weeklyResp.Body), intPtr(weeklyResp.StatusCode), nil
+	}
+	if monthlyResp.StatusCode == http.StatusTooManyRequests && !proinspection.IsXAIQuotaFailure(monthlyResp.Body) {
+		return rateLimitedDecision(monthlyResp.Body), intPtr(monthlyResp.StatusCode), nil
+	}
 	if billing == nil {
-		if isQuotaHTTPStatus(weeklyResp.StatusCode) || proinspection.IsXAIQuotaFailure(weeklyResp.Body) {
-			return quotaUnavailableDecision(account, "xAI 额度不可用，建议建立额度保护", weeklyResp.Body), status, nil
-		}
-		if isQuotaHTTPStatus(monthlyResp.StatusCode) || proinspection.IsXAIQuotaFailure(monthlyResp.Body) {
-			return quotaUnavailableDecision(account, "xAI 额度不可用，建议建立额度保护", monthlyResp.Body), status, nil
-		}
 		if proinspection.IsAccountErrorStatus(weeklyResp.StatusCode) {
 			return proinspection.WithHTTPErrorDetail(authErrorDecision(account, weeklyResp.StatusCode), weeklyResp.Body), status, nil
 		}
@@ -537,19 +764,34 @@ func (s *accountInspectionScheduler) inspectXAICLI(ctx context.Context, account 
 	}
 	billing = mergeCachedXAIFreeQuota(ctx, account, billing)
 
-	// Free 套餐的 token 额度不在 billing 响应中，只能从一次真实 Responses
-	// 请求的 x-ratelimit-* 响应头或 free-usage-exhausted 错误体获得。该采样是
-	// 巡检的固定额度步骤，不依赖可选的“深度检测”开关；开启深度检测时复用同一
-	// 次请求做健康分类，避免重复消耗额度。
+	// Free token quota comes from a Responses observation. Reuse a fresh
+	// observation on scheduled runs; manual and recovery checks sample again.
 	var freeProbe *xaiResponsesProbeOutcome
-	if strings.EqualFold(strings.TrimSpace(stringFromAny(billing["planType"])), "free") {
-		model := strings.TrimSpace(settings.XAIDeepProbeModel)
-		if model == "" {
-			model = "grok-4.5"
-		}
+	freeProbeConfirm := false
+	probeContext := inspectionProbeContextFrom(ctx)
+	if probeContext.Now.IsZero() {
+		probeContext.Now = time.Now()
+	}
+	freeQuota := firstMap(billing, "freeQuota", "free_quota")
+	model := strings.TrimSpace(settings.XAIDeepProbeModel)
+	if model == "" {
+		model = "grok-4.5"
+	}
+	cachedModel := strings.TrimSpace(stringFromAny(freeQuota["model"]))
+	refreshFreeQuota := probeContext.Previous == nil || (cachedModel != "" && !strings.EqualFold(cachedModel, model)) || shouldRefreshXAIFreeQuota(billing, probeContext.Now, probeContext.Trigger)
+	if strings.EqualFold(strings.TrimSpace(stringFromAny(billing["planType"])), "free") && refreshFreeQuota {
 		s.appendLog("info", fmt.Sprintf("%s xAI 免费额度探测开始：%s", account.identity(), model))
-		outcome := s.runXAIResponsesProbe(ctx, account, settings, model, settings.XAIDeepProbeEnabled)
+		currentUsed := proquota.XAISummaryUsedPercent(billing)
+		currentDecision := quotaDecision(account, currentUsed, currentUsed != nil, settings.UsedPercentThreshold)
+		freeProbeConfirm = settings.XAIDeepProbeEnabled && shouldConfirmInspection(ctx, currentDecision)
+		outcome := s.runXAIResponsesProbe(ctx, account, settings, model, freeProbeConfirm)
 		freeProbe = &outcome
+		if outcome.resp.StatusCode == http.StatusTooManyRequests && outcome.freeQuota == nil {
+			if proinspection.IsXAIQuotaFailure(outcome.resp.Body) {
+				return quotaUnavailableDecision(account, "xAI 免费额度不可用，建议建立额度保护", outcome.resp.Body), intPtr(outcome.resp.StatusCode), nil
+			}
+			return rateLimitedDecision(outcome.resp.Body), intPtr(outcome.resp.StatusCode), nil
+		}
 		if outcome.freeQuota != nil {
 			billing["freeQuota"] = outcome.freeQuota
 			if outcome.resp.StatusCode != 0 {
@@ -569,7 +811,7 @@ func (s *accountInspectionScheduler) inspectXAICLI(ctx context.Context, account 
 		"monthlyRawShapeHash": proquota.JSONShapeHash(monthlyResp.Body),
 	}))
 	decision := quotaDecision(account, used, used != nil, settings.UsedPercentThreshold)
-	if settings.XAIDeepProbeEnabled && proinspection.ShouldDeepProbe(decision) {
+	if settings.XAIDeepProbeEnabled && (freeProbeConfirm || shouldConfirmInspection(ctx, decision)) {
 		if freeProbe != nil {
 			return s.applyXAIDeepProbeOutcome(ctx, account, decision, status, *freeProbe)
 		}
@@ -587,6 +829,7 @@ type xaiResponsesProbeOutcome struct {
 }
 
 func (s *accountInspectionScheduler) runXAIResponsesProbe(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings, model string, classifyDeep bool) xaiResponsesProbeOutcome {
+	defer inspectionMetricsStartConfirmation(ctx)()
 	var freeQuota map[string]any
 	task := func() (accountInspectionHTTPResult, error) {
 		result, requestErr := s.apiCall(ctx, account.Auth, http.MethodPost, xaiResponsesURL(account.Auth), xaiDeepProbeHeaders(account.Auth), proinspection.BuildXAIDeepProbeBody(model), settings.Timeout)

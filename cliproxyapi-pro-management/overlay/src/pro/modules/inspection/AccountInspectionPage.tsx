@@ -1894,6 +1894,22 @@ export function AccountInspectionPage() {
                   <strong>{displayedHealthCounts.unknown ?? 0}</strong>
                 </button>
               </div>
+              {result?.runStats && Object.keys(result.runStats.providers).length > 0 ? (
+                <div className={styles.runMetrics}>
+                  <strong>{t('monitoring.account_inspection_run_metrics_title')}</strong>
+                  <ul>
+                    {Object.entries(result.runStats.providers).sort(([left], [right]) => left.localeCompare(right)).map(([provider, stats]) => (
+                      <li key={provider}>
+                        <strong>{resolveProviderDisplayLabel(provider)}</strong>
+                        <span>{stats.accounts} {t('monitoring.account_inspection_run_metrics_accounts')}</span>
+                        <span>{stats.httpRequests} {t('monitoring.account_inspection_run_metrics_requests')}</span>
+                        <span>{(stats.wallTimeMs / 1000).toFixed(1)}s</span>
+                        {stats.realProbeRequests > 0 ? <span>{stats.realProbeRequests} {t('monitoring.account_inspection_run_metrics_real_probes')}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
 
             {hasAutoExecutionPolicy ? (

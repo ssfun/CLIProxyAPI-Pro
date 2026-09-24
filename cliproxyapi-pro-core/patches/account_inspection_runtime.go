@@ -125,6 +125,7 @@ type accountInspectionLogStreamMessage = proinspection.LogStreamMessage
 type accountInspectionScheduler struct {
 	evidenceGeneration      string
 	history                 []accountInspectionResult
+	previousResults         []accountInspectionResult
 	operations              []proinspection.OperationRecord
 	runID                   string
 	manualActionMu          sync.Mutex
@@ -137,6 +138,7 @@ type accountInspectionScheduler struct {
 	fullRunStartMu          sync.Mutex
 	fullRunMu               sync.RWMutex
 	probeLimiter            proinspection.KeyedLimiter
+	probeCache              inspectionProbeCache
 	quotaRecoveryActive     sync.Map
 	quotaRecoveryDeferred   sync.Map
 	actionLimiter           proinspection.KeyedLimiter
@@ -367,6 +369,7 @@ func (s *accountInspectionScheduler) applyResultSnapshotLocked(snapshot accountI
 		Completed: len(snapshot.Results),
 	}
 	s.status.Summary = snapshot.Summary
+	s.status.RunStats = nil
 	s.status.Logs = nil
 	s.status.Results = append([]accountInspectionResult(nil), snapshot.Results...)
 	s.status.RestoredSnapshot = restored
@@ -737,7 +740,9 @@ func (s *accountInspectionScheduler) startRun(manual bool) error {
 	s.status.LastError = ""
 	s.status.Progress = accountInspectionProgress{}
 	s.status.Summary = accountInspectionSummary{}
+	s.status.RunStats = nil
 	s.status.Logs = nil
+	s.previousResults = append([]accountInspectionResult(nil), s.status.Results...)
 	s.status.Results = nil
 	s.healthCounts = accountInspectionHealthCounts{}
 	schedule := s.schedule
@@ -1248,7 +1253,7 @@ func (s *accountInspectionScheduler) executeSingleInspection(ctx context.Context
 			return accountInspectionResult{}, accountInspectionSummary{}, err
 		}
 		defer release()
-		result := s.inspectAccount(ctx, account, settings)
+		result := s.inspectAccount(withInspectionProbeTrigger(ctx, inspectionTriggerManual), account, settings)
 		s.mu.Lock()
 		for _, previous := range s.status.Results {
 			if previous.ResultRef == item.ResultRef && result.RegistrationEpoch != "" && result.RegistrationEpoch == previous.RegistrationEpoch {
@@ -1266,9 +1271,17 @@ func (s *accountInspectionScheduler) executeSingleInspection(ctx context.Context
 func (s *accountInspectionScheduler) run(ctx context.Context, cancel context.CancelFunc, schedule accountInspectionSchedule, manual bool) {
 	defer cancel()
 	defer s.refreshAccountPoliciesIfQuotaChanged()
+	if manual {
+		ctx = withInspectionProbeTrigger(ctx, inspectionTriggerManual)
+	} else {
+		ctx = withInspectionProbeTrigger(ctx, inspectionTriggerScheduled)
+	}
+	runMetrics := &inspectionRunMetrics{startedAt: time.Now(), providers: make(map[string]*inspectionProviderMetricTotals)}
+	ctx = inspectionMetricsContext(ctx, runMetrics)
 	s.appendLog("info", "后端账号巡检开始")
 	results, summary, runErr := s.executeInspection(ctx, schedule.Settings)
-	finishedAt := time.Now().UnixMilli()
+	finished := time.Now()
+	finishedAt := finished.UnixMilli()
 	state := accountInspectionStateCompleted
 	if runErr != nil {
 		if errors.Is(runErr, context.Canceled) {
@@ -1284,7 +1297,9 @@ func (s *accountInspectionScheduler) run(ctx context.Context, cancel context.Can
 	s.setRunStateLocked(state)
 	s.status.LastFinishedAt = finishedAt
 	s.status.Summary = summary
+	s.status.RunStats = runMetrics.snapshot(finished)
 	s.status.Results = results
+	s.previousResults = nil
 	s.status.RestoredSnapshot = false
 	s.healthCounts = proinspection.ResultHealthCounts(results)
 	completed := s.status.Progress.Completed

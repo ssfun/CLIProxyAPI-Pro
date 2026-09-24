@@ -62,6 +62,7 @@ type accountInspectionAuthStore struct {
 }
 
 type xaiInspectionRoutingExecutor struct {
+	requestsMu      sync.Mutex
 	requests        []*http.Request
 	officialStatus  int
 	officialBody    string
@@ -93,7 +94,9 @@ func (e *xaiInspectionRoutingExecutor) CountTokens(context.Context, *coreauth.Au
 }
 
 func (e *xaiInspectionRoutingExecutor) HttpRequest(_ context.Context, _ *coreauth.Auth, req *http.Request) (*http.Response, error) {
+	e.requestsMu.Lock()
 	e.requests = append(e.requests, req.Clone(context.Background()))
+	e.requestsMu.Unlock()
 	body := `{"id":"chatcmpl-test","choices":[]}`
 	status := http.StatusOK
 	header := make(http.Header)

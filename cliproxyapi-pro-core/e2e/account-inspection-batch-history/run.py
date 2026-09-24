@@ -39,6 +39,7 @@ opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 receipts = []
 coverage_gaps = []
 requests = {}
+request_paths = {}
 request_lock = threading.Lock()
 slow_entered = threading.Event()
 slow_release = threading.Event()
@@ -55,6 +56,7 @@ class Provider(BaseHTTPRequestHandler):
         letter = self.path.split("/")[1]
         with request_lock:
             requests[letter] = requests.get(letter, 0) + 1
+            request_paths.setdefault(letter, []).append(self.path)
         mode = json.loads((root / "modes.json").read_text()).get(letter, "healthy")
         if mode == "held":
             with request_lock:
@@ -74,10 +76,13 @@ class Provider(BaseHTTPRequestHandler):
             mode = "healthy"
         status, payload = {
             "quota": (429, {"error": {"code": "quota_exhausted", "message": "quota exhausted"}}),
+            "rate_limited": (429, {"error": {"code": "rate_limited", "message": "Too many requests"}}),
             "healthy": (200, {"choices": [{"message": {"content": "pong"}}]}),
             "unauthorized": (401, {"error": {"message": "authentication required"}}),
         }[mode]
         body = json.dumps(payload).encode()
+        if mode == "healthy" and self.path.endswith("/responses"):
+            body = b'data: {"type":"response.completed"}\n\n'
         try:
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
@@ -195,8 +200,8 @@ def disconnect_execute(operation_id):
 shutil.rmtree(root / "usage", ignore_errors=True)
 shutil.rmtree(root / "auth", ignore_errors=True)
 (root / "auth").mkdir()
-(root / "modes.json").write_text(json.dumps({"a": "quota", "b": "unauthorized", "c": "healthy", "d": "healthy", "e": "quota", "f": "unauthorized", "g": "healthy", "h": "healthy"}))
-for letter in "abcdefgh":
+(root / "modes.json").write_text(json.dumps({"a": "quota", "b": "unauthorized", "c": "healthy", "d": "healthy", "e": "quota", "f": "unauthorized", "g": "healthy", "h": "healthy", "i": "rate_limited"}))
+for letter in "abcdefghi":
     (root / "auth" / f"xai-{letter}.json").write_text(json.dumps({
         "api_key": f"secret-e2e-{letter}",
         "base_url": f"http://127.0.0.1:{provider_port}/{letter}/v1",
@@ -224,9 +229,36 @@ try:
     schedule["settings"]["providerWorkers"] = 2
     ok("PUT", "/schedule", schedule)
     ok("POST", "/run", {}, 202)
-    wait_until("initial inspection", lambda: ok("GET", "/status?details=1"), lambda body: body["status"]["state"] == "completed")
+    initial = wait_until("initial inspection", lambda: ok("GET", "/status?details=1"), lambda body: body["status"]["state"] == "completed")
     a, b, c, d, e, f = (row(f"xai-{letter}.json") for letter in "abcdef")
     assert a["isQuota"] and b["statusCode"] == 401 and e["isQuota"] and f["statusCode"] == 401
+    limited = row("xai-i.json")
+    assert limited["statusCode"] == 429 and limited["errorCode"] == "inspection_rate_limited", limited
+    assert limited["action"] == "keep" and not limited["isQuota"], limited
+    stats = initial["status"]["runStats"]
+    xai_stats = stats["providers"]["xai"]
+    assert xai_stats["accounts"] == 9 and xai_stats["httpRequests"] == 9, stats
+    assert xai_stats["realProbeRequests"] == 9 and stats["wallTimeMs"] >= 0, stats
+    note("provider_metrics_and_rate_limit", wallTimeMs=stats["wallTimeMs"], provider=xai_stats, rateLimited=limited["errorCode"])
+
+    # A manual confirmation uses one Responses request for official xAI.
+    deep_schedule = ok("GET", "/status?details=1")["schedule"]
+    deep_schedule["settings"]["xaiDeepProbeEnabled"] = True
+    ok("PUT", "/schedule", deep_schedule)
+    modes = json.loads((root / "modes.json").read_text())
+    modes["i"] = "healthy"
+    (root / "modes.json").write_text(json.dumps(modes))
+    with request_lock:
+        before_paths = len(request_paths["i"])
+    rechecked = inspect(limited)
+    with request_lock:
+        new_paths = request_paths["i"][before_paths:]
+    assert len(new_paths) == 1 and new_paths[0].endswith("/responses"), new_paths
+    assert rechecked["deepProbeStatus"] == "success" and rechecked["action"] == "keep", rechecked
+    deep_schedule = ok("GET", "/status?details=1")["schedule"]
+    deep_schedule["settings"]["xaiDeepProbeEnabled"] = False
+    ok("PUT", "/schedule", deep_schedule)
+    note("official_xai_single_confirmation_request", paths=new_paths)
 
     capacity_status, capacity = call("POST", "/batches/preflight", {
         "kind": "recover", "scope": {"type": "selected", "items": [item(c) for _ in range(21)]},

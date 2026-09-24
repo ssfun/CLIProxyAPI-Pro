@@ -528,15 +528,28 @@ func IsXAIQuotaFailure(body string) bool {
 	return strings.Contains(lower, "free-usage-exhausted") ||
 		strings.Contains(lower, "quota_exhausted") ||
 		strings.Contains(lower, "quota exhausted") ||
-		strings.Contains(lower, "usage limit") ||
+		strings.Contains(lower, "usage exhausted") ||
 		strings.Contains(lower, "included free usage") ||
-		strings.Contains(lower, "out of credits") ||
-		strings.Contains(lower, "grok subscription")
+		strings.Contains(lower, "out of credits")
+}
+
+func IsExplicitQuotaFailure(body string) bool {
+	lower := strings.ToLower(body)
+	for _, evidence := range []string{
+		"quota_exhausted", "quota exhausted", "usage exhausted",
+		"billing exhausted", "free-usage-exhausted", "payment_required",
+		"insufficient_quota", "out of credits",
+	} {
+		if strings.Contains(lower, evidence) {
+			return true
+		}
+	}
+	return false
 }
 
 func IsAntigravityQuotaFailure(body string) bool {
 	lower := strings.ToLower(body)
-	if strings.Contains(lower, "quota_exhausted") || strings.Contains(lower, "quota exhausted") || strings.Contains(lower, "limit reached") {
+	if strings.Contains(lower, "quota_exhausted") || strings.Contains(lower, "quota exhausted") {
 		return true
 	}
 	var payload map[string]any

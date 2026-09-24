@@ -212,6 +212,8 @@ ACCOUNT_INSPECTION_SOURCE_FILES = (
     'account_inspection_batch.go',
     'account_inspection_history.go',
     'account_inspection_accounts.go',
+    'account_inspection_metrics.go',
+    'account_inspection_probe_context.go',
     'account_inspection_transport.go',
     'account_inspection_quota.go',
     'account_inspection_runtime_test.go',

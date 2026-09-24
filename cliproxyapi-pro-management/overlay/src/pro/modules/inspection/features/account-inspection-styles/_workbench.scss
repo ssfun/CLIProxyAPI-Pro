@@ -627,6 +627,38 @@
   gap: 8px;
 }
 
+.runMetrics {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--inspect-line) 70%, transparent);
+  font-size: 12px;
+}
+
+.runMetrics ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.runMetrics li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  align-items: baseline;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--inspect-surface);
+  color: var(--inspect-muted);
+}
+
+.runMetrics li strong {
+  min-width: 85px;
+  color: var(--inspect-text);
+}
+
 .resultOverviewItem {
   position: relative;
   display: grid;

@@ -340,6 +340,7 @@ func (s *accountInspectionScheduler) recoverQuotaAccountWithMode(ctx context.Con
 	settings.Retries = 0
 	probeCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
+	probeCtx = withInspectionProbeTrigger(probeCtx, inspectionTriggerRecovery)
 	release, err := s.probeLimiter.Acquire(probeCtx, min(4, settings.Workers), settings.ProviderWorkers, auth.Provider)
 	if err != nil {
 		return err
@@ -394,6 +395,7 @@ func (s *accountInspectionScheduler) recoverQuotaWithProbeRequest(ctx context.Co
 	settings.XAIDeepProbeEnabled = false
 	probeCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
+	probeCtx = withInspectionProbeTrigger(probeCtx, inspectionTriggerRecovery)
 	release, err := s.probeLimiter.Acquire(probeCtx, 1, 1, auth.Provider)
 	if err != nil {
 		return err

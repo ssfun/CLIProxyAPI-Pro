@@ -124,6 +124,9 @@ func CodexDecision(disabled bool, status int, used *float64, isQuota bool, thres
 
 func ErrorCode(status *int, fallback string) string {
 	if status != nil && *status >= 400 {
+		if *status == 429 {
+			return "inspection_rate_limited"
+		}
 		if IsAccountErrorStatus(*status) {
 			return "inspection_http_error"
 		}
@@ -135,6 +138,9 @@ func ErrorCode(status *int, fallback string) string {
 func DecisionErrorCode(provider string, decision Decision, status *int) string {
 	if decision.IsQuota {
 		return ""
+	}
+	if status != nil && *status == 429 {
+		return "inspection_rate_limited"
 	}
 	deepProbeErrorCode := func() string {
 		if strings.EqualFold(strings.TrimSpace(provider), "xai") {

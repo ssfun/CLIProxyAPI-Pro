@@ -151,6 +151,27 @@ func mergeCachedXAIFreeQuota(ctx context.Context, account accountInspectionAccou
 	return billing
 }
 
+const xaiFreeQuotaRefreshInterval = 15 * time.Minute
+
+func shouldRefreshXAIFreeQuota(billing map[string]any, now time.Time, trigger inspectionProbeTrigger) bool {
+	if trigger == inspectionTriggerManual || trigger == inspectionTriggerRecovery {
+		return true
+	}
+	freeQuota := firstMap(billing, "freeQuota", "free_quota")
+	if freeQuota == nil {
+		return true
+	}
+	observedAt, ok := intFromAny(freeQuota["observedAt"])
+	if !ok || observedAt <= 0 {
+		return true
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	age := now.Sub(time.UnixMilli(int64(observedAt)))
+	return age < 0 || age >= xaiFreeQuotaRefreshInterval
+}
+
 func observeAccountXAIQuota(ctx context.Context, account accountInspectionAccount, model string, result accountInspectionHTTPResult) map[string]any {
 	observedAt := time.Now()
 	_ = embeddedusage.ObserveXAIQuotaResponse(ctx, embeddedusage.XAIQuotaObservation{

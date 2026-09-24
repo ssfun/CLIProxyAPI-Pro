@@ -71,6 +71,7 @@ func (s *accountInspectionScheduler) executeInspection(ctx context.Context, sett
 	}
 	s.updateProgress(len(accounts), 0, 0, true)
 	s.appendLog("info", fmt.Sprintf("巡检并发：总任务 %d，单提供商 %d，操作执行 %d", settings.Workers, settings.ProviderWorkers, settings.DeleteWorkers))
+	queuedAt := time.Now()
 	runAccountInspectionProviderWorkers(
 		len(accounts),
 		settings.Workers,
@@ -89,7 +90,9 @@ func (s *accountInspectionScheduler) executeInspection(ctx context.Context, sett
 			inFlight++
 			s.updateProgress(len(accounts), completed, inFlight, false)
 			progressMu.Unlock()
-			results[index] = s.inspectAccount(ctx, account, settings)
+			accountCtx, finishMetrics := inspectionMetricsStartAccount(ctx, account.Provider, queuedAt)
+			results[index] = s.inspectAccount(accountCtx, account, settings)
+			finishMetrics(results[index])
 			s.mu.Lock()
 			results[index].RunID = s.runID
 			s.mu.Unlock()
@@ -322,6 +325,7 @@ func sampleAccounts(accounts []accountInspectionAccount, sampleSize int) []accou
 }
 
 func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) accountInspectionResult {
+	ctx = s.withPreviousInspection(ctx, account)
 	result := s.inspectAccountObserved(ctx, account, settings)
 	result.ObservedAt = time.Now().UnixMilli()
 	return result
@@ -337,7 +341,10 @@ func (s *accountInspectionScheduler) inspectAccountObserved(ctx context.Context,
 		result.ErrorCode = "missing_auth_index"
 		return result
 	}
-	if refreshed, refreshTriggered, refreshErr := s.refreshAccountIfDue(ctx, account, settings); refreshErr != nil {
+	stopRefresh := inspectionMetricsStartRefresh(ctx)
+	refreshed, refreshTriggered, refreshErr := s.refreshAccountIfDue(ctx, account, settings)
+	stopRefresh()
+	if refreshErr != nil {
 		result.TokenRefreshTriggered = refreshTriggered
 		result.NextRefreshAt = account.nextRefreshAtMillis()
 		if errors.Is(refreshErr, coreauth.ErrInspectionAuthChanged) {
@@ -378,6 +385,7 @@ func (s *accountInspectionScheduler) inspectAccountObserved(ctx context.Context,
 	var decision accountInspectionDecision
 	var statusCode *int
 	var err error
+	stopPrimary := inspectionMetricsStartPrimary(ctx)
 	switch account.Provider {
 	case "antigravity":
 		decision, statusCode, err = s.inspectAntigravity(ctx, account, settings)
@@ -392,10 +400,12 @@ func (s *accountInspectionScheduler) inspectAccountObserved(ctx context.Context,
 	case "xai":
 		decision, statusCode, err = s.inspectXAI(ctx, account, settings)
 	default:
+		stopPrimary()
 		result.ActionReason = "暂不支持该 provider 巡检"
 		result.Error = "unsupported provider"
 		return result
 	}
+	stopPrimary()
 	if err != nil {
 		result.StatusCode = statusCode
 		result.Error = err.Error()
@@ -582,11 +592,11 @@ func (account accountInspectionAccount) identity() string {
 }
 
 func isQuotaHTTPStatus(status int) bool {
-	return status == http.StatusPaymentRequired || status == http.StatusTooManyRequests
+	return status == http.StatusPaymentRequired
 }
 
 func isInspectionAuthRecoveryStatus(status int) bool {
-	return (status >= 200 && status < 300) || status == 402 || status == 429
+	return (status >= 200 && status < 300) || status == http.StatusPaymentRequired
 }
 
 func (s *accountInspectionScheduler) clearInspectionAuthError(ctx context.Context, account accountInspectionAccount) {
@@ -636,6 +646,15 @@ func quotaDecision(account accountInspectionAccount, used *float64, hasQuotaData
 
 func quotaUnavailableDecision(account accountInspectionAccount, reason string, body string) accountInspectionDecision {
 	return proinspection.QuotaUnavailableDecision(account.Disabled, reason, proinspection.HTTPErrorDetail(body))
+}
+
+func rateLimitedDecision(body string) accountInspectionDecision {
+	return accountInspectionDecision{
+		Action:       accountInspectionActionKeep,
+		ActionReason: "巡检接口暂时限流，保留账号",
+		Error:        "HTTP 429",
+		ErrorDetail:  proinspection.HTTPErrorDetail(body),
+	}
 }
 
 func codexDecision(account accountInspectionAccount, status int, used *float64, isQuota bool, threshold float64) accountInspectionDecision {

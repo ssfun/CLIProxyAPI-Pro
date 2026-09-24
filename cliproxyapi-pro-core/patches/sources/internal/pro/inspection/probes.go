@@ -231,6 +231,9 @@ func RunXAIDeepProbeWithRetry(
 		last, lastErr = task()
 		if lastErr == nil {
 			lastStatus, lastMessage = ClassifyXAIDeepProbeResponse(last)
+			if last.StatusCode == http.StatusTooManyRequests {
+				return last, lastStatus, lastMessage, nil
+			}
 			if !ShouldRetryXAIDeepProbe(lastStatus, lastMessage) {
 				return last, lastStatus, lastMessage, nil
 			}
@@ -373,5 +376,5 @@ func FirstNonZeroStatus(values ...int) *int {
 }
 
 func isQuotaHTTPStatus(status int) bool {
-	return status == http.StatusPaymentRequired || status == http.StatusTooManyRequests
+	return status == http.StatusPaymentRequired
 }
