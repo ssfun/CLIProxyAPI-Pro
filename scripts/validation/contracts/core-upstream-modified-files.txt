@@ -1,4 +1,4 @@
-# Latest-only baseline: CLIProxyAPI v7.3.7 (b773607).
+# Latest-only baseline: CLIProxyAPI v7.3.16 (c404af9).
 # Update this reviewed surface only when adapting to a newer latest upstream release.
 cmd/server/main.go
 config.example.yaml
@@ -31,7 +31,6 @@ internal/managementasset/updater.go
 internal/pluginhost/adapters_executors.go
 internal/pluginhost/auth_provider.go
 internal/pluginhost/executor_route.go
-internal/pluginhost/host_callbacks.go
 internal/pluginhost/host_model_stream_callbacks.go
 internal/pluginhost/http_bridge.go
 internal/pluginhost/snapshot.go

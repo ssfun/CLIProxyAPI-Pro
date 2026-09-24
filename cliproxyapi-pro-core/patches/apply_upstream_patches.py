@@ -5045,61 +5045,9 @@ replace_once(
 ''',
 )
 
-replace_once(
-    ROOT / 'internal/pluginhost/host_callbacks.go',
-    '''\tstreamCtx, cancel := newStreamContext(ctx)
-\tresp, errDo := h.newHTTPClient(nil).DoStream(streamCtx, httpReq)
-\tif errDo != nil {
-\t\tcancel()
-\t\treturn nil, errDo
-\t}
-\tstreamID := ""
-\tif h != nil && h.httpStreams != nil {
-\t\tstreamID = h.httpStreams.open(resp.Chunks, cancel)
-\t}
-\tif streamID == "" {
-\t\tcancel()
-\t\treturn nil, fmt.Errorf("host http stream bridge is unavailable")
-\t}
-\treturn marshalRPCResult(rpcHostHTTPStreamResponse{
-\t\tStatusCode: resp.StatusCode,
-\t\tHeaders:    httpHeader(resp.Headers),
-\t\tStreamID:   streamID,
-\t})
-''',
-    '''\tstreamCtx, cancel := newStreamContext(ctx)
-\tcancelOwned := true
-\tdefer func() {
-\t\tif cancelOwned {
-\t\t\tcancel()
-\t\t}
-\t}()
-\tresp, errDo := h.newHTTPClient(nil).DoStream(streamCtx, httpReq)
-\tif errDo != nil {
-\t\treturn nil, errDo
-\t}
-\tstreamID := ""
-\tif h != nil && h.httpStreams != nil {
-\t\tstreamID = h.httpStreams.open(resp.Chunks, cancel)
-\t}
-\tif streamID == "" {
-\t\treturn nil, fmt.Errorf("host http stream bridge is unavailable")
-\t}
-\trawResponse, errMarshal := marshalRPCResult(rpcHostHTTPStreamResponse{
-\t\tStatusCode: resp.StatusCode,
-\t\tHeaders:    httpHeader(resp.Headers),
-\t\tStreamID:   streamID,
-\t})
-\tif errMarshal != nil {
-\t\th.httpStreams.close(streamID)
-\t\treturn nil, errMarshal
-\t}
-\tcancelOwned = false
-\treturn rawResponse, nil
-''',
-    'rawResponse, errMarshal := marshalRPCResult(rpcHostHTTPStreamResponse{',
-)
-
+# Upstream v7.3.16 owns HTTP stream cleanup through host HTTP operations,
+# including startup/marshal failures and plugin-instance cancellation. Keep its
+# lifecycle intact; the model-stream callback still needs the guard below.
 replace_once(
     ROOT / 'internal/pluginhost/host_model_stream_callbacks.go',
     '''\tstreamCtx, cancel := newStreamContext(context.WithoutCancel(callbackCtx))
