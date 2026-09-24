@@ -77,6 +77,7 @@ class Provider(BaseHTTPRequestHandler):
         status, payload = {
             "quota": (429, {"error": {"code": "quota_exhausted", "message": "quota exhausted"}}),
             "rate_limited": (429, {"error": {"code": "rate_limited", "message": "Too many requests"}}),
+            "service_unavailable": (503, {"error": {"code": "service_unavailable", "message": "Temporary upstream failure"}}),
             "healthy": (200, {"choices": [{"message": {"content": "pong"}}]}),
             "unauthorized": (401, {"error": {"message": "authentication required"}}),
         }[mode]
@@ -200,8 +201,8 @@ def disconnect_execute(operation_id):
 shutil.rmtree(root / "usage", ignore_errors=True)
 shutil.rmtree(root / "auth", ignore_errors=True)
 (root / "auth").mkdir()
-(root / "modes.json").write_text(json.dumps({"a": "quota", "b": "unauthorized", "c": "healthy", "d": "healthy", "e": "quota", "f": "unauthorized", "g": "healthy", "h": "healthy", "i": "rate_limited"}))
-for letter in "abcdefghi":
+(root / "modes.json").write_text(json.dumps({"a": "quota", "b": "unauthorized", "c": "healthy", "d": "healthy", "e": "quota", "f": "unauthorized", "g": "healthy", "h": "healthy", "i": "rate_limited", "j": "service_unavailable"}))
+for letter in "abcdefghij":
     (root / "auth" / f"xai-{letter}.json").write_text(json.dumps({
         "api_key": f"secret-e2e-{letter}",
         "base_url": f"http://127.0.0.1:{provider_port}/{letter}/v1",
@@ -224,7 +225,7 @@ try:
     schedule["settings"]["autoExecuteQuotaLimitDisable"] = False
     schedule["settings"]["autoExecuteQuotaRecoveryEnable"] = False
     schedule["settings"]["autoExecuteAccountInvalidAction"] = "none"
-    schedule["settings"]["autoExecuteRequestErrorAction"] = "none"
+    schedule["settings"]["autoExecuteRequestErrorAction"] = "delete"
     schedule["settings"]["workers"] = 4
     schedule["settings"]["providerWorkers"] = 2
     ok("PUT", "/schedule", schedule)
@@ -235,11 +236,15 @@ try:
     limited = row("xai-i.json")
     assert limited["statusCode"] == 429 and limited["errorCode"] == "inspection_rate_limited", limited
     assert limited["action"] == "keep" and not limited["isQuota"], limited
+    unavailable = row("xai-j.json")
+    assert unavailable["statusCode"] == 503 and unavailable["action"] == "keep", unavailable
+    assert all((root / "auth" / f"xai-{letter}.json").exists() for letter in "ij"), (limited, unavailable)
+    assert not limited["executed"] and not unavailable["executed"], (limited, unavailable)
     stats = initial["status"]["runStats"]
     xai_stats = stats["providers"]["xai"]
-    assert xai_stats["accounts"] == 9 and xai_stats["httpRequests"] == 9, stats
-    assert xai_stats["realProbeRequests"] == 9 and stats["wallTimeMs"] >= 0, stats
-    note("provider_metrics_and_rate_limit", wallTimeMs=stats["wallTimeMs"], provider=xai_stats, rateLimited=limited["errorCode"])
+    assert xai_stats["accounts"] == 10 and xai_stats["httpRequests"] == 10, stats
+    assert xai_stats["realProbeRequests"] == 10 and stats["wallTimeMs"] >= 0, stats
+    note("provider_metrics_and_rate_limit", wallTimeMs=stats["wallTimeMs"], provider=xai_stats, rateLimited=limited["errorCode"], autoRequestErrorAction="delete", retained=["xai-i.json", "xai-j.json"])
 
     # A manual confirmation uses one Responses request for official xAI.
     deep_schedule = ok("GET", "/status?details=1")["schedule"]

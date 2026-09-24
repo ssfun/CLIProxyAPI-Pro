@@ -78,3 +78,18 @@ func shouldConfirmInspection(ctx context.Context, decision accountInspectionDeci
 	}
 	return probe.Trigger == inspectionTriggerManual && decision.Action == accountInspectionActionKeep
 }
+
+func shouldConfirmAntigravityInspection(ctx context.Context, decision accountInspectionDecision) bool {
+	if decision.IsQuota || decision.Error != "" || decision.Action == accountInspectionActionDisable {
+		return false
+	}
+	quotaRecovered := !decision.QuotaUnknown && (decision.QuotaKnown || decision.UsedPercent != nil)
+	if decision.Action == accountInspectionActionEnable {
+		return quotaRecovered
+	}
+	probe := inspectionProbeContextFrom(ctx)
+	if probe.Previous != nil && probe.Previous.IsQuota && quotaRecovered {
+		return true
+	}
+	return probe.Trigger == inspectionTriggerManual && decision.Action == accountInspectionActionKeep
+}

@@ -76,3 +76,41 @@ func TestResultMatchesSearchIncludesAuthID(t *testing.T) {
 		t.Fatal("unrelated query matched")
 	}
 }
+
+// Failure matrix: transient/provider/parser errors must not inherit destructive
+// request-error settings; stale suggestions must not bypass this boundary;
+// explicit 403 account evidence and confirmed quota must retain their policies.
+func TestAutomaticMutationRequiresAccountEvidence(t *testing.T) {
+	cases := []struct {
+		name   string
+		result Result
+	}{
+		{"rate limit", Result{ErrorCode: "inspection_rate_limited", StatusCode: intPointer(429)}},
+		{"rate limit stale action", Result{ErrorCode: "inspection_rate_limited", Action: ActionDelete}},
+		{"rate limit stale quota", Result{ErrorCode: "inspection_rate_limited", Action: ActionDisable, IsQuota: true}},
+		{"incomplete", Result{ErrorCode: "inspection_incomplete"}},
+		{"parser", Result{ErrorCode: "inspection_parser_error"}},
+		{"network", Result{ErrorCode: "inspection_probe_error", Error: "network timeout"}},
+		{"transport", Result{ErrorCode: "inspection_transport_error"}},
+		{"provider", Result{ErrorCode: "inspection_provider_error", StatusCode: intPointer(503)}},
+		{"legacy provider", Result{ErrorCode: "inspection_probe_error", StatusCode: intPointer(502)}},
+		{"deep transient", Result{DeepProbeStatus: string(DeepProbeTransientError)}},
+		{"refresh", Result{ErrorCode: "token_refresh_error", TokenRefreshStatus: "failed"}},
+	}
+	for _, action := range []Action{ActionDisable, ActionDelete} {
+		settings := DefaultSettings()
+		settings.AutoExecuteRequestErrorAction = action
+		settings.AutoExecuteAccountInvalidAction = action
+		settings.AutoExecuteQuotaLimitDisable = true
+		for _, tc := range cases {
+			t.Run(string(action)+"/"+tc.name, func(t *testing.T) {
+				if got := AutoActionForResult(tc.result, settings); got != ActionNone {
+					t.Fatalf("auto action = %q, want none", got)
+				}
+			})
+		}
+		if got := AutoActionForResult(Result{ErrorCode: "inspection_http_error", StatusCode: intPointer(403)}, settings); got != action {
+			t.Fatalf("403 auto action = %q, want %q", got, action)
+		}
+	}
+}

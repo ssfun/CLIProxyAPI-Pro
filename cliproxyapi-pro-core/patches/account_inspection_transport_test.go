@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -17,12 +18,42 @@ import (
 	"testing"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/embeddedusage"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	proinspection "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/inspection"
 	proquota "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/quota"
 	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 )
+
+func TestAntigravityConfirmationRequiresResolvableHealthEvidence(t *testing.T) {
+	used := 20.0
+	tests := []struct {
+		name     string
+		trigger  inspectionProbeTrigger
+		previous *accountInspectionResult
+		decision accountInspectionDecision
+		want     bool
+	}{
+		{name: "scheduled healthy", decision: accountInspectionDecision{Action: accountInspectionActionKeep, UsedPercent: &used}, want: false},
+		{name: "scheduled unknown", decision: accountInspectionDecision{Action: accountInspectionActionKeep, QuotaUnknown: true}, want: false},
+		{name: "previous quota and current unknown", previous: &accountInspectionResult{IsQuota: true}, decision: accountInspectionDecision{Action: accountInspectionActionKeep, QuotaUnknown: true}, want: false},
+		{name: "previous quota and current recovered", previous: &accountInspectionResult{IsQuota: true}, decision: accountInspectionDecision{Action: accountInspectionActionKeep, UsedPercent: &used}, want: true},
+		{name: "disabled account recovered", decision: accountInspectionDecision{Action: accountInspectionActionEnable, UsedPercent: &used}, want: true},
+		{name: "manual health confirmation", trigger: inspectionTriggerManual, decision: accountInspectionDecision{Action: accountInspectionActionKeep, QuotaUnknown: true}, want: true},
+		{name: "recovery unknown", trigger: inspectionTriggerRecovery, decision: accountInspectionDecision{Action: accountInspectionActionKeep, QuotaUnknown: true}, want: false},
+		{name: "clear quota", decision: accountInspectionDecision{Action: accountInspectionActionDisable, IsQuota: true}, want: false},
+		{name: "probe error", trigger: inspectionTriggerManual, decision: accountInspectionDecision{Action: accountInspectionActionKeep, Error: "temporary failure"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.WithValue(context.Background(), inspectionProbeContextKey{}, inspectionProbeContext{Trigger: tt.trigger, Previous: tt.previous})
+			if got := shouldConfirmAntigravityInspection(ctx, tt.decision); got != tt.want {
+				t.Fatalf("shouldConfirmAntigravityInspection() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestAntigravityInspectionBindsPreparedTokenToAutomaticAction(t *testing.T) {
 	startProQuotaTestService(t)
@@ -1385,4 +1416,152 @@ func TestInspectionCheapProbeCacheAndAntigravityEndpointFailover(t *testing.T) {
 	if claudeProfile.Load() != 2 || antigravitySubscription.Load() != 2 {
 		t.Fatalf("replacement must refresh plan evidence: profile=%d subscription=%d", claudeProfile.Load(), antigravitySubscription.Load())
 	}
+}
+
+// Failure matrix: malformed provider JSON, successful schema with no usage,
+// and absent Codex identity metadata must remain incomplete and non-actionable
+// even when both error automation policies are configured to delete.
+func TestInspectionIncompleteEvidenceCannotDeleteAccounts(t *testing.T) {
+	ctx := startProQuotaTestService(t)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Header.Get("Authorization") == "Bearer missing-fields" {
+			_, _ = w.Write([]byte(`{"unknown":true}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"broken":`))
+	}))
+	defer server.Close()
+	transport := server.Client().Transport.(*http.Transport).Clone()
+	transport.TLSClientConfig.ServerName = "example.com"
+	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+	}
+	previous := http.DefaultTransport
+	http.DefaultTransport = transport
+	defer func() { http.DefaultTransport = previous; transport.CloseIdleConnections() }()
+	for _, tc := range []struct {
+		name, provider, token string
+		missingID             bool
+	}{
+		{"claude malformed", "claude", "malformed", false},
+		{"kimi malformed", "kimi", "malformed", false},
+		{"codex malformed", "codex", "malformed", false},
+		{"claude schema", "claude", "missing-fields", false},
+		{"kimi schema", "kimi", "missing-fields", false},
+		{"codex missing account id", "codex", "unused", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := coreauth.NewManager(nil, nil, nil)
+			metadata := map[string]any{"access_token": tc.token}
+			if !tc.missingID {
+				metadata["account_id"] = "test-account"
+			}
+			registered, err := manager.Register(ctx, &coreauth.Auth{ID: "incomplete-" + tc.provider, FileName: "incomplete.json", Provider: tc.provider, Metadata: metadata, Runtime: inspectionProbeRefreshDue(false)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
+			settings := proinspection.DefaultSettings()
+			settings.Retries = 0
+			settings.AutoExecuteRequestErrorAction = accountInspectionActionDelete
+			settings.AutoExecuteAccountInvalidAction = accountInspectionActionDelete
+			result := scheduler.inspectAccount(ctx, accountFromAuth(registered), settings)
+			if result.ErrorCode != "inspection_incomplete" || result.QuotaKnown || result.IsQuota {
+				t.Fatalf("incomplete result = %+v", result)
+			}
+			results := []accountInspectionResult{result}
+			scheduler.applyAutomaticActions(ctx, results, settings)
+			current, exists := manager.GetByID(registered.ID)
+			if !exists || current.Disabled || results[0].Executed {
+				t.Fatalf("incomplete evidence mutated account: exists=%v result=%+v", exists, results[0])
+			}
+		})
+	}
+}
+
+// Exercise the real inspection and SQLite cache path for four stale-evidence
+// failures: exhausted and healthy snapshots followed by network failure,
+// replacement credentials with a fresh old snapshot, and HTTP 200 without
+// quota headers. A current explicit exhaustion response is covered separately.
+func TestXAICLIFreeRefreshFailureDoesNotDecideFromCachedQuota(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		exhausted    bool
+		age          time.Duration
+		previous     bool
+		missingHeads bool
+	}{
+		{name: "stale exhausted timeout", exhausted: true, age: 30 * time.Minute, previous: true},
+		{name: "stale healthy timeout", age: 30 * time.Minute, previous: true},
+		{name: "replacement credential old cache timeout", exhausted: true, age: time.Minute},
+		{name: "stale cache 200 without quota headers", exhausted: true, age: 30 * time.Minute, previous: true, missingHeads: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := startProQuotaTestService(t)
+			observedAt := time.Now().Add(-tc.age).UnixMilli()
+			freeQuota := map[string]any{"model": "grok-4.5", "observedAt": observedAt, "usedTokens": 300, "limitTokens": 1000, "exhausted": tc.exhausted}
+			account := accountInspectionAccount{
+				Auth: &coreauth.Auth{
+					Provider: "xai", FileName: "old-free.json",
+					Attributes: map[string]string{"using_api": "false"},
+					Metadata:   map[string]any{"access_token": "header." + base64.RawURLEncoding.EncodeToString([]byte(`{"tier":0}`)) + ".signature"},
+				},
+				Provider: "xai", FileName: "old-free.json", AuthIndex: "old-free",
+			}
+			if err := persistQuotaState(ctx, account, quotaSuccessState(map[string]any{
+				"billing": map[string]any{"planType": "free", "freeQuota": freeQuota},
+			})); err != nil {
+				t.Fatal(err)
+			}
+			executor := &xaiStaleQuotaExecutor{xaiInspectionRoutingExecutor: &xaiInspectionRoutingExecutor{}, missingHeaders: tc.missingHeads}
+			manager := coreauth.NewManager(nil, nil, nil)
+			manager.RegisterExecutor(executor)
+			scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
+			probe := inspectionProbeContext{Now: time.Now()}
+			if tc.previous {
+				probe.Previous = &accountInspectionResult{}
+			}
+			ctx = context.WithValue(ctx, inspectionProbeContextKey{}, probe)
+			decision, status, err := scheduler.inspectXAI(ctx, account, accountInspectionSettings{
+				Timeout: 3000, UsedPercentThreshold: 25, XAIDeepProbeModel: "grok-4.5", XAIDeepProbeEnabled: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if decision.UsedPercent != nil || decision.QuotaKnown || !decision.QuotaUnknown || decision.IsQuota || decision.Action != accountInspectionActionKeep {
+				t.Fatalf("stale quota affected current decision: %#v", decision)
+			}
+			if code := proinspection.DecisionErrorCode("xai", decision, status); code != "inspection_incomplete" {
+				t.Fatalf("error code = %q, want inspection_incomplete; decision = %#v", code, decision)
+			}
+			state, ok, err := embeddedusage.GetXAIQuotaState(ctx, account.FileName)
+			if err != nil || !ok {
+				t.Fatalf("historical cache unavailable: ok=%v err=%v", ok, err)
+			}
+			cached := firstMap(firstMap(state, "billing"), "freeQuota")
+			if got, ok := intFromAny(cached["observedAt"]); !ok || int64(got) != observedAt {
+				t.Fatalf("historical free quota was lost: %#v", cached)
+			}
+		})
+	}
+}
+
+type xaiStaleQuotaExecutor struct {
+	*xaiInspectionRoutingExecutor
+	missingHeaders bool
+}
+
+func (e *xaiStaleQuotaExecutor) HttpRequest(ctx context.Context, auth *coreauth.Auth, req *http.Request) (*http.Response, error) {
+	if !strings.HasSuffix(req.URL.Path, "/responses") {
+		return e.xaiInspectionRoutingExecutor.HttpRequest(ctx, auth, req)
+	}
+	if !e.missingHeaders {
+		return nil, errors.New("refresh timeout")
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(`data: {"type":"response.completed"}` + "\n\n")),
+	}, nil
 }

@@ -342,7 +342,7 @@ func (s *accountInspectionScheduler) inspectAntigravity(ctx context.Context, acc
 		used := proinspection.AntigravityUsedPercent(groups, settings.AntigravityQuotaMode)
 		decision := proinspection.WithQuotaWindows(quotaDecision(account, used, used != nil, settings.UsedPercentThreshold), proinspection.AntigravityBlockingWindows(groups, settings.AntigravityQuotaMode), settings.UsedPercentThreshold)
 		decision.QuotaModel = proinspection.AntigravityQuotaModel(groups, settings.AntigravityQuotaMode, settings.UsedPercentThreshold)
-		if settings.AntigravityDeepProbeEnabled && shouldConfirmInspection(ctx, decision) {
+		if settings.AntigravityDeepProbeEnabled && shouldConfirmAntigravityInspection(ctx, decision) {
 			stopConfirm := inspectionMetricsStartConfirmation(ctx)
 			confirmed, confirmStatus, confirmErr := s.applyAntigravityDeepProbe(ctx, account, settings, decision, status)
 			stopConfirm()
@@ -511,7 +511,7 @@ func (s *accountInspectionScheduler) inspectClaude(ctx context.Context, account 
 	}
 	windows, extraUsage, err := proinspection.BuildClaudeWindows(usageResp.Body)
 	if err != nil {
-		return accountInspectionDecision{}, status, err
+		return accountInspectionDecision{Action: accountInspectionActionKeep, ActionReason: "Claude 额度数据无法解析，保留账号", QuotaUnknown: true, Error: err.Error()}, status, nil
 	}
 	planType := ""
 	key, cacheable := inspectionCacheKey(account)
@@ -538,7 +538,7 @@ func (s *accountInspectionScheduler) inspectClaude(ctx context.Context, account 
 func (s *accountInspectionScheduler) inspectCodex(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) (accountInspectionDecision, *int, error) {
 	accountID := codexAccountID(account.Auth)
 	if accountID == "" {
-		return accountInspectionDecision{}, nil, fmt.Errorf("missing ChatGPT account id")
+		return accountInspectionDecision{Action: accountInspectionActionKeep, ActionReason: "缺少 ChatGPT account id，无法判断额度，保留账号", QuotaUnknown: true, Error: "missing ChatGPT account id"}, nil, nil
 	}
 	resp, err := s.withRetry(ctx, settings.Retries, func() (accountInspectionHTTPResult, error) {
 		return s.apiCall(ctx, account.Auth, http.MethodGet, "https://chatgpt.com/backend-api/wham/usage", map[string]string{
@@ -634,7 +634,7 @@ func (s *accountInspectionScheduler) inspectKimi(ctx context.Context, account ac
 	}
 	rows, used, err := proinspection.BuildKimiRows(resp.Body)
 	if err != nil {
-		return accountInspectionDecision{}, status, err
+		return accountInspectionDecision{Action: accountInspectionActionKeep, ActionReason: "Kimi 额度数据无法解析，保留账号", QuotaUnknown: true, Error: err.Error()}, status, nil
 	}
 	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"rows": rows, "rawShapeHash": proquota.JSONShapeHash(resp.Body)}))
 	decision := proinspection.WithQuotaWindows(quotaDecision(account, used, used != nil, settings.UsedPercentThreshold), rows, settings.UsedPercentThreshold)
@@ -779,7 +779,11 @@ func (s *accountInspectionScheduler) inspectXAICLI(ctx context.Context, account 
 	}
 	cachedModel := strings.TrimSpace(stringFromAny(freeQuota["model"]))
 	refreshFreeQuota := probeContext.Previous == nil || (cachedModel != "" && !strings.EqualFold(cachedModel, model)) || shouldRefreshXAIFreeQuota(billing, probeContext.Now, probeContext.Trigger)
-	if strings.EqualFold(strings.TrimSpace(stringFromAny(billing["planType"])), "free") && refreshFreeQuota {
+	freePlan := strings.EqualFold(strings.TrimSpace(stringFromAny(billing["planType"])), "free")
+	// Keep the cached observation in billing for display, but require a new
+	// observation before it can affect this run when a refresh is due.
+	freeQuotaCurrent := !freePlan || !refreshFreeQuota
+	if freePlan && refreshFreeQuota {
 		s.appendLog("info", fmt.Sprintf("%s xAI 免费额度探测开始：%s", account.identity(), model))
 		currentUsed := proquota.XAISummaryUsedPercent(billing)
 		currentDecision := quotaDecision(account, currentUsed, currentUsed != nil, settings.UsedPercentThreshold)
@@ -794,16 +798,20 @@ func (s *accountInspectionScheduler) inspectXAICLI(ctx context.Context, account 
 		}
 		if outcome.freeQuota != nil {
 			billing["freeQuota"] = outcome.freeQuota
+			freeQuotaCurrent = true
 			if outcome.resp.StatusCode != 0 {
 				status = intPtr(outcome.resp.StatusCode)
 			}
 		} else if outcome.err != nil {
 			s.appendLog("warning", fmt.Sprintf("%s xAI 免费额度探测失败，保留 billing 与历史快照：%s", account.identity(), outcome.err.Error()))
-		} else if firstMap(billing, "freeQuota", "free_quota") == nil {
+		} else {
 			s.appendLog("warning", fmt.Sprintf("%s xAI 免费额度探测未返回限额明细", account.identity()))
 		}
 	}
-	used := proquota.XAISummaryUsedPercent(billing)
+	var used *float64
+	if freeQuotaCurrent {
+		used = proquota.XAISummaryUsedPercent(billing)
+	}
 	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{
 		"billing":             billing,
 		"rawShapeHash":        proquota.JSONShapeHashForBodies(map[string]string{"weekly": weeklyResp.Body, "monthly": monthlyResp.Body}),
@@ -811,6 +819,11 @@ func (s *accountInspectionScheduler) inspectXAICLI(ctx context.Context, account 
 		"monthlyRawShapeHash": proquota.JSONShapeHash(monthlyResp.Body),
 	}))
 	decision := quotaDecision(account, used, used != nil, settings.UsedPercentThreshold)
+	if !freeQuotaCurrent {
+		// A successful Responses request without quota headers confirms only
+		// request health; it cannot turn a stale percentage into quota evidence.
+		return decision, status, nil
+	}
 	if settings.XAIDeepProbeEnabled && (freeProbeConfirm || shouldConfirmInspection(ctx, decision)) {
 		if freeProbe != nil {
 			return s.applyXAIDeepProbeOutcome(ctx, account, decision, status, *freeProbe)
