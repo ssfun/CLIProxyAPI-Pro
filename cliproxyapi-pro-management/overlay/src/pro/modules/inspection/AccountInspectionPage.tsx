@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from 'react';
+import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
@@ -150,9 +150,9 @@ export function AccountInspectionPage() {
   const geminiCliQuota = useQuotaStore((state) => state.geminiCliQuota);
   const kimiQuota = useQuotaStore((state) => state.kimiQuota);
   const xaiQuota = useQuotaStore((state) => state.xaiQuota);
-  const initialAutoExecutionPolicy = useRef(
+  const [initialAutoExecutionPolicy] = useState(() =>
     hasAccountInspectionAutoExecutePolicies(loadAccountInspectionConfigurableSettings())
-  ).current;
+  );
 
   const [backendState, dispatchBackendState] = useReducer(
     inspectionBackendReducer,
@@ -421,7 +421,9 @@ export function AccountInspectionPage() {
   }, [batchHydrated, batchOperations, batchStorageKey, connectionStatus]);
 
   const batchRefreshRef = useRef({ currentInspectionDetailOptions, applyBackendResponse, loadAuthFiles });
-  batchRefreshRef.current = { currentInspectionDetailOptions, applyBackendResponse, loadAuthFiles };
+  useLayoutEffect(() => {
+    batchRefreshRef.current = { currentInspectionDetailOptions, applyBackendResponse, loadAuthFiles };
+  }, [currentInspectionDetailOptions, applyBackendResponse, loadAuthFiles]);
   const runningBatchIds = batchOperations.filter((operation) => operation.state === 'running').map((operation) => operation.operationId).join('|');
 
   useEffect(() => {
@@ -961,8 +963,19 @@ export function AccountInspectionPage() {
       showNotification(t('monitoring.account_inspection_batch_no_ready'), 'warning');
       return;
     }
+    const operationIds = operations.map((operation) => operation.operationId).join(':');
+    const selectedTargets = operations.flatMap((operation) => operation.items)
+      .filter((entry) => entry.status === 'ready')
+      .map(({ item }) => `${item.key}:${item.action}`)
+      .sort()
+      .join('|');
+    const confirmationIdentity = scope === 'selected'
+      ? { dedupeKey: `account-inspection:execute:selected:${selectedTargets}:${operationIds}` }
+      : scope === 'filtered'
+        ? { dedupeKey: `account-inspection:execute:filtered:${operationIds}` }
+        : { dedupeKey: `account-inspection:execute:batch:${operationIds}` };
     showConfirmation({
-      dedupeKey: `account-inspection:execute:batch:${operations.map((operation) => operation.operationId).join(':')}`,
+      ...confirmationIdentity,
       title: t('monitoring.account_inspection_batch_preflight_title'),
       message: (
         <div className={styles.batchPreflight}>
@@ -1553,7 +1566,7 @@ export function AccountInspectionPage() {
     } finally {
       setScheduleLoading(false);
     }
-  }, [applyBackendResponse, parseIntegerInRange, scheduleDraft.enabled, scheduleDraft.intervalMinutes, schedule?.nextRunAt, setIsSettingsModalOpen, settingsDraft, showNotification, t]);
+  }, [applyBackendResponse, parseIntegerInRange, schedule, scheduleDraft.enabled, scheduleDraft.intervalMinutes, setIsSettingsModalOpen, settingsDraft, showNotification, t]);
 
   const handleResetSettings = useCallback(() => {
     dispatchBackendState({ type: 'resetSettings', settings: DEFAULT_ACCOUNT_INSPECTION_SETTINGS });
