@@ -19,6 +19,20 @@ import (
 
 const inspectionQuotaSource = "inspection"
 
+// A failed persistence attempt must not keep an account at the head of every
+// recovery batch. This fallback is scoped to the observed protection revision.
+type quotaRecoveryDeferral struct {
+	revision int64
+	retryAt  int64
+}
+
+type quotaRecoveryOutcome struct {
+	authID   string
+	err      error
+	retryAt  int64
+	canceled bool
+}
+
 // checkQuotaRecoveryNow shares the same directed recovery path as the timed
 // worker. It never runs concurrently with a full inspection of the account.
 func (s *accountInspectionScheduler) checkQuotaRecoveryNow(ctx context.Context, auth *coreauth.Auth) error {
@@ -155,13 +169,36 @@ func (s *accountInspectionScheduler) recoverQuotaProtections(ctx context.Context
 		if !ok || hold.RetryAt <= 0 || hold.RetryAt > now || hold.Recheck && !autoRecover {
 			continue
 		}
+		if deferred, loaded := s.quotaRecoveryDeferred.Load(auth.ID); loaded {
+			pause := deferred.(quotaRecoveryDeferral)
+			if pause.revision == hold.Revision && pause.retryAt > now {
+				continue
+			}
+			s.quotaRecoveryDeferred.Delete(auth.ID)
+		}
+		if _, active := s.quotaRecoveryActive.Load(auth.ID); active {
+			continue
+		}
 		if len(due) == 4 {
 			moreDue = true
 			break
 		}
 		due = append(due, auth)
 	}
-	runAccountInspectionWorkers(len(due), 4, nil, func(index int) bool { s.recoverQuotaAccount(ctx, due[index]); return ctx.Err() == nil })
+	outcomes := make([]quotaRecoveryOutcome, len(due))
+	runAccountInspectionWorkers(len(due), 4, nil, func(index int) bool {
+		outcomes[index] = s.recoverQuotaAccount(ctx, due[index])
+		return ctx.Err() == nil
+	})
+	for _, outcome := range outcomes {
+		if outcome.err != nil && !outcome.canceled {
+			if outcome.retryAt > 0 {
+				s.appendLog("warning", fmt.Sprintf("账号 %s 额度恢复失败，下次尝试时间 %d：%v", outcome.authID, outcome.retryAt, outcome.err))
+			} else {
+				s.appendLog("warning", fmt.Sprintf("账号 %s 额度恢复失败，保护可能已变化：%v", outcome.authID, outcome.err))
+			}
+		}
+	}
 	s.refreshAccountPoliciesIfQuotaChanged()
 	if moreDue && ctx.Err() == nil {
 		select {
@@ -232,15 +269,59 @@ func recoveryTime(auth *coreauth.Auth) int64 {
 	return hold.RetryAt
 }
 
-func (s *accountInspectionScheduler) recoverQuotaAccount(ctx context.Context, auth *coreauth.Auth) {
+func (s *accountInspectionScheduler) recoverQuotaAccount(ctx context.Context, auth *coreauth.Auth) quotaRecoveryOutcome {
+	outcome := quotaRecoveryOutcome{}
 	if auth == nil {
-		return
+		return outcome
 	}
+	outcome.authID = auth.ID
 	if _, loaded := s.quotaRecoveryActive.LoadOrStore(auth.ID, struct{}{}); loaded {
-		return
+		return outcome
 	}
 	defer s.quotaRecoveryActive.Delete(auth.ID)
-	s.recoverQuotaAccountWithMode(ctx, auth, false)
+	outcome.err = s.recoverQuotaAccountWithMode(ctx, auth, false)
+	if outcome.err == nil {
+		s.quotaRecoveryDeferred.Delete(auth.ID)
+		return outcome
+	}
+	if ctx.Err() != nil {
+		outcome.canceled = true
+		return outcome
+	}
+	outcome.retryAt = s.deferQuotaRecoveryFailure(ctx, auth, outcome.err)
+	return outcome
+}
+
+// Persist retry state for every recoverable failure, including limiter/timeouts
+// and failures writing the normal probe result. A revision change means another
+// operation owns the protection, so it must never inherit this attempt's error.
+func (s *accountInspectionScheduler) deferQuotaRecoveryFailure(ctx context.Context, auth *coreauth.Auth, recoveryErr error) int64 {
+	manager := s.inspectionAuthManager()
+	if manager == nil || auth == nil {
+		return 0
+	}
+	current, ok := manager.GetByID(auth.ID)
+	if !ok || current == nil || current.EnsureIndex() != auth.EnsureIndex() || current.RegistrationEpoch != auth.RegistrationEpoch {
+		return 0
+	}
+	old := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
+	hold, ok := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]
+	if !ok || hold.Revision != old.Revision {
+		return 0
+	}
+	hold.Failures++
+	hold.RetryAt = prorouting.NextRecheckAt(0, auth.ID, hold.Failures, time.Now())
+	if err := manager.ChangeQuotaProtection(ctx, current, inspectionQuotaSource, hold.Revision, &hold); err == nil {
+		s.quotaRecoveryDeferred.Delete(auth.ID)
+		s.publishQuotaProtectionState(auth.ID, "额度恢复失败，等待下次复查")
+		return hold.RetryAt
+	} else {
+		// Storage may be temporarily unavailable. Keep this attempt out of the
+		// immediate queue even if the durable retry write also failed.
+		s.quotaRecoveryDeferred.Store(auth.ID, quotaRecoveryDeferral{revision: hold.Revision, retryAt: hold.RetryAt})
+		s.appendLog("warning", fmt.Sprintf("账号 %s 额度恢复错误 %v；重试时间写入失败：%v", auth.ID, recoveryErr, err))
+		return hold.RetryAt
+	}
 }
 
 func (s *accountInspectionScheduler) recoverQuotaAccountWithMode(ctx context.Context, auth *coreauth.Auth, manual bool) error {
@@ -397,11 +478,8 @@ func (s *accountInspectionScheduler) publishQuotaProtectionState(authID, reason 
 		current.QuotaCooling = observed.QuotaCooling
 		current.QuotaRetryAt = observed.QuotaRetryAt
 		current.QuotaRevision = observed.QuotaRevision
-		current.ActionReason = reason
-		if !observed.QuotaCooling {
-			current.Action = accountInspectionActionKeep
-			current.IsQuota = false
-		}
+		// This notification only reflects the live scheduling restriction. The
+		// last probe's action, reason and quota conclusion remain observations.
 		return current, true
 	})
 	var err error
@@ -413,6 +491,9 @@ func (s *accountInspectionScheduler) publishQuotaProtectionState(authID, reason 
 	broadcast.send()
 	if err != nil {
 		s.appendLog("warning", "额度保护状态保存失败："+err.Error())
+	}
+	if changed && reason != "" {
+		s.appendLog("info", fmt.Sprintf("账号 %s：%s", authID, reason))
 	}
 }
 

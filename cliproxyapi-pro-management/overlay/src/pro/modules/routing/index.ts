@@ -1,5 +1,5 @@
 export { routingModule } from './manifest';
-export { SchedulingRecoveryActions } from './SchedulingRecoveryActions';
+export { SchedulingRecoveryActions, SchedulingRecoveryOutcome } from './SchedulingRecoveryActions';
 export {
   routingPolicyApi,
   schedulingRecoveryResultTone,

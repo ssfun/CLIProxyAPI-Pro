@@ -206,6 +206,10 @@ func TestAntigravityInspectionBindsPreparedTokenToAutomaticAction(t *testing.T) 
 				if result.TokenRefreshStatus != "failed" || result.ErrorCode != "token_refresh_error" || probes.Load() != 0 {
 					t.Fatalf("refresh failure = status:%s code:%s probes:%d", result.TokenRefreshStatus, result.ErrorCode, probes.Load())
 				}
+				current, _ := manager.GetByID(registered.ID)
+				if current.Unavailable || current.LastError != nil || current.Status == coreauth.StatusError {
+					t.Fatalf("refresh observation changed native scheduling state: %#v", current)
+				}
 				return
 			}
 			wantRefreshes := int32(1)
@@ -1008,6 +1012,43 @@ func TestQuotaRecoverySkipsIdleScanWithoutStoredProtections(t *testing.T) {
 	after, _ := m.GetByID(a.ID)
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("idle quota recovery mutated auth state")
+	}
+}
+
+func TestQuotaRecoveryAdvancesPastFourFailingAccounts(t *testing.T) {
+	ctx := startProQuotaTestService(t)
+	manager := coreauth.NewManager(nil, nil, nil)
+	ids := []string{"failing-a", "failing-b", "failing-c", "failing-d", "failing-e"}
+	for index, id := range ids {
+		auth, err := manager.Register(ctx, &coreauth.Auth{ID: id, FileName: id + ".json", Provider: "claude"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A valid JSON value with the wrong shape fails before the normal
+		// recovery code reaches its retry-state write.
+		hold := prorouting.QuotaProtection{Recheck: true, RetryAt: time.Now().Add(time.Duration(index-6) * time.Minute).UnixMilli(), Settings: json.RawMessage(`"invalid settings"`)}
+		if err := manager.ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, 0, &hold); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scheduler := newAccountInspectionScheduler(&Handler{authManager: manager}, nil)
+	scheduler.schedule.Settings.AutoExecuteQuotaRecoveryEnable = true
+	scheduler.recoverQuotaProtections(ctx)
+	for index, id := range ids {
+		auth, _ := manager.GetByID(id)
+		hold := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
+		if index < 4 && (hold.Failures != 1 || hold.RetryAt <= time.Now().UnixMilli()) {
+			t.Fatalf("first batch account %s did not back off: %+v", id, hold)
+		}
+		if index == 4 && hold.Failures != 0 {
+			t.Fatalf("fifth account was processed in the first batch: %+v", hold)
+		}
+	}
+	scheduler.recoverQuotaProtections(ctx)
+	auth, _ := manager.GetByID(ids[4])
+	hold := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
+	if hold.Failures != 1 || hold.RetryAt <= time.Now().UnixMilli() {
+		t.Fatalf("later account never received its recovery attempt: %+v", hold)
 	}
 }
 

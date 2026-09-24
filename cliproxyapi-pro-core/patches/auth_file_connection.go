@@ -107,6 +107,7 @@ func (h *Handler) testAuthConnection(ctx context.Context, auth *coreauth.Auth, m
 				coreexecutor.GenerateMetadataKey:       true,
 			},
 		},
+		auth,
 	)
 	latencyMS := time.Since(startedAt).Milliseconds()
 	if errExecute != nil {
@@ -260,6 +261,9 @@ func isAuthFileConnectionTextModel(model *registry.ModelInfo) bool {
 func authFileConnectionTestError(err error) (message string, code string, status int) {
 	if err == nil {
 		return "connection test failed", "connection_test_failed", 0
+	}
+	if errors.Is(err, coreauth.ErrSchedulingBlockChanged) {
+		return "account changed before execution", "account_changed", http.StatusConflict
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "connection test timed out", "timeout", http.StatusGatewayTimeout

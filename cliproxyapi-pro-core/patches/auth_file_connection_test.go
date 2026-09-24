@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -216,5 +217,29 @@ func TestExtractAuthFileConnectionOutput(t *testing.T) {
 				t.Fatalf("extractAuthFileConnectionOutput() = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+// The management snapshot can become stale before ExecutePinnedAuth looks up
+// the ID. It must not prepare, send, or write a result for the new registration.
+func TestAuthFileConnectionRejectsReplacementBeforeExecution(t *testing.T) {
+	manager := coreauth.NewManager(nil, nil, nil)
+	executor := &authFileConnectionExecutor{response: []byte(`{"choices":[{"message":{"content":"OK"}}]}`)}
+	manager.RegisterExecutor(executor)
+	old, err := manager.Register(context.Background(), &coreauth.Auth{ID: "replaced-before-send", Provider: "codex", FileName: "same.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := manager.Register(context.Background(), &coreauth.Auth{ID: old.ID, Provider: "codex", FileName: old.FileName, Unavailable: true, Status: coreauth.StatusError})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := (&Handler{authManager: manager}).testAuthConnection(context.Background(), old, "gpt-5")
+	if result.Success || result.ErrorCode != "account_changed" || executor.lastAuthID != "" {
+		t.Fatalf("result=%+v executed=%q", result, executor.lastAuthID)
+	}
+	current, _ := manager.GetByID(old.ID)
+	if !reflect.DeepEqual(current, replacement) {
+		t.Fatal("replacement changed without executing its own request")
 	}
 }

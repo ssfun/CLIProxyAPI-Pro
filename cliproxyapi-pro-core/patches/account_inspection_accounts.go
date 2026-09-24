@@ -347,7 +347,6 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 		result.Error = refreshErr.Error()
 		result.ErrorCode = "token_refresh_error"
 		result.ActionReason = "刷新令牌失败，保留账号"
-		s.syncInspectionAuthError(ctx, account, "token_refresh_error", refreshErr.Error(), 0)
 		s.appendLog("warning", fmt.Sprintf("%s 刷新令牌失败，保留账号：%s", account.identity(), refreshErr.Error()))
 		return result
 	} else if refreshTriggered {
@@ -388,11 +387,6 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 		result.Error = err.Error()
 		result.ErrorCode = proinspection.ErrorCode(statusCode, "inspection_probe_error")
 		result.ActionReason = "探测异常，保留账号"
-		if statusCode != nil && proinspection.IsAccountErrorStatus(*statusCode) {
-			s.syncInspectionAuthStatus(ctx, account, *statusCode)
-		} else {
-			s.syncInspectionAuthError(ctx, account, "inspection_probe_error", err.Error(), 0)
-		}
 		s.appendLog("warning", fmt.Sprintf("%s 探测异常，保留账号：%s", account.identity(), err.Error()))
 		return result
 	}
@@ -560,25 +554,6 @@ func isInspectionAuthRecoveryStatus(status int) bool {
 	return (status >= 200 && status < 300) || status == 402 || status == 429
 }
 
-func (s *accountInspectionScheduler) syncInspectionAuthError(ctx context.Context, account accountInspectionAccount, code string, message string, status int) {
-	if s == nil || s.h == nil || s.inspectionAuthManager() == nil || account.AuthIndex == "" {
-		return
-	}
-	if !accountInspectionAccountMatchesAuth(account, s.h.authByIndex(account.AuthIndex)) {
-		return
-	}
-	err := s.h.updateProErrorAuth(ctx, account.AuthIndex, func(auth *coreauth.Auth) {
-		auth.Status = coreauth.StatusError
-		auth.StatusMessage = message
-		auth.Unavailable = true
-		syncAuthInspectionLastError(auth, &coreauth.Error{Code: code, Message: message, HTTPStatus: status})
-		auth.UpdatedAt = time.Now()
-	})
-	if err != nil {
-		s.appendLog("warning", fmt.Sprintf("%s 认证状态回写失败：%s", account.identity(), err.Error()))
-	}
-}
-
 func (s *accountInspectionScheduler) clearInspectionAuthError(ctx context.Context, account accountInspectionAccount) {
 	if s == nil || s.h == nil || s.inspectionAuthManager() == nil || account.AuthIndex == "" {
 		return
@@ -607,11 +582,6 @@ func (s *accountInspectionScheduler) clearInspectionAuthError(ctx context.Contex
 }
 
 func (s *accountInspectionScheduler) syncInspectionAuthStatus(ctx context.Context, account accountInspectionAccount, status int) {
-	if proinspection.IsAccountErrorStatus(status) {
-		message := fmt.Sprintf("HTTP %d", status)
-		s.syncInspectionAuthError(ctx, account, "inspection_http_error", message, status)
-		return
-	}
 	if isInspectionAuthRecoveryStatus(status) {
 		s.clearInspectionAuthError(ctx, account)
 	}
@@ -882,9 +852,8 @@ func (s *accountInspectionScheduler) executeAction(ctx context.Context, result a
 	switch action {
 	case accountInspectionActionDisable, accountInspectionActionEnable:
 		if action == accountInspectionActionEnable && !auth.Disabled {
-			hold, ok := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
-			if ok {
-				return s.inspectionAuthManager().ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, hold.Revision, nil)
+			if _, ok := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]; ok {
+				return fmt.Errorf("account has an inspection quota protection; use the versioned routing release action")
 			}
 		}
 		return s.h.updateProAuth(ctx, result.AuthIndex, func(auth *coreauth.Auth) {

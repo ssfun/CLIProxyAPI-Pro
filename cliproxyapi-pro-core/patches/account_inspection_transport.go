@@ -318,7 +318,6 @@ endpointLoop:
 	if lastMessage == "" {
 		lastMessage = "antigravity deep probe unavailable"
 	}
-	s.syncInspectionAuthError(ctx, account, "antigravity_deep_probe_error", lastMessage, proinspection.StatusValue(lastStatus))
 	decision.Action = accountInspectionActionKeep
 	decision.ActionReason = "Antigravity 深度检测临时异常，保留账号"
 	decision.Error = lastMessage
@@ -632,7 +631,6 @@ func (s *accountInspectionScheduler) applyXAIDeepProbeOutcome(ctx context.Contex
 	}
 	if err != nil {
 		message := err.Error()
-		s.syncInspectionAuthError(ctx, account, "xai_deep_probe_error", message, proinspection.StatusValue(probeStatus))
 		decision.Action = accountInspectionActionKeep
 		decision.ActionReason = "xAI 深度检测临时异常，保留账号"
 		decision.Error = message
@@ -669,7 +667,6 @@ func (s *accountInspectionScheduler) applyXAIDeepProbeOutcome(ctx context.Contex
 		s.appendLog("warning", fmt.Sprintf("%s xAI 深度检测额度不可用：%s", account.identity(), message))
 		return probeDecision, probeStatus, nil
 	default:
-		s.syncInspectionAuthError(ctx, account, "xai_deep_probe_error", message, resp.StatusCode)
 		decision.Action = accountInspectionActionKeep
 		decision.ActionReason = "xAI 深度检测临时异常，保留账号"
 		decision.Error = message

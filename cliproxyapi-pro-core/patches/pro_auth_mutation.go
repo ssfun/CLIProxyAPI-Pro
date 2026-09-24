@@ -52,28 +52,26 @@ func setProAuthDisabledState(auth *coreauth.Auth, disabled bool) {
 	if auth.Metadata == nil {
 		auth.Metadata = make(map[string]any)
 	}
-	clearRoutingProtectionOwnership(auth)
+	if disabled {
+		clearRoutingProtectionOwnership(auth)
+	}
 	auth.Metadata["disabled"] = disabled
 	if disabled {
 		auth.Status = coreauth.StatusDisabled
 		auth.StatusMessage = "disabled by scheduled account inspection"
 	} else {
-		code := authInspectionLastErrorCode(auth)
-		if code != "" && !isInspectionAuthErrorCode(code) {
+		if authInspectionLastErrorCode(auth) != "" || auth.Unavailable {
 			auth.Status = coreauth.StatusError
-			auth.Unavailable = true
 			if auth.LastError != nil {
 				auth.StatusMessage = strings.TrimSpace(auth.LastError.Message)
 			} else if raw, ok := auth.Metadata["last_error"].(map[string]any); ok {
 				auth.StatusMessage = strings.TrimSpace(stringFromAny(raw["message"]))
+			} else if auth.StatusMessage == "disabled by scheduled account inspection" {
+				auth.StatusMessage = "account remains unavailable"
 			}
 		} else {
 			auth.Status = coreauth.StatusActive
 			auth.StatusMessage = ""
-			auth.Unavailable = false
-			if isInspectionAuthErrorCode(code) {
-				syncAuthInspectionLastError(auth, nil)
-			}
 		}
 	}
 	auth.UpdatedAt = time.Now()

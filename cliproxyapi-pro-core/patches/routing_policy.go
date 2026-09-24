@@ -204,6 +204,23 @@ func routingRecoveryModel(auth *coreauth.Auth, requested string, details []routi
 	return resolveAuthFileConnectionTestModel(auth, "")
 }
 
+const routingRecoveryTimeout = 55 * time.Second
+
+type routingRecoveryPhase struct {
+	Source string `json:"source"`
+	Model  string `json:"model,omitempty"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+func failedRoutingPhase(source, model string, err error) routingRecoveryPhase {
+	status := "failed"
+	if errors.Is(err, context.DeadlineExceeded) {
+		status = "timeout"
+	}
+	return routingRecoveryPhase{Source: source, Model: model, Status: status, Error: err.Error()}
+}
+
 // CheckRoutingAccount operates on the live restriction. Inspection-owned holds
 // use the existing directed quota recovery; upstream failures use a pinned real
 // request whose result is recorded by the native manager.
@@ -216,7 +233,6 @@ func (h *Handler) CheckRoutingAccount(c *gin.Context) {
 	request.AuthID = strings.TrimSpace(request.AuthID)
 	request.AuthIndex = strings.TrimSpace(request.AuthIndex)
 	request.Source = strings.TrimSpace(request.Source)
-	request.Model = strings.TrimSpace(request.Model)
 	auth, status := h.routingRecoveryAuth(request)
 	if status != http.StatusOK {
 		c.JSON(status, gin.H{"error": "account is unavailable or has changed"})
@@ -244,52 +260,83 @@ func (h *Handler) CheckRoutingAccount(c *gin.Context) {
 		return
 	}
 
+	if request.Source != "" && (request.Model != "" || request.Revision != "") {
+		found := false
+		for _, detail := range before.Details {
+			if detail.Source == request.Source && detail.Model == request.Model && (request.Revision == "" || detail.Revision == request.Revision) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.JSON(http.StatusConflict, gin.H{"error": "restriction changed; refresh and retry"})
+			return
+		}
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), routingRecoveryTimeout)
+	defer cancel()
 	steps := make([]string, 0, 2)
+	phases := make([]routingRecoveryPhase, 0, 2)
 	var test *authFileConnectionTestResponse
+	writeResult := func() {
+		current, ok := h.authManager.GetByID(request.AuthID)
+		if !ok || current == nil || current.EnsureIndex() != request.AuthIndex || current.RegistrationEpoch != observedEpoch {
+			c.JSON(http.StatusConflict, gin.H{"error": "account changed during recovery", "phases": phases})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"before": before, "after": schedulingBoardAccount(current, time.Now()), "steps": steps, "phases": phases, "test": test})
+	}
 	if request.Source == "" || request.Source == "inspection" {
 		if _, exists := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]; exists {
 			scheduler := schedulerForHandler(h)
 			if scheduler == nil {
-				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "quota recovery is unavailable"})
+				phases = append(phases, failedRoutingPhase("inspection", "", errors.New("quota recovery is unavailable")))
+				writeResult()
 				return
 			}
-			if err := scheduler.checkQuotaRecoveryNow(c.Request.Context(), auth); err != nil {
-				c.JSON(accountInspectionHTTPStatus(err), gin.H{"error": err.Error()})
+			if err := scheduler.checkQuotaRecoveryNow(ctx, auth); err != nil {
+				phases = append(phases, failedRoutingPhase("inspection", "", err))
+				writeResult()
 				return
 			}
 			steps = append(steps, "inspection")
+			phases = append(phases, routingRecoveryPhase{Source: "inspection", Status: "completed"})
 			auth, _ = h.authManager.GetByID(request.AuthID)
 			if auth == nil || auth.EnsureIndex() != request.AuthIndex || auth.RegistrationEpoch != observedEpoch {
-				c.JSON(http.StatusConflict, gin.H{"error": "account changed during recovery"})
+				writeResult()
 				return
 			}
 		}
 	}
-	// When the quota hold remains, a paid request cannot establish quota
-	// recovery. A caller may explicitly select the upstream source separately.
 	_, stillHeld := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
 	currentBoard := schedulingBoardAccount(auth, time.Now())
 	if (request.Source == "" && !stillHeld || request.Source == "upstream") && containsString(currentBoard.Sources, "upstream") {
 		model, err := routingRecoveryModel(auth, request.Model, currentBoard.Details)
 		if err != nil {
-			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+			phases = append(phases, failedRoutingPhase("upstream", request.Model, err))
+			writeResult()
 			return
 		}
-		result := h.testAuthConnection(c.Request.Context(), auth, model)
+		if err := ctx.Err(); err != nil {
+			phases = append(phases, failedRoutingPhase("upstream", model, err))
+			writeResult()
+			return
+		}
+		result := h.testAuthConnection(ctx, auth, model)
 		test = &result
 		steps = append(steps, "upstream")
+		phase := routingRecoveryPhase{Source: "upstream", Model: model, Status: "completed"}
+		if !result.Success {
+			phase.Status, phase.Error = "failed", result.Error
+			if result.ErrorCode == "timeout" {
+				phase.Status = "timeout"
+			}
+		}
+		phases = append(phases, phase)
+	} else if request.Source == "" && stillHeld && containsString(currentBoard.Sources, "upstream") {
+		phases = append(phases, routingRecoveryPhase{Source: "upstream", Status: "skipped", Error: "quota protection remains active; select the upstream restriction to check it separately"})
 	}
-	current, ok := h.authManager.GetByID(request.AuthID)
-	if !ok || current == nil || current.EnsureIndex() != request.AuthIndex || current.RegistrationEpoch != observedEpoch {
-		c.JSON(http.StatusConflict, gin.H{"error": "account changed during recovery"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"before": before,
-		"after":  schedulingBoardAccount(current, time.Now()),
-		"steps":  steps,
-		"test":   test,
-	})
+	writeResult()
 }
 
 func (h *Handler) ReleaseRoutingRestriction(c *gin.Context) {
@@ -301,7 +348,6 @@ func (h *Handler) ReleaseRoutingRestriction(c *gin.Context) {
 	request.AuthID = strings.TrimSpace(request.AuthID)
 	request.AuthIndex = strings.TrimSpace(request.AuthIndex)
 	request.Source = strings.TrimSpace(request.Source)
-	request.Model = strings.TrimSpace(request.Model)
 	auth, status := h.routingRecoveryAuth(request)
 	if status != http.StatusOK {
 		c.JSON(status, gin.H{"error": "account is unavailable or has changed"})

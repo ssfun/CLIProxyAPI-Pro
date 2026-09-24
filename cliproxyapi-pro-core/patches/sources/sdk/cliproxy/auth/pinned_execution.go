@@ -16,6 +16,18 @@ import (
 
 var ErrSchedulingBlockChanged = errors.New("scheduling block or account changed")
 
+type pinnedExpectedIdentityKey struct{}
+
+func pinnedExpectedIdentityMatches(ctx context.Context, auth *Auth) bool {
+	expected, _ := ctx.Value(pinnedExpectedIdentityKey{}).(string)
+	return expected == "" || expected == pinnedResultIdentity(auth)
+}
+
+func (m *Manager) pinnedCurrentIdentityMatches(auth *Auth) bool {
+	current, ok := m.GetByID(auth.ID)
+	return ok && pinnedCredentialMatches(auth, current)
+}
+
 const pinnedResultIdentityKey = "pro.pinned_auth_identity"
 
 func pinnedResultOptions(opts cliproxyexecutor.Options, auth *Auth) cliproxyexecutor.Options {
@@ -162,7 +174,7 @@ func (m *Manager) ClearSchedulingBlock(ctx context.Context, base *Auth, model st
 // so an operator can verify whether a credential has recovered. The normal
 // preparation, proxy transport, unauthorized refresh, alias mapping, and result
 // accounting paths are still applied.
-func (m *Manager) ExecutePinnedAuth(ctx context.Context, authID string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+func (m *Manager) ExecutePinnedAuth(ctx context.Context, authID string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, expected ...*Auth) (cliproxyexecutor.Response, error) {
 	if m == nil {
 		return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "auth manager is unavailable"}
 	}
@@ -174,6 +186,13 @@ func (m *Manager) ExecutePinnedAuth(ctx context.Context, authID string, req clip
 	if !okAuth || auth == nil {
 		return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "auth not found"}
 	}
+	if len(expected) > 0 && !pinnedCredentialMatches(expected[0], auth) {
+		return cliproxyexecutor.Response{}, ErrSchedulingBlockChanged
+	}
+	if err := ctx.Err(); err != nil {
+		return cliproxyexecutor.Response{}, err
+	}
+	ctx = context.WithValue(ctx, pinnedExpectedIdentityKey{}, pinnedResultIdentity(auth))
 	provider := executorKeyFromAuth(auth)
 	executor, okExecutor := m.Executor(provider)
 	if !okExecutor || executor == nil {
@@ -195,11 +214,20 @@ func (m *Manager) ExecutePinnedAuth(ctx context.Context, authID string, req clip
 		return cliproxyexecutor.Response{}, &Error{Code: "model_not_found", Message: "auth does not provide the requested model"}
 	}
 
+	if !m.pinnedCurrentIdentityMatches(auth) {
+		return cliproxyexecutor.Response{}, ErrSchedulingBlockChanged
+	}
 	preparedAuth, errPrepare := m.prepareRequestAuth(execCtx, executor, auth)
 	if errPrepare != nil {
+		if errors.Is(errPrepare, ErrSchedulingBlockChanged) {
+			return cliproxyexecutor.Response{}, errPrepare
+		}
 		result := Result{AuthID: auth.ID, Provider: provider, Model: routeModel, Success: false, Error: resultErrorFromError(errPrepare), Options: pinnedResultOptions(opts, auth)}
 		m.MarkResult(execCtx, result)
 		return cliproxyexecutor.Response{}, errPrepare
+	}
+	if preparedAuth == nil || preparedAuth.RegistrationEpoch != auth.RegistrationEpoch || preparedAuth.EnsureIndex() != auth.EnsureIndex() {
+		return cliproxyexecutor.Response{}, ErrSchedulingBlockChanged
 	}
 	auth = preparedAuth
 
@@ -222,6 +250,12 @@ func (m *Manager) ExecutePinnedAuth(ctx context.Context, authID string, req clip
 			execReq = attachResolvedAPIKeyModelInfo(routing, execReq, auth, routeModel, upstreamModel)
 		}
 
+		if err := execCtx.Err(); err != nil {
+			return cliproxyexecutor.Response{}, err
+		}
+		if !m.pinnedCurrentIdentityMatches(auth) {
+			return cliproxyexecutor.Response{}, ErrSchedulingBlockChanged
+		}
 		resp, errExecute := executor.Execute(execCtx, auth, execReq, execOpts)
 		if errExecute != nil {
 			if errContext := execCtx.Err(); errContext != nil {
@@ -230,6 +264,9 @@ func (m *Manager) ExecutePinnedAuth(ctx context.Context, authID string, req clip
 			if refreshed, okRefresh := m.tryRefreshAfterUnauthorized(execCtx, auth, errExecute, didRefreshOnUnauthorized); okRefresh {
 				auth = refreshed
 				didRefreshOnUnauthorized = true
+				if !m.pinnedCurrentIdentityMatches(auth) {
+					return cliproxyexecutor.Response{}, ErrSchedulingBlockChanged
+				}
 				resp, errExecute = executor.Execute(execCtx, auth, execReq, execOpts)
 			}
 		}

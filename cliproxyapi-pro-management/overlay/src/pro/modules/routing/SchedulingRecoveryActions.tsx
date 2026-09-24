@@ -12,11 +12,40 @@ import styles from './SchedulingRecoveryActions.module.scss';
 
 type Props = {
   account: SchedulingBoardAccount;
-  onResult: (result: SchedulingRecoveryResult) => void | Promise<void>;
+  onResult: (result?: SchedulingRecoveryResult) => void | Promise<void>;
 };
 
 const restrictionKey = (detail: SchedulingBoardDetail) =>
   `${detail.source}:${detail.scope}:${detail.model || ''}:${detail.revision || ''}`;
+
+export function SchedulingRecoveryOutcome({ result }: { result: SchedulingRecoveryResult }) {
+  const { t } = useTranslation();
+  const resultTone = schedulingRecoveryResultTone(result);
+  return (
+    <div className={styles.outcome} role="status">
+      <p className={styles[resultTone]}>
+        {resultTone === 'error'
+          ? t('routing_policy.recovery.failed')
+          : result.after?.authId
+          ? t('routing_policy.recovery.still_restricted')
+          : t('routing_policy.recovery.restored')}
+      </p>
+      {result.phases?.map((phase, index) => (
+        <p key={`${phase.source}:${phase.model || ''}:${index}`} className={styles[phase.status === 'completed' ? 'success' : phase.status === 'skipped' ? 'warning' : 'error']}>
+          {t(`routing_policy.recovery.phase_${phase.source}`)}
+          {phase.model ? ` · ${phase.model}` : ''}: {t(`routing_policy.recovery.phase_${phase.status}`)}
+          {phase.error ? ` · ${phase.error}` : ''}
+        </p>
+      ))}
+      {!result.phases?.length && result.test && !result.test.success && result.test.error ? (
+        <p className={styles.error}>{result.test.error}</p>
+      ) : null}
+      {result.after?.reason ? (
+        <p>{t('routing_policy.recovery.current_reason')}: {result.after.reason}</p>
+      ) : null}
+    </div>
+  );
+}
 
 export function SchedulingRecoveryActions({ account, onResult }: Props) {
   const { t } = useTranslation();
@@ -24,7 +53,6 @@ export function SchedulingRecoveryActions({ account, onResult }: Props) {
   const [error, setError] = useState('');
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const [result, setResult] = useState<SchedulingRecoveryResult | null>(null);
-  const resultTone = result ? schedulingRecoveryResultTone(result) : null;
 
   if (!account.registrationEpoch) {
     return <p>{t('routing_policy.recovery.unavailable_version')}</p>;
@@ -38,18 +66,20 @@ export function SchedulingRecoveryActions({ account, onResult }: Props) {
   const run = async (operation: () => Promise<SchedulingRecoveryResult>) => {
     setBusy(true);
     setError('');
+    setResult(null);
+    let response: SchedulingRecoveryResult | undefined;
     try {
-      const response = await operation();
+      response = await operation();
       setResult(response);
       setConfirmKey(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t('routing_policy.recovery.failed'));
+    } finally {
       try {
         await onResult(response);
       } catch (refreshError) {
         setError(refreshError instanceof Error ? refreshError.message : t('routing_policy.recovery.refresh_failed'));
       }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t('routing_policy.recovery.failed'));
-    } finally {
       setBusy(false);
     }
   };
@@ -68,26 +98,45 @@ export function SchedulingRecoveryActions({ account, onResult }: Props) {
         {t('routing_policy.recovery.check')}
       </Button>
       <small>{t('routing_policy.recovery.request_notice')}</small>
-      {result ? (
-        <p className={styles[resultTone!]} role="status">
-          {resultTone === 'error'
-            ? t('routing_policy.recovery.failed')
-            : result.after?.authId
-            ? t('routing_policy.recovery.still_restricted')
-            : t('routing_policy.recovery.restored')}
-          {result.test && !result.test.success && result.test.error
-            ? ` · ${result.test.error}`
-            : null}
-        </p>
-      ) : null}
+      {result ? <SchedulingRecoveryOutcome result={result} /> : null}
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
+      <div className={styles.targeted}>
+        <h4>{t('routing_policy.recovery.targeted_title')}</h4>
+        {account.details.filter((detail) => detail.source === 'inspection' || detail.source === 'upstream').map((detail, index) => {
+          const key = `${restrictionKey(detail)}:${index}`;
+          const label = `${t(`routing_policy.sources.${detail.source}`, { defaultValue: detail.source })} · ${detail.model || t('routing_policy.runtime.all_models')}`;
+          return (
+            <div className={styles.manualRow} key={key}>
+              <span className={styles.detailLabel}>
+                <strong>{label}</strong>
+                <small>{t(`routing_policy.reasons.${detail.reason}`, { defaultValue: detail.reason || '-' })}</small>
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy}
+                onClick={() => void run(() => routingPolicyApi.check({
+                  ...requestBase,
+                  source: detail.source as 'inspection' | 'upstream',
+                  model: detail.model || '',
+                  revision: detail.revision,
+                }))}
+              >
+                {t(detail.source === 'inspection'
+                  ? 'routing_policy.recovery.check_quota'
+                  : 'routing_policy.recovery.verify_request')}
+              </Button>
+            </div>
+          );
+        })}
+      </div>
       <details className={styles.manual}>
         <summary>{t('routing_policy.recovery.manual_title')}</summary>
         <p>{t('routing_policy.recovery.manual_notice')}</p>
         {account.details.filter((detail) => detail.revision && (
           detail.source === 'inspection' || detail.source === 'upstream' && Boolean(detail.retryAt)
-        )).map((detail) => {
-          const key = restrictionKey(detail);
+        )).map((detail, index) => {
+          const key = `${restrictionKey(detail)}:${index}`;
           const label = `${t(`routing_policy.sources.${detail.source}`, { defaultValue: detail.source })} · ${detail.model || t('routing_policy.runtime.all_models')}`;
           return (
             <div className={styles.manualRow} key={key}>

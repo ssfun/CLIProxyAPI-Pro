@@ -87,6 +87,14 @@ class ValidateWorkflowTests(unittest.TestCase):
         self.assertIn("stopSlowHandler", fixture)
         self.assertEqual(2, fixture.count("close(stopSlowHandler)"))
         self.assertEqual(4, fixture.count("resetAntigravityCapabilityCache"))
+        self.assertIn("antigravity_models_timeout_cleanup codex_live_media_loopback", script)
+        media_fixture = (ROOT / "scripts/validation/fixtures/codex_live_media_loopback.patch").read_text()
+        self.assertIn("newTestLoopbackWebRTCAPI", media_fixture)
+        self.assertIn("offerCandidatesAreLoopback(t, sdp)", media_fixture)
+        # Setup is isolated; the real audio/data transfer assertions are not removed.
+        removed = [line for line in media_fixture.splitlines() if line.startswith("-") and not line.startswith("---")]
+        self.assertTrue(all("newTestWebRTCAPI(t)" in line for line in removed))
+
 
     def test_source_image_uses_buildx_cache_and_pinned_management_asset(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()

@@ -12,6 +12,7 @@ import (
 
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	proinspection "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/inspection"
+	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
 )
 
 func TestAccountFromAuthUsesFileNameWhenEmailUnavailable(t *testing.T) {
@@ -172,7 +173,7 @@ func TestSyncAuthInspectionLastErrorClearsMetadata(t *testing.T) {
 	}
 }
 
-func TestSyncInspectionAuthErrorPersistsLastErrorMetadata(t *testing.T) {
+func TestInspectionHTTPErrorDoesNotChangeNativeSchedulingState(t *testing.T) {
 	manager := coreauth.NewManager(nil, nil, nil)
 	registered, err := manager.Register(context.Background(), &coreauth.Auth{
 		Provider: "codex",
@@ -185,7 +186,7 @@ func TestSyncInspectionAuthErrorPersistsLastErrorMetadata(t *testing.T) {
 	}
 
 	scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
-	scheduler.syncInspectionAuthError(context.Background(), accountFromAuth(registered), "token_refresh_error", "refresh failed", 0)
+	scheduler.syncInspectionAuthStatus(context.Background(), accountFromAuth(registered), http.StatusUnauthorized)
 
 	var got *coreauth.Auth
 	for _, auth := range manager.List() {
@@ -197,22 +198,12 @@ func TestSyncInspectionAuthErrorPersistsLastErrorMetadata(t *testing.T) {
 	if got == nil {
 		t.Fatal("updated auth not found")
 	}
-	if got.Status != coreauth.StatusError || !got.Unavailable || got.StatusMessage != "refresh failed" {
-		t.Fatalf("updated status = status:%q unavailable:%v message:%q, want error/unavailable/refresh failed", got.Status, got.Unavailable, got.StatusMessage)
-	}
-	if got.LastError == nil || got.LastError.Code != "token_refresh_error" || got.LastError.Message != "refresh failed" {
-		t.Fatalf("LastError = %#v, want token_refresh_error/refresh failed", got.LastError)
-	}
-	lastError, ok := got.Metadata["last_error"].(map[string]any)
-	if !ok {
-		t.Fatalf("metadata last_error = %#v, want object", got.Metadata["last_error"])
-	}
-	if lastError["code"] != "token_refresh_error" || lastError["message"] != "refresh failed" {
-		t.Fatalf("metadata last_error = %#v, want token_refresh_error/refresh failed", lastError)
+	if got.Status == coreauth.StatusError || got.Unavailable || got.StatusMessage != "" || got.LastError != nil || got.Metadata["last_error"] != nil {
+		t.Fatalf("inspection HTTP error changed native auth state: %#v", got)
 	}
 }
 
-func TestSyncInspectionAuthErrorRejectsReauthenticatedAccount(t *testing.T) {
+func TestInspectionRecoveryDoesNotClearReauthenticatedAccount(t *testing.T) {
 	manager := coreauth.NewManager(nil, nil, nil)
 	registered, err := manager.Register(context.Background(), &coreauth.Auth{
 		Provider: "codex",
@@ -231,7 +222,7 @@ func TestSyncInspectionAuthErrorRejectsReauthenticatedAccount(t *testing.T) {
 	}
 
 	scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
-	scheduler.syncInspectionAuthError(context.Background(), observed, "token_refresh_error", "stale refresh failed", 0)
+	scheduler.syncInspectionAuthStatus(context.Background(), observed, http.StatusOK)
 
 	got, _ := manager.GetByID(registered.ID)
 	if got == nil {
@@ -575,7 +566,7 @@ func TestExecuteActionRejectsSharedPluginVirtualSourceDelete(t *testing.T) {
 	}
 }
 
-func TestPluginVirtualInspectionErrorStaysOnTargetIdentity(t *testing.T) {
+func TestPluginVirtualInspectionErrorDoesNotChangeNativeState(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "gemini-cli.json")
 	if err := os.WriteFile(authPath, []byte(`{"type":"gemini-cli","project_ids":["project-a","project-b"]}`), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -588,15 +579,15 @@ func TestPluginVirtualInspectionErrorStaysOnTargetIdentity(t *testing.T) {
 	registeredPrimary, _ := manager.Register(context.Background(), primary)
 	registeredSecondary, _ := manager.Register(context.Background(), secondary)
 	scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
-	scheduler.syncInspectionAuthError(context.Background(), accountFromAuth(registeredSecondary), "inspection_probe_error", "project-b failed", 0)
+	scheduler.syncInspectionAuthStatus(context.Background(), accountFromAuth(registeredSecondary), http.StatusUnauthorized)
 
 	gotPrimary, _ := manager.GetByID(registeredPrimary.ID)
 	gotSecondary, _ := manager.GetByID(registeredSecondary.ID)
 	if gotPrimary.LastError != nil || gotPrimary.Status == coreauth.StatusError {
 		t.Fatalf("primary auth was polluted: %#v", gotPrimary)
 	}
-	if gotSecondary.LastError == nil || gotSecondary.LastError.Code != "inspection_probe_error" || gotSecondary.Status != coreauth.StatusError {
-		t.Fatalf("secondary auth error = %#v, want scoped inspection error", gotSecondary)
+	if gotSecondary.LastError != nil || gotSecondary.Status == coreauth.StatusError || gotSecondary.Unavailable {
+		t.Fatalf("secondary auth changed by inspection error: %#v", gotSecondary)
 	}
 	raw, err := os.ReadFile(authPath)
 	if err != nil {
@@ -604,6 +595,65 @@ func TestPluginVirtualInspectionErrorStaysOnTargetIdentity(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "last_error") {
 		t.Fatalf("shared source contains identity-local error: %s", raw)
+	}
+}
+
+func TestInspectionEnableCannotReleaseNewQuotaProtection(t *testing.T) {
+	ctx := startProQuotaTestService(t)
+	manager := coreauth.NewManager(nil, nil, nil)
+	registered, err := manager.Register(ctx, &coreauth.Auth{
+		Provider: "codex", ID: "enable-hold", FileName: "enable-hold.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleResult := accountFromAuth(registered).baseResult()
+	hold := prorouting.QuotaProtection{Recheck: true}
+	if err := manager.ChangeQuotaProtection(ctx, registered, inspectionQuotaSource, 0, &hold); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := manager.GetByID(registered.ID)
+	before := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]
+	scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
+	if err := scheduler.executeAction(ctx, staleResult, accountInspectionActionEnable); err == nil || !strings.Contains(err.Error(), "versioned routing release") {
+		t.Fatalf("enable error = %v, want explicit release instruction", err)
+	}
+	current, _ = manager.GetByID(registered.ID)
+	got, ok := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]
+	if !ok || got.Revision != before.Revision || current.Disabled {
+		t.Fatalf("new quota protection changed by stale enable: hold=%#v disabled=%v", got, current.Disabled)
+	}
+}
+
+func TestInspectionEnableDisabledAccountPreservesQuotaProtection(t *testing.T) {
+	ctx := startProQuotaTestService(t)
+	manager := coreauth.NewManager(nil, nil, nil)
+	registered, err := manager.Register(ctx, &coreauth.Auth{
+		Provider: "codex", ID: "disabled-with-hold", FileName: "disabled-with-hold.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hold := prorouting.QuotaProtection{Recheck: true}
+	if err := manager.ChangeQuotaProtection(ctx, registered, inspectionQuotaSource, 0, &hold); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := manager.GetByID(registered.ID)
+	current.Disabled = true
+	current.Status = coreauth.StatusDisabled
+	if _, err := manager.Update(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	current, _ = manager.GetByID(registered.ID)
+	before := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]
+	scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
+	if err := scheduler.executeAction(ctx, accountFromAuth(current).baseResult(), accountInspectionActionEnable); err != nil {
+		t.Fatalf("enable disabled account: %v", err)
+	}
+	current, _ = manager.GetByID(registered.ID)
+	got, ok := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]
+	if current.Disabled || !ok || got.Revision != before.Revision {
+		t.Fatalf("enable changed quota protection: hold=%#v disabled=%v", got, current.Disabled)
 	}
 }
 
@@ -624,5 +674,27 @@ func TestEnablePreservesNonInspectionLastError(t *testing.T) {
 	}
 	if _, ok := auth.Metadata["last_error"]; !ok {
 		t.Fatal("metadata last_error was removed")
+	}
+}
+
+func TestEnablePreservesNativeUnavailableWithoutLastError(t *testing.T) {
+	auth := &coreauth.Auth{
+		Disabled:      true,
+		Status:        coreauth.StatusDisabled,
+		StatusMessage: "disabled by scheduled account inspection",
+		Unavailable:   true,
+		Metadata: map[string]any{
+			prorouting.ProtectionMetadataKey: map[string]any{"owner": prorouting.ProtectionOwner},
+		},
+	}
+	setProAuthDisabledState(auth, false)
+	if auth.Disabled || auth.Status != coreauth.StatusError || !auth.Unavailable {
+		t.Fatalf("enabled auth cleared native restriction: %#v", auth)
+	}
+	if auth.StatusMessage != "account remains unavailable" {
+		t.Fatalf("status message = %q, want unresolved availability", auth.StatusMessage)
+	}
+	if !prorouting.ProtectionOwned(auth.Metadata) {
+		t.Fatal("enabling account removed native restriction ownership")
 	}
 }

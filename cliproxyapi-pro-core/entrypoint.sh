@@ -31,8 +31,8 @@ stop_child() {
     fi
 }
 
-# Invoked indirectly by the TERM/INT traps below.
-# shellcheck disable=SC2317
+# Invoked indirectly by the TERM/INT traps below; ShellCheck cannot trace trap strings.
+# shellcheck disable=SC2317,SC2329
 shutdown() {
     signal_name="$1"
     trap - TERM INT

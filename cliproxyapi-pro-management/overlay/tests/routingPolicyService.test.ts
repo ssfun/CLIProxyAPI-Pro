@@ -78,6 +78,10 @@ describe('scheduling board service model', () => {
     expect(schedulingRecoveryResultTone({ after: undefined, test: { success: true } })).toBe('success');
     expect(schedulingRecoveryResultTone({ after: { authId: 'a' } as never })).toBe('warning');
     expect(schedulingRecoveryResultTone({ after: undefined, test: { success: false } })).toBe('error');
+    expect(schedulingRecoveryResultTone({ after: undefined, phases: [
+      { source: 'inspection', status: 'completed' },
+      { source: 'upstream', status: 'timeout' },
+    ] })).toBe('error');
   });
 
   test('formats remaining countdowns correctly', () => {

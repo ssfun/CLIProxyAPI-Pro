@@ -38,7 +38,7 @@ import {
   type SchedulingBoardResponse,
   type SchedulingRecoveryResult,
 } from '@/pro/modules/routing/routingPolicy';
-import { SchedulingRecoveryActions } from './SchedulingRecoveryActions';
+import { SchedulingRecoveryActions, SchedulingRecoveryOutcome } from './SchedulingRecoveryActions';
 import { useRoutingAccountPlans } from './useRoutingAccountPlans';
 import { createLatestRequestGate } from '@/pro/modules/routing/latestRequestGate';
 import { buildInspectionFocusLocationState } from '@/pro/shared/inspectionNavigation';
@@ -292,7 +292,7 @@ function SchedulingBoardDetailPanel({
   t: ReturnType<typeof useTranslation>['t'];
   language: string;
   onOpenInspection?: (account: SchedulingBoardAccount) => void;
-  onRecovered: (result: SchedulingRecoveryResult) => void | Promise<void>;
+  onRecovered: (result?: SchedulingRecoveryResult) => void | Promise<void>;
 }) {
   const accountName = account.fileName || account.authIndex || account.authId || '-';
   const tone: ProInformationDetailsTone =
@@ -990,20 +990,14 @@ export function RoutingPolicyPage() {
               language={i18n.language}
               onOpenInspection={openInspection}
               onRecovered={async (result) => {
-                setRecoveryOutcome(result);
+                if (result) setRecoveryOutcome(result);
                 await loadBoard();
               }}
             />
           ) : selectedAuthId ? (
-            <p>
-              {recoveryOutcome && !recoveryOutcome.after?.authId
-                ? t('routing_policy.recovery.restored')
-                : t(
-                data
-                  ? 'routing_policy.runtime.no_longer_listed'
-                  : 'routing_policy.runtime.unavailable'
-              )}
-            </p>
+            recoveryOutcome ? <SchedulingRecoveryOutcome result={recoveryOutcome} /> : (
+              <p>{t(data ? 'routing_policy.runtime.no_longer_listed' : 'routing_policy.runtime.unavailable')}</p>
+            )
           ) : null}
         </ProDetailDialog>
       </div>

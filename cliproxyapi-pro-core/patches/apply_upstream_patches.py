@@ -4034,6 +4034,12 @@ replace_once(
     'for index, existing := range m.plugins',
 )
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_execution.go'
+insert_before(
+    auth_conductor,
+    '\n\tif !preparer.ShouldPrepareRequestAuth(target) {\n',
+    '\tif !pinnedExpectedIdentityMatches(ctx, target) {\n\t\treturn nil, ErrSchedulingBlockChanged\n\t}\n\n',
+    'if !pinnedExpectedIdentityMatches(ctx, target)',
+)
 replace_once(
     auth_conductor,
     '''\tserviceTier := serviceTierFromOptions(opts)

@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -12,8 +13,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	proinspection "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/inspection"
 	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	coreexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
 
 func TestRoutingRecoveryChecksPinnedModelAndClearsNativeCooldown(t *testing.T) {
@@ -448,7 +451,7 @@ func setQuotaProtectionsForTest(auth *coreauth.Auth, protections map[string]pror
 	auth.Metadata[prorouting.QuotaProtectionMetadataKey] = string(raw)
 }
 
-func TestUpdateProAuthSerializesInspectionPriority(t *testing.T) {
+func TestUpdateProAuthSerializesAdministrativeEnable(t *testing.T) {
 	manager := coreauth.NewManager(nil, nil, nil)
 	registered, err := manager.Register(context.Background(), &coreauth.Auth{
 		ID:       "serialized-auth",
@@ -492,8 +495,8 @@ func TestUpdateProAuthSerializesInspectionPriority(t *testing.T) {
 	if !ok || updated == nil {
 		t.Fatal("updated auth missing")
 	}
-	if updated.Disabled || prorouting.ProtectionOwned(updated.Metadata) {
-		t.Fatalf("inspection must win: disabled=%v metadata=%#v", updated.Disabled, updated.Metadata)
+	if updated.Disabled || !prorouting.ProtectionOwned(updated.Metadata) {
+		t.Fatalf("enable must preserve independent protection: disabled=%v metadata=%#v", updated.Disabled, updated.Metadata)
 	}
 }
 
@@ -537,6 +540,10 @@ func TestRoutingInspectionReleaseImmediatelyUpdatesStatus(t *testing.T) {
 	result := accountFromAuth(auth).baseResult()
 	scheduler.fillQuotaProtectionResult(auth, &result)
 	result.IsQuota = true
+	result.Action = accountInspectionActionDisable
+	result.ActionReason = "最近探测额度不足"
+	used := 99.0
+	result.UsedPercent = &used
 	scheduler.status.Results = []accountInspectionResult{result}
 	updates := make(chan accountInspectionLogStreamMessage, 4)
 	scheduler.subscribers[updates] = struct{}{}
@@ -571,12 +578,200 @@ func TestRoutingInspectionReleaseImmediatelyUpdatesStatus(t *testing.T) {
 		t.Fatalf("release=%d %s", recorder.Code, recorder.Body.String())
 	}
 	updated := statusResult()
-	if updated.QuotaCooling || updated.QuotaRetryAt != 0 || updated.QuotaRevision != 0 || updated.IsQuota {
+	if updated.QuotaCooling || updated.QuotaRetryAt != 0 || updated.QuotaRevision != 0 || !updated.IsQuota || updated.Action != result.Action || updated.ActionReason != result.ActionReason || updated.UsedPercent == nil || *updated.UsedPercent != used {
 		t.Fatalf("stale status after release: %+v", updated)
 	}
 	select {
 	case <-updates:
 	default:
 		t.Fatal("inspection status update was not broadcast")
+	}
+}
+
+func TestRoutingReleaseUsesNormalizedHistoricalModelStateKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	manager := coreauth.NewManager(nil, nil, nil)
+	now := time.Now()
+	const key = " gpt-5(high) "
+	auth, err := manager.Register(context.Background(), &coreauth.Auth{ID: "historical-model", Provider: "codex", ModelStates: map[string]*coreauth.ModelState{
+		key:     {Status: coreauth.StatusError, Unavailable: true, NextRetryAfter: now.Add(time.Hour), UpdatedAt: now},
+		"gpt-5": {Status: coreauth.StatusError, Unavailable: true, NextRetryAfter: now.Add(time.Minute), UpdatedAt: now.Add(-time.Second)},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	board := schedulingBoardAccount(auth, now)
+	if len(board.Details) != 1 || board.Details[0].Model != "gpt-5" || board.Details[0].Revision != strconv.FormatInt(now.UnixNano(), 10) {
+		t.Fatalf("details=%+v", board.Details)
+	}
+	h := &Handler{authManager: manager}
+	router := gin.New()
+	h.RegisterRoutingPolicyRoutes(router.Group("/"))
+	body, _ := json.Marshal(routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10), Source: "upstream", Model: board.Details[0].Model, Revision: board.Details[0].Revision})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/routing-policy/restrictions/release", strings.NewReader(string(body))))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("release=%d %s", recorder.Code, recorder.Body.String())
+	}
+	current, _ := manager.GetByID(auth.ID)
+	if len(current.ModelStates) != 1 || current.ModelStates["gpt-5"].Unavailable {
+		t.Fatal("release changed wrong model state")
+	}
+}
+
+type deadlineRoutingExecutor struct {
+	authFileConnectionExecutor
+	deadline time.Time
+}
+
+func (e *deadlineRoutingExecutor) Execute(ctx context.Context, auth *coreauth.Auth, req coreexecutor.Request, opts coreexecutor.Options) (coreexecutor.Response, error) {
+	e.deadline, _ = ctx.Deadline()
+	<-ctx.Done()
+	return coreexecutor.Response{}, ctx.Err()
+}
+func TestRoutingRecoveryReturnsTimeoutPhaseAndLiveRestriction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	manager := coreauth.NewManager(nil, nil, nil)
+	executor := &deadlineRoutingExecutor{}
+	manager.RegisterExecutor(executor)
+	now := time.Now()
+	auth, err := manager.Register(context.Background(), &coreauth.Auth{ID: "deadline", Provider: "codex", Unavailable: true, NextRetryAfter: now.Add(time.Hour), UpdatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{authManager: manager}
+	router := gin.New()
+	h.RegisterRoutingPolicyRoutes(router.Group("/"))
+	body, _ := json.Marshal(routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10)})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/routing-policy/check", strings.NewReader(string(body))).WithContext(ctx))
+	var response struct {
+		After  routingBoardAccount
+		Phases []routingRecoveryPhase
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != 200 || len(response.Phases) != 1 || response.Phases[0].Status != "timeout" || response.After.AuthID != auth.ID || executor.deadline != deadline {
+		t.Fatalf("response=%s deadline=%v want=%v", recorder.Body.String(), executor.deadline, deadline)
+	}
+}
+
+type twoStageClaudeExecutor struct{ deadlineRoutingExecutor }
+
+func (*twoStageClaudeExecutor) Identifier() string { return "claude" }
+
+func TestRoutingRecoveryPreservesQuotaSuccessWhenUpstreamTimesOut(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := startProQuotaTestService(t)
+	manager := coreauth.NewManager(nil, nil, nil)
+	executor := &twoStageClaudeExecutor{}
+	manager.RegisterExecutor(executor)
+	now := time.Now()
+	auth, err := manager.Register(ctx, &coreauth.Auth{
+		ID: "two-stage-recovery", FileName: "two-stage.json", Provider: "claude",
+		Metadata: map[string]any{"access_token": "test-token"}, Runtime: inspectionProbeRefreshDue(false),
+		Unavailable: true, NextRetryAfter: now.Add(time.Hour), UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := proinspection.DefaultSettings()
+	settings.AutoExecuteQuotaRecoveryEnable = true
+	settings.UsedPercentThreshold = 95
+	raw, _ := json.Marshal(settings)
+	if err := manager.ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, 0, &prorouting.QuotaProtection{
+		Recheck: true, RetryAt: now.Add(-time.Minute).UnixMilli(), Settings: raw,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	auth, _ = manager.GetByID(auth.ID)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/profile") {
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"five_hour":{"utilization":10}}`))
+	}))
+	defer server.Close()
+	transport := server.Client().Transport.(*http.Transport).Clone()
+	transport.TLSClientConfig.ServerName = "example.com"
+	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+	}
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = transport
+	defer func() { http.DefaultTransport = previousTransport; transport.CloseIdleConnections() }()
+	h := &Handler{authManager: manager}
+	scheduler := newAccountInspectionScheduler(h, nil)
+	accountInspectionSchedulers.Store(h, scheduler)
+	t.Cleanup(func() { accountInspectionSchedulers.Delete(h) })
+	router := gin.New()
+	h.RegisterRoutingPolicyRoutes(router.Group("/"))
+	body, _ := json.Marshal(routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10)})
+	requestCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	deadline, _ := requestCtx.Deadline()
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/routing-policy/check", strings.NewReader(string(body))).WithContext(requestCtx))
+	var response struct {
+		After  routingBoardAccount
+		Phases []routingRecoveryPhase
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusOK || len(response.Phases) != 2 || response.Phases[0].Source != "inspection" || response.Phases[0].Status != "completed" || response.Phases[1].Source != "upstream" || response.Phases[1].Status != "timeout" {
+		t.Fatalf("wrong recovery phases: %s", recorder.Body.String())
+	}
+	if response.After.AuthID != auth.ID || response.After.Inspection || !containsString(response.After.Sources, "upstream") {
+		t.Fatalf("response lost remaining native restriction: %s", recorder.Body.String())
+	}
+	if executor.deadline != deadline {
+		t.Fatalf("upstream deadline = %v, want shared deadline %v", executor.deadline, deadline)
+	}
+	current, _ := manager.GetByID(auth.ID)
+	if _, held := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]; held {
+		t.Fatal("successful quota stage did not release its protection")
+	}
+}
+
+func TestRoutingTargetedModelCheckPreservesOtherRestrictions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := startProQuotaTestService(t)
+	manager := coreauth.NewManager(nil, nil, nil)
+	executor := &authFileConnectionExecutor{response: []byte(`{"choices":[{"message":{"content":"OK"}}]}`)}
+	manager.RegisterExecutor(executor)
+	models := authFileConnectionTestModels(&coreauth.Auth{Provider: "codex"})
+	if len(models) < 2 {
+		t.Fatal("need two supported diagnostic models")
+	}
+	modelA, modelB := models[0].ID, models[1].ID
+	now := time.Now()
+	auth, err := manager.Register(ctx, &coreauth.Auth{ID: "targeted-model", Provider: "codex", ModelStates: map[string]*coreauth.ModelState{
+		modelA: {Status: coreauth.StatusError, Unavailable: true, NextRetryAfter: now.Add(time.Hour), UpdatedAt: now},
+		modelB: {Status: coreauth.StatusError, Unavailable: true, NextRetryAfter: now.Add(time.Hour), UpdatedAt: now},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ChangeQuotaProtection(ctx, auth, inspectionQuotaSource, 0, &prorouting.QuotaProtection{RetryAt: now.Add(time.Hour).UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	auth, _ = manager.GetByID(auth.ID)
+	hold := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
+	h := &Handler{authManager: manager}
+	router := gin.New()
+	h.RegisterRoutingPolicyRoutes(router.Group("/"))
+	body, _ := json.Marshal(routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10), Source: "upstream", Model: modelB, Revision: strconv.FormatInt(now.UnixNano(), 10)})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/routing-policy/check", strings.NewReader(string(body))))
+	current, _ := manager.GetByID(auth.ID)
+	if recorder.Code != 200 || executor.lastModel != modelB || current.ModelStates[modelB].Unavailable || !current.ModelStates[modelA].Unavailable || prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource].Revision != hold.Revision {
+		t.Fatalf("targeted result=%s model=%s", recorder.Body.String(), executor.lastModel)
 	}
 }

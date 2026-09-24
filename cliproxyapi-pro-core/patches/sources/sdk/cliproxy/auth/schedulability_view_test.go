@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"reflect"
 	"strings"
@@ -261,5 +262,27 @@ func TestPinnedResultMetadataContainsOnlyFingerprints(t *testing.T) {
 	}
 	if !pinnedResultIdentityMatches(Result{Success: true, Options: opts}, auth) {
 		t.Fatal("fingerprints do not match unchanged auth")
+	}
+}
+
+func TestPinnedPreparationRejectsReplacementBeforePreparing(t *testing.T) {
+	manager := NewManager(nil, nil, nil)
+	old, err := manager.Register(context.Background(), &Auth{ID: "prepare-replaced", Provider: "antigravity", FileName: "same.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(context.Background(), pinnedExpectedIdentityKey{}, pinnedResultIdentity(old))
+	replacement, err := manager.Register(context.Background(), &Auth{ID: old.ID, Provider: old.Provider, FileName: old.FileName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &requestPrepareExecutor{}
+	_, err = manager.PrepareRequestAuth(ctx, executor, old)
+	if !errors.Is(err, ErrSchedulingBlockChanged) || executor.prepareCalls.Load() != 0 || executor.executeCalls.Load() != 0 {
+		t.Fatalf("err=%v prepared=%d executed=%d", err, executor.prepareCalls.Load(), executor.executeCalls.Load())
+	}
+	current, _ := manager.GetByID(old.ID)
+	if !reflect.DeepEqual(replacement, current) {
+		t.Fatal("replaced account mutated by stale preparation")
 	}
 }

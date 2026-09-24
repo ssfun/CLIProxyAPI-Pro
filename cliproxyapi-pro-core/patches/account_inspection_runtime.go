@@ -133,6 +133,7 @@ type accountInspectionScheduler struct {
 	fullRunMu               sync.RWMutex
 	probeLimiter            proinspection.KeyedLimiter
 	quotaRecoveryActive     sync.Map
+	quotaRecoveryDeferred   sync.Map
 	actionLimiter           proinspection.KeyedLimiter
 	pause                   *sync.Cond
 	cancel                  context.CancelFunc
@@ -1026,7 +1027,6 @@ func (s *accountInspectionScheduler) refreshTokenNow(ctx context.Context, item a
 			result.Error = result.TokenRefreshError
 			result.ErrorCode = "missing_auth_id"
 			result.ActionReason = "刷新令牌失败，保留账号"
-			s.syncInspectionAuthError(ctx, account, "token_refresh_error", result.TokenRefreshError, 0)
 			return result, errors.New(result.TokenRefreshError)
 		}
 		s.appendLog("info", fmt.Sprintf("主动刷新令牌 %s", account.identity()))
@@ -1054,7 +1054,6 @@ func (s *accountInspectionScheduler) refreshTokenNow(ctx context.Context, item a
 			result.Error = refreshErr.Error()
 			result.ErrorCode = "token_refresh_error"
 			result.ActionReason = "刷新令牌失败，保留账号"
-			s.syncInspectionAuthError(ctx, account, "token_refresh_error", refreshErr.Error(), 0)
 			s.appendLog("warning", fmt.Sprintf("%s 主动刷新令牌失败：%s", account.identity(), refreshErr.Error()))
 			return result, refreshErr
 		}

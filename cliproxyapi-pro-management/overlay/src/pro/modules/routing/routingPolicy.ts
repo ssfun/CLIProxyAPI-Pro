@@ -81,6 +81,12 @@ export interface SchedulingRecoveryResult {
   before?: SchedulingBoardAccount;
   after?: SchedulingBoardAccount;
   steps?: string[];
+  phases?: Array<{
+    source: 'inspection' | 'upstream';
+    model?: string;
+    status: 'completed' | 'failed' | 'timeout' | 'skipped';
+    error?: string;
+  }>;
   test?: {
     success: boolean;
     model?: string;
@@ -92,7 +98,9 @@ export interface SchedulingRecoveryResult {
 }
 
 export const schedulingRecoveryResultTone = (result: SchedulingRecoveryResult) => {
-  if (result.test?.success === false) return 'error' as const;
+  if (result.test?.success === false || result.phases?.some((phase) =>
+    phase.status === 'failed' || phase.status === 'timeout'
+  )) return 'error' as const;
   if (result.after?.authId) return 'warning' as const;
   return 'success' as const;
 };

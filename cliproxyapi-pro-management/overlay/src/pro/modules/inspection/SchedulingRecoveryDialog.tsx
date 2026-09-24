@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { ProDetailDialog } from '@/pro/shared/ProSurface';
 import {
   SchedulingRecoveryActions,
+  SchedulingRecoveryOutcome,
   routingPolicyApi,
-  schedulingRecoveryResultTone,
   type SchedulingBoardAccount,
   type SchedulingRecoveryResult,
 } from '@/pro/modules/routing';
@@ -15,7 +15,7 @@ type Props = {
   authIndex: string;
   accountName: string;
   onClose: () => void;
-  onResult?: (result: SchedulingRecoveryResult) => void | Promise<void>;
+  onResult?: (result?: SchedulingRecoveryResult) => void | Promise<void>;
 };
 
 export function SchedulingRecoveryDialog({ open, authId, authIndex, accountName, onClose, onResult }: Props) {
@@ -48,9 +48,9 @@ export function SchedulingRecoveryDialog({ open, authId, authIndex, accountName,
     };
   }, [open, authId, authIndex]);
 
-  const handleResult = async (result: SchedulingRecoveryResult) => {
+  const handleResult = async (result?: SchedulingRecoveryResult) => {
     const requestId = requestIdRef.current;
-    setOutcome(result);
+    if (result) setOutcome(result);
     await Promise.all([
       routingPolicyApi.get().then((board) => {
         if (requestId === requestIdRef.current) {
@@ -69,13 +69,9 @@ export function SchedulingRecoveryDialog({ open, authId, authIndex, accountName,
           <p>{t('routing_policy.runtime.models')}: {account.models?.join(', ') || t('routing_policy.runtime.all_models')}</p>
           <SchedulingRecoveryActions account={account} onResult={handleResult} />
         </>
-      ) : <p role="status">{outcome
-        ? t(schedulingRecoveryResultTone(outcome) === 'error'
-          ? 'routing_policy.recovery.failed'
-          : outcome.after?.authId
-          ? 'routing_policy.recovery.still_restricted'
-          : 'routing_policy.recovery.restored')
-        : t('routing_policy.recovery.no_current_block')}</p>}
+      ) : outcome
+        ? <SchedulingRecoveryOutcome result={outcome} />
+        : <p role="status">{t('routing_policy.recovery.no_current_block')}</p>}
     </ProDetailDialog>
   );
 }
