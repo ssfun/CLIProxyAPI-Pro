@@ -55,11 +55,11 @@ func TestMergeTokenRefreshResultTransitionsErrors(t *testing.T) {
 	}
 }
 
-func TestMergeReinspectionResultPreservesExecutionState(t *testing.T) {
+func TestMergeReinspectionResultStartsNewObservation(t *testing.T) {
 	current := Result{Key: "account", Executed: true, ExecuteError: "previous"}
 	incoming := Result{Key: "account", Provider: "xai"}
 	merged, updateSummary := MergeReinspectionResult(current, incoming)
-	if !updateSummary || !merged.Executed || merged.ExecuteError != "previous" || merged.Provider != "xai" {
+	if !updateSummary || merged.Executed || merged.ExecuteError != "" || merged.Provider != "xai" {
 		t.Fatalf("merged = %#v update=%v", merged, updateSummary)
 	}
 }

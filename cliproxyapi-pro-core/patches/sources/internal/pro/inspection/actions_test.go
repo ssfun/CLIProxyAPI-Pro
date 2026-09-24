@@ -36,7 +36,7 @@ func TestMergeManualActionResult(t *testing.T) {
 	current := Result{Key: "key", Action: ActionDisable, ActionReason: "disable", Error: "old"}
 	executed := Result{Key: "key", Provider: "xai", Disabled: true, Executed: true, Action: ActionDisable}
 	merged, updateSummary := MergeManualActionResult(current, executed)
-	if !updateSummary || merged.Action != ActionKeep || merged.ActionReason != "无需处理" || merged.Error != "" || !merged.Disabled {
+	if !updateSummary || merged.Action != ActionDisable || merged.ActionReason != "disable" || merged.Error != "old" || !merged.Disabled || !merged.Executed || merged.OperationAction != ActionDisable {
 		t.Fatalf("merged = %#v update=%v", merged, updateSummary)
 	}
 }

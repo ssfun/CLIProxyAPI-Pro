@@ -707,7 +707,7 @@ func TestRoutingRecoveryPreservesQuotaSuccessWhenUpstreamTimesOut(t *testing.T) 
 	previousTransport := http.DefaultTransport
 	http.DefaultTransport = transport
 	defer func() { http.DefaultTransport = previousTransport; transport.CloseIdleConnections() }()
-	h := &Handler{authManager: manager}
+	h := &Handler{authManager: manager, configFilePath: t.TempDir() + "/config.yaml"}
 	scheduler := newAccountInspectionScheduler(h, nil)
 	accountInspectionSchedulers.Store(h, scheduler)
 	t.Cleanup(func() { accountInspectionSchedulers.Delete(h) })
@@ -806,7 +806,7 @@ func newXAIRoutingRecoveryFixture(t *testing.T, status int, body string, blocked
 		t.Fatal(err)
 	}
 	auth, _ = manager.GetByID(auth.ID)
-	h := &Handler{authManager: manager}
+	h := &Handler{authManager: manager, configFilePath: t.TempDir() + "/config.yaml"}
 	scheduler := newAccountInspectionScheduler(h, nil)
 	scheduler.schedule.Settings = settings
 	accountInspectionSchedulers.Store(h, scheduler)

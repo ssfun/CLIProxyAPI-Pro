@@ -59,8 +59,8 @@ func TestHealthSummaryAndAutomaticActions(t *testing.T) {
 	settings := DefaultSettings()
 	settings.AutoExecuteAccountInvalidAction = ActionDelete
 	settings.AutoExecuteQuotaLimitDisable = true
-	if got := AutoActionForResult(results[0], settings); got != ActionDelete {
-		t.Fatalf("auth invalid action = %q", got)
+	if got := AutoActionForResult(results[0], settings); got != ActionNone {
+		t.Fatalf("401 auto action = %q, want none", got)
 	}
 	if got := AutoActionForResult(results[1], settings); got != ActionDisable {
 		t.Fatalf("quota action = %q", got)

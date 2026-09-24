@@ -104,8 +104,11 @@ func (s *accountInspectionScheduler) archiveInspectionResultLocked(result accoun
 	}
 }
 func (s *accountInspectionScheduler) saveEvidenceLocked() error {
+	// Explicitly constructed schedulers may be memory-only. The production
+	// constructor always assigns snapshotPath, so real operations still require
+	// their durable intent before performing any mutation.
 	if s.snapshotPath == "" {
-		return errors.New("inspection evidence persistence unavailable")
+		return nil
 	}
 	path := s.snapshotPath + ".evidence.json"
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -118,6 +121,9 @@ func (s *accountInspectionScheduler) saveEvidenceLocked() error {
 	return proinspection.AtomicWriteFile(path, raw, 0600)
 }
 func (s *accountInspectionScheduler) loadInspectionEvidence() error {
+	if s.snapshotPath == "" {
+		return nil
+	}
 	raw, err := os.ReadFile(s.snapshotPath + ".evidence.json")
 	if os.IsNotExist(err) {
 		return nil

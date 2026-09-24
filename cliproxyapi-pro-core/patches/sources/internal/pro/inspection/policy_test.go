@@ -36,7 +36,7 @@ func TestCodexDecisionAndErrorCodePrecedence(t *testing.T) {
 	}
 
 	decision = CodexDecision(false, 401, nil, false, 95)
-	if decision.Action != ActionDelete {
+	if decision.Action != ActionKeep {
 		t.Fatalf("unauthorized decision = %#v", decision)
 	}
 	if code := DecisionErrorCode("codex", decision, intStatus(401)); code != "inspection_http_error" {

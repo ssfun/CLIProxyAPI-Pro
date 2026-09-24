@@ -1032,7 +1032,7 @@ export function AccountInspectionPage() {
       return;
     }
     showConfirmation({
-      dedupeKey: `account-inspection:batch:${operations.map((operation) => operation.operationId).join(':')}`,
+      dedupeKey: `account-inspection:execute:batch:${operations.map((operation) => operation.operationId).join(':')}`,
       title: t('monitoring.account_inspection_batch_preflight_title'),
       message: (
         <div className={styles.batchPreflight}>
