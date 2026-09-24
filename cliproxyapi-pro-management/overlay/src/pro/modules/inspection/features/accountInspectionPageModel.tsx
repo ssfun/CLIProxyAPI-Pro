@@ -66,9 +66,9 @@ export const formatAccountInspectionDuration = (
   return parts.map((part) => t(part.key, { count: part.value })).join('');
 };
 
-export type ResultHealthStatus = 'healthy' | 'disabled' | 'authInvalid' | 'quotaExhausted' | 'inspectionError' | 'recoverable';
+export type ResultHealthStatus = 'healthy' | 'disabled' | 'authInvalid' | 'quotaExhausted' | 'inspectionError' | 'recoverable' | 'unknown' | 'deleted';
 
-export type ResultStatusFilter = 'all' | 'accountIssues' | 'quotaChanges' | 'highAvailable';
+export type ResultStatusFilter = 'all' | 'accountIssues' | 'quotaChanges' | 'highAvailable' | 'unknown';
 
 export type ResultReasonFilter = 'accountInvalid' | 'requestError' | 'quotaExhausted' | 'recoverable';
 
@@ -87,6 +87,8 @@ export type HealthCounts = {
   quotaExhausted: number;
   inspectionError: number;
   recoverable: number;
+  unknown: number;
+  deleted: number;
 };
 
 export type InspectionLogEntry = {
@@ -178,6 +180,8 @@ export type AutoExecutionCounts = {
   delete: number;
   disable: number;
   enable: number;
+  quotaProtection: number;
+  quotaRecovery: number;
 };
 
 export type InspectionResultViewRow = {
@@ -247,6 +251,8 @@ const emptyAutoExecutionCounts = (): AutoExecutionCounts => ({
   delete: 0,
   disable: 0,
   enable: 0,
+  quotaProtection: 0,
+  quotaRecovery: 0,
 });
 
 const createEmptyFilterRows = (): Record<ResultFilter, InspectionResultViewRow[]> => ({
@@ -258,6 +264,7 @@ const createEmptyFilterRows = (): Record<ResultFilter, InspectionResultViewRow[]
   requestError: [],
   quotaExhausted: [],
   recoverable: [],
+  unknown: [],
   highAvailable: [],
 });
 
@@ -275,6 +282,8 @@ export const healthToneClass: Record<ResultHealthStatus, string> = {
   quotaExhausted: styles.healthQuota,
   inspectionError: styles.healthError,
   recoverable: styles.healthRecoverable,
+  unknown: styles.healthQuota,
+  deleted: styles.healthDisabled,
 };
 
 const healthLabelKey: Record<ResultHealthStatus, string> = {
@@ -284,6 +293,8 @@ const healthLabelKey: Record<ResultHealthStatus, string> = {
   quotaExhausted: 'monitoring.account_inspection_health_quota_exhausted',
   inspectionError: 'monitoring.account_inspection_account_request_error',
   recoverable: 'monitoring.account_inspection_health_recoverable',
+  unknown: 'monitoring.account_inspection_health_unknown',
+  deleted: 'monitoring.account_inspection_effect_delete',
 };
 
 const extractHealthHttpStatusCode = (item: AccountInspectionResultItem) => {
@@ -303,6 +314,7 @@ export const buildHealthStatusLabel = (
   healthStatus: ResultHealthStatus,
   t: TFunction
 ) => {
+  if (healthStatus === 'deleted') return t('monitoring.account_inspection_effect_delete');
   const label = t(healthLabelKey[healthStatus]);
   const code = buildHealthStatusCodeText(item);
   return code ? `${label} · ${code}` : label;
@@ -370,6 +382,8 @@ export const isResultRequestError = (item: AccountInspectionResultItem) => {
 };
 
 export const resolveResultHealthStatus = (item: AccountInspectionResultItem): ResultHealthStatus => {
+  if (item.executedEffect === 'delete') return 'deleted';
+  if (item.errorCode === 'inspection_incomplete') return 'unknown';
   if (item.isQuota) return 'quotaExhausted';
   if (isResultAccountInvalid(item)) return 'authInvalid';
   if (isResultRequestError(item)) return 'inspectionError';
@@ -394,16 +408,49 @@ export function InspectionErrorDetailsPanel({
     { label: t('monitoring.filter_provider'), value: item.provider },
     {
       label: t('monitoring.account_inspection_enabled_status'),
-      value: formatCurrentStateLabel(item, t),
+      value: item.executedEffect === 'delete' ? t('monitoring.account_inspection_effect_delete') : formatCurrentStateLabel(item, t),
     },
   ].filter((detail) => detail.value);
   const inspectionItems = [
+    {
+      label: t('monitoring.account_inspection_observed_at'),
+      value: item.observedAt ? new Date(item.observedAt).toLocaleString() : t('monitoring.account_inspection_observation_not_recorded'),
+    },
+    {
+      label: t('monitoring.account_inspection_observation_origin'),
+      value: item.parentResultRef
+        ? t('monitoring.account_inspection_observation_recheck')
+        : item.runId ? t('monitoring.account_inspection_observation_full_run') : t('monitoring.account_inspection_observation_not_recorded'),
+    },
+    { label: t('monitoring.account_inspection_run_id'), value: item.runId || t('monitoring.account_inspection_observation_not_recorded') },
+    { label: t('monitoring.account_inspection_registration_epoch'), value: item.registrationEpoch || '' },
+    { label: t('monitoring.account_inspection_parent_result_ref'), value: item.parentResultRef || '' },
+    { label: t('monitoring.account_inspection_result_ref'), value: item.resultRef || '' },
     { label: t('monitoring.account_inspection_http_status'), value: httpStatusCode !== null ? String(httpStatusCode) : '' },
     { label: t('monitoring.account_inspection_error_code'), value: item.errorCode?.trim() || '' },
     { label: t('monitoring.account_inspection_used_percent'), value: item.usedPercent !== null ? `${item.usedPercent}%` : '' },
     { label: t('monitoring.account_inspection_token_status'), value: formatTokenRefreshLabel(item, t) },
     { label: t('monitoring.account_inspection_next_action'), value: formatActionLabel(item.action, t) },
     { label: t('monitoring.account_inspection_reason'), value: item.actionReason?.trim() || '' },
+    ...(item.isQuota && item.action === 'disable'
+      ? [{ label: t('monitoring.account_inspection_quota_protection'), value: t('monitoring.account_inspection_quota_protection_detail') }]
+      : []),
+    ...(item.executed
+      ? [{ label: t('monitoring.account_inspection_suggestion_processed'), value: t('monitoring.account_inspection_suggestion_processed_detail') }]
+      : []),
+    ...(item.executedEffect
+      ? [{
+          label: t('monitoring.account_inspection_last_execution'),
+          value: `${t(`monitoring.account_inspection_effect_${item.executedEffect}`)}${item.executedAt ? ` · ${new Date(item.executedAt).toLocaleString()}` : ''}`,
+        }]
+      : item.executedAction
+      ? [{
+          label: t('monitoring.account_inspection_last_manual_override'),
+          value: `${formatActionLabel(item.executedAction, t)}${item.executedAt ? ` · ${new Date(item.executedAt).toLocaleString()}` : ''}`,
+        }]
+      : item.executeError
+        ? [{ label: t('monitoring.account_inspection_execution_error'), value: item.executeError }]
+        : []),
   ].filter((detail) => detail.value);
   const toneByHealth: Record<ResultHealthStatus, ProInformationDetailsTone> = {
     healthy: 'good',
@@ -412,6 +459,8 @@ export function InspectionErrorDetailsPanel({
     quotaExhausted: 'warning',
     authInvalid: 'danger',
     inspectionError: 'danger',
+    unknown: 'warning',
+    deleted: 'neutral',
   };
 
   return (
@@ -790,6 +839,8 @@ const emptyHealthCounts = (): HealthCounts => ({
   quotaExhausted: 0,
   inspectionError: 0,
   recoverable: 0,
+  unknown: 0,
+  deleted: 0,
 });
 
 const getManualActionsByHealthStatus = (
@@ -814,6 +865,7 @@ export const buildInspectionResultsViewState = (items: AccountInspectionResultIt
     quotaExhausted: 0,
     requestError: 0,
     recoverable: 0,
+    unknown: 0,
     pending: 0,
   };
   const rows: InspectionResultViewRow[] = [];
@@ -881,9 +933,17 @@ export const buildInspectionResultsViewState = (items: AccountInspectionResultIt
         filterRowCounts.recoverable += 1;
         row = pushResultRow(filterRows.recoverable, item, healthStatus, row);
         break;
+      case 'unknown':
+        healthCounts.unknown += 1;
+        filterRowCounts.unknown += 1;
+        row = pushResultRow(filterRows.unknown, item, healthStatus, row);
+        break;
+      case 'deleted':
+        healthCounts.deleted += 1;
+        break;
     }
 
-    if (isSuggestedAction(item) && !item.executed) {
+    if (item.executedEffect !== 'delete' && isSuggestedAction(item) && !item.executed) {
       filterRowCounts.pending += 1;
       pushResultRow(filterRows.pending, item, healthStatus, row);
       if (item.action === 'delete') actionableActionCounts.delete += 1;
@@ -904,7 +964,7 @@ export const buildInspectionResultsViewState = (items: AccountInspectionResultIt
 export const collectActionableInspectionResults = (items: AccountInspectionResultItem[]) => {
   const targets: AccountInspectionResultItem[] = [];
   items.forEach((item) => {
-    if (isSuggestedAction(item) && !item.executed) {
+    if (item.executedEffect !== 'delete' && isSuggestedAction(item) && !item.executed) {
       targets.push(item);
     }
   });
@@ -917,6 +977,7 @@ export const buildManualActionItem = (
 ): AccountInspectionResultItem => ({
   ...item,
   action,
+  suggested: false,
   actionReason: item.actionReason || action,
 });
 
@@ -1012,6 +1073,11 @@ export const formatActionLabel = (action: AccountInspectionAction, t: TFunction)
   }
 };
 
+export const formatInspectionExecutionLabel = (item: AccountInspectionResultItem, t: TFunction) =>
+  item.action === 'disable' && item.isQuota && isSuggestedAction(item)
+    ? t('monitoring.account_inspection_action_quota_protection')
+    : formatActionLabel(item.action, t);
+
 export const formatQuotaRemainingLabel = (value: number | null) => {
   if (value === null) return '--';
   return `${Math.max(0, 100 - value).toFixed(1)}%`;
@@ -1069,9 +1135,12 @@ const formatInspectionVerdictPrimary = (
   healthStatus: ResultHealthStatus,
   t: TFunction
 ) => {
+  if (healthStatus === 'deleted') return t('monitoring.account_inspection_effect_delete');
   if (item.tokenRefreshStatus === 'failed') return t('monitoring.account_inspection_verdict_token_refresh_failed');
 
   switch (healthStatus) {
+    case 'unknown':
+      return t('monitoring.account_inspection_health_unknown');
     case 'inspectionError':
       return t('monitoring.account_inspection_verdict_probe_error');
     case 'authInvalid':
@@ -1127,11 +1196,15 @@ export const countActions = (items: AccountInspectionResultItem[]) => {
     delete: 0,
     disable: 0,
     enable: 0,
+    quotaProtection: 0,
   };
 
   items.forEach((item) => {
     if (item.action === 'delete') summary.delete += 1;
-    if (item.action === 'disable') summary.disable += 1;
+    if (item.action === 'disable') {
+      if (item.isQuota && isSuggestedAction(item)) summary.quotaProtection += 1;
+      else summary.disable += 1;
+    }
     if (item.action === 'enable') summary.enable += 1;
   });
 
@@ -1140,6 +1213,7 @@ export const countActions = (items: AccountInspectionResultItem[]) => {
 
 export const toAccountInspectionApiItem = (item: AccountInspectionResultItem): AccountInspectionInspectOneItem => ({
   key: item.key,
+  resultRef: item.resultRef,
   provider: item.provider,
   fileName: item.fileName,
   displayName: item.displayAccount,
@@ -1154,7 +1228,7 @@ export const buildActionPreview = (items: AccountInspectionResultItem[], t: TFun
     key: item.key,
     account: item.fileName,
     provider: resolveProviderDisplayLabel(item.provider),
-    action: formatActionLabel(item.action, t),
+    action: formatInspectionExecutionLabel(item, t),
     reason: item.actionReason || item.error || '-',
     dangerous: item.action === 'delete',
   }));
@@ -1184,6 +1258,7 @@ export const buildExecuteConfirmationMessage = (
             total: items.length,
             delete: counts.delete,
             disable: counts.disable,
+            quotaProtection: counts.quotaProtection,
             enable: counts.enable,
           })}
         </span>
@@ -1196,6 +1271,10 @@ export const buildExecuteConfirmationMessage = (
         <div>
           <span>{t('monitoring.account_inspection_action_disable')}</span>
           <strong>{counts.disable}</strong>
+        </div>
+        <div>
+          <span>{t('monitoring.account_inspection_action_quota_protection')}</span>
+          <strong>{counts.quotaProtection}</strong>
         </div>
         <div>
           <span>{t('monitoring.account_inspection_action_enable')}</span>
@@ -1358,7 +1437,8 @@ const sameScheduleSnapshot = (
 };
 
 const sameAutoExecutionCounts = (left: AutoExecutionCounts, right: AutoExecutionCounts) =>
-  left.delete === right.delete && left.disable === right.disable && left.enable === right.enable;
+  left.delete === right.delete && left.disable === right.disable && left.enable === right.enable &&
+  left.quotaProtection === right.quotaProtection && left.quotaRecovery === right.quotaRecovery;
 
 const sameRunStatus = (left: RunStatus, right: RunStatus) => left === right;
 

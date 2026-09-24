@@ -209,6 +209,8 @@ MODULE_PATH = module_path()
 ACCOUNT_INSPECTION_SOURCE_FILES = (
     'account_inspection_runtime.go',
     'account_inspection_http.go',
+    'account_inspection_batch.go',
+    'account_inspection_history.go',
     'account_inspection_accounts.go',
     'account_inspection_transport.go',
     'account_inspection_quota.go',

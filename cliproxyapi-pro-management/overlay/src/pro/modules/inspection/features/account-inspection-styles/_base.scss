@@ -107,8 +107,7 @@
 }
 
 .inspectionAlert,
-.inspectionInlineError,
-.bulkFailurePanel {
+.inspectionInlineError {
   display: flex;
   gap: 10px;
   padding: 12px 14px;
@@ -118,8 +117,7 @@
   color: var(--text-primary);
 }
 
-.inspectionAlert,
-.bulkFailurePanel {
+.inspectionAlert {
   flex-direction: column;
   margin-bottom: 14px;
 }
@@ -128,14 +126,6 @@
   align-items: center;
   justify-content: space-between;
   margin: 14px;
-}
-
-.bulkFailurePanel {
-  margin: 14px;
-}
-
-.bulkFailurePanel > :global(button) {
-  align-self: flex-start;
 }
 
 .inspectionStatusError {
@@ -613,10 +603,21 @@
   background: color-mix(in srgb, var(--inspect-accent) 6%, var(--inspect-surface));
 }
 
-.resultSelectionBar > strong {
+.resultSelectionSummary {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.resultSelectionSummary > strong {
   color: var(--inspect-ink);
   font-size: 13px;
-  white-space: nowrap;
+}
+
+.resultSelectionSummary > span,
+.resultSelectionSummary > small {
+  color: var(--inspect-muted);
+  font-size: 12px;
 }
 
 .resultSelectionActions {
@@ -635,6 +636,77 @@
   min-height: 32px;
   border-radius: 7px;
   font-size: 12px;
+}
+
+.batchPreflight {
+  display: grid;
+  gap: 8px;
+}
+
+.batchPreflightList,
+.batchReceiptList {
+  display: grid;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.batchPreflightStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.batchPreflightStats > span {
+  padding: 4px 7px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 6px;
+}
+
+.batchPreflightList > span {
+  overflow-wrap: anywhere;
+}
+
+.batchReceiptPanel {
+  display: grid;
+  gap: 12px;
+  margin: 14px;
+  padding: 14px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 8px;
+  background: var(--inspect-surface);
+}
+
+.batchReceiptPanel > :global(button) {
+  justify-self: start;
+}
+
+.batchReceiptHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.batchReceiptHeader > div,
+.batchReceiptItem {
+  display: grid;
+  gap: 3px;
+}
+
+.batchReceiptHeader span,
+.batchReceiptItem span,
+.batchReceiptItem small {
+  color: var(--inspect-muted);
+  font-size: 12px;
+}
+
+.batchReceiptItem {
+  padding: 8px 10px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
 }
 
 .clearSelectionButton {

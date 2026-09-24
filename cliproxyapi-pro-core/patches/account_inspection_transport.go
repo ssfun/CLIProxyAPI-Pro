@@ -178,7 +178,7 @@ func (s *accountInspectionScheduler) inspectAntigravity(ctx context.Context, acc
 		status := intPtr(resp.StatusCode)
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			if isQuotaHTTPStatus(resp.StatusCode) || proinspection.IsAntigravityQuotaFailure(resp.Body) {
-				return quotaUnavailableDecision(account, "Antigravity 额度不可用，建议禁用账号", resp.Body), status, nil
+				return quotaUnavailableDecision(account, "Antigravity 额度不可用，建议建立额度保护", resp.Body), status, nil
 			}
 			if proinspection.IsAccountErrorStatus(resp.StatusCode) {
 				priorityStatus = status
@@ -300,7 +300,7 @@ endpointLoop:
 			return probeDecision, lastStatus, nil
 		case accountInspectionDeepProbeQuota:
 			s.clearInspectionAuthError(ctx, account)
-			probeDecision := accountInspectionDecision{Action: accountInspectionActionDisable, ActionReason: "Antigravity 深度检测返回额度不可用，建议禁用账号", UsedPercent: decision.UsedPercent, IsQuota: true, ErrorDetail: probeDetail, DeepProbeStatus: accountInspectionDeepProbeQuota, DeepProbeError: probeMessage}
+			probeDecision := accountInspectionDecision{Action: accountInspectionActionDisable, ActionReason: "Antigravity 深度检测返回额度不可用，建议建立额度保护", UsedPercent: decision.UsedPercent, IsQuota: true, ErrorDetail: probeDetail, DeepProbeStatus: accountInspectionDeepProbeQuota, DeepProbeError: probeMessage}
 			if account.Disabled {
 				probeDecision.Action = accountInspectionActionKeep
 				probeDecision.ActionReason = "Antigravity 深度检测返回额度不可用，但账号已禁用"
@@ -346,7 +346,7 @@ func (s *accountInspectionScheduler) inspectClaude(ctx context.Context, account 
 	}
 	if usageResp.StatusCode < 200 || usageResp.StatusCode >= 300 {
 		if isQuotaHTTPStatus(usageResp.StatusCode) {
-			return quotaUnavailableDecision(account, "Claude 额度不可用，建议禁用账号", usageResp.Body), status, nil
+			return quotaUnavailableDecision(account, "Claude 额度不可用，建议建立额度保护", usageResp.Body), status, nil
 		}
 		if proinspection.IsAccountErrorStatus(usageResp.StatusCode) {
 			return proinspection.WithHTTPErrorDetail(authErrorDecision(account, usageResp.StatusCode), usageResp.Body), status, nil
@@ -364,7 +364,7 @@ func (s *accountInspectionScheduler) inspectClaude(ctx context.Context, account 
 	}
 	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"windows": windows, "extraUsage": extraUsage, "planType": emptyStringAsNil(planType), "rawShapeHash": proquota.JSONShapeHash(usageResp.Body)}))
 	used := proinspection.MaxUsedPercentFromWindows(windows)
-	decision := proinspection.WithQuotaWindows(quotaDecision(account, used, len(windows) > 0, settings.UsedPercentThreshold), windows, settings.UsedPercentThreshold)
+	decision := proinspection.WithQuotaWindows(quotaDecision(account, used, used != nil, settings.UsedPercentThreshold), windows, settings.UsedPercentThreshold)
 	decision.QuotaModel = proinspection.ClaudeQuotaModel(windows, settings.UsedPercentThreshold)
 	return decision, status, nil
 }
@@ -421,7 +421,7 @@ func (s *accountInspectionScheduler) inspectGeminiCLI(ctx context.Context, accou
 			status = result.ServiceStatus
 		}
 		if isQuotaHTTPStatus(upstreamStatus) {
-			return quotaUnavailableDecision(account, "Gemini CLI 额度不可用，建议禁用账号", ""), intPtr(upstreamStatus), nil
+			return quotaUnavailableDecision(account, "Gemini CLI 额度不可用，建议建立额度保护", ""), intPtr(upstreamStatus), nil
 		}
 		if proinspection.IsAccountErrorStatus(upstreamStatus) {
 			return authErrorDecision(account, upstreamStatus), intPtr(upstreamStatus), nil
@@ -432,7 +432,7 @@ func (s *accountInspectionScheduler) inspectGeminiCLI(ctx context.Context, accou
 		s.appendLog("warning", fmt.Sprintf("%s 旧认证文件配额缓存清理失败：%s", account.identity(), errCleanup.Error()))
 	}
 	used, hasQuota := proquota.SnapshotMaxUsedPercent(result.Snapshot)
-	return quotaDecision(account, used, hasQuota, settings.UsedPercentThreshold), intPtr(http.StatusOK), nil
+	return quotaDecision(account, used, hasQuota && used != nil, settings.UsedPercentThreshold), intPtr(http.StatusOK), nil
 }
 
 func (s *accountInspectionScheduler) inspectKimi(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) (accountInspectionDecision, *int, error) {
@@ -445,7 +445,7 @@ func (s *accountInspectionScheduler) inspectKimi(ctx context.Context, account ac
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if isQuotaHTTPStatus(resp.StatusCode) {
-			return quotaUnavailableDecision(account, "Kimi 额度不可用，建议禁用账号", resp.Body), status, nil
+			return quotaUnavailableDecision(account, "Kimi 额度不可用，建议建立额度保护", resp.Body), status, nil
 		}
 		if proinspection.IsAccountErrorStatus(resp.StatusCode) {
 			return proinspection.WithHTTPErrorDetail(authErrorDecision(account, resp.StatusCode), resp.Body), status, nil
@@ -457,7 +457,7 @@ func (s *accountInspectionScheduler) inspectKimi(ctx context.Context, account ac
 		return accountInspectionDecision{}, status, err
 	}
 	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{"rows": rows, "rawShapeHash": proquota.JSONShapeHash(resp.Body)}))
-	decision := proinspection.WithQuotaWindows(quotaDecision(account, used, len(rows) > 0, settings.UsedPercentThreshold), rows, settings.UsedPercentThreshold)
+	decision := proinspection.WithQuotaWindows(quotaDecision(account, used, used != nil, settings.UsedPercentThreshold), rows, settings.UsedPercentThreshold)
 	decision.QuotaModel = proinspection.QuotaModelScope("kimi", rows, settings.UsedPercentThreshold)
 	return decision, status, nil
 }
@@ -511,10 +511,10 @@ func (s *accountInspectionScheduler) inspectXAICLI(ctx context.Context, account 
 	billing := proquota.MergeXAIBillingSummaries(weeklyBilling, monthlyBilling)
 	if billing == nil {
 		if isQuotaHTTPStatus(weeklyResp.StatusCode) || proinspection.IsXAIQuotaFailure(weeklyResp.Body) {
-			return quotaUnavailableDecision(account, "xAI 额度不可用，建议禁用账号", weeklyResp.Body), status, nil
+			return quotaUnavailableDecision(account, "xAI 额度不可用，建议建立额度保护", weeklyResp.Body), status, nil
 		}
 		if isQuotaHTTPStatus(monthlyResp.StatusCode) || proinspection.IsXAIQuotaFailure(monthlyResp.Body) {
-			return quotaUnavailableDecision(account, "xAI 额度不可用，建议禁用账号", monthlyResp.Body), status, nil
+			return quotaUnavailableDecision(account, "xAI 额度不可用，建议建立额度保护", monthlyResp.Body), status, nil
 		}
 		if proinspection.IsAccountErrorStatus(weeklyResp.StatusCode) {
 			return proinspection.WithHTTPErrorDetail(authErrorDecision(account, weeklyResp.StatusCode), weeklyResp.Body), status, nil
@@ -568,7 +568,7 @@ func (s *accountInspectionScheduler) inspectXAICLI(ctx context.Context, account 
 		"weeklyRawShapeHash":  proquota.JSONShapeHash(weeklyResp.Body),
 		"monthlyRawShapeHash": proquota.JSONShapeHash(monthlyResp.Body),
 	}))
-	decision := quotaDecision(account, used, billing != nil, settings.UsedPercentThreshold)
+	decision := quotaDecision(account, used, used != nil, settings.UsedPercentThreshold)
 	if settings.XAIDeepProbeEnabled && proinspection.ShouldDeepProbe(decision) {
 		if freeProbe != nil {
 			return s.applyXAIDeepProbeOutcome(ctx, account, decision, status, *freeProbe)
@@ -659,7 +659,7 @@ func (s *accountInspectionScheduler) applyXAIDeepProbeOutcome(ctx context.Contex
 		return probeDecision, probeStatus, nil
 	case accountInspectionDeepProbeQuota:
 		s.clearInspectionAuthError(ctx, account)
-		probeDecision := accountInspectionDecision{Action: accountInspectionActionDisable, ActionReason: "xAI 深度检测返回额度不可用，建议禁用账号", UsedPercent: decision.UsedPercent, IsQuota: true, ErrorDetail: errorDetail, DeepProbeStatus: accountInspectionDeepProbeQuota, DeepProbeError: message}
+		probeDecision := accountInspectionDecision{Action: accountInspectionActionDisable, ActionReason: "xAI 深度检测返回额度不可用，建议建立额度保护", UsedPercent: decision.UsedPercent, IsQuota: true, ErrorDetail: errorDetail, DeepProbeStatus: accountInspectionDeepProbeQuota, DeepProbeError: message}
 		if account.Disabled {
 			probeDecision.Action = accountInspectionActionKeep
 			probeDecision.ActionReason = "xAI 深度检测返回额度不可用，但账号已禁用"

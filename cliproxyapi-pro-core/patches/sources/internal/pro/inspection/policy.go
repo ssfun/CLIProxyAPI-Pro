@@ -29,6 +29,7 @@ type Decision struct {
 	QuotaResetAt    int64
 	QuotaModel      string
 	QuotaKnown      bool
+	QuotaUnknown    bool
 	Action          Action
 	ActionReason    string
 	UsedPercent     *float64
@@ -66,19 +67,20 @@ func HealthyDecision(disabled bool) Decision {
 }
 
 func QuotaDecision(disabled bool, used *float64, hasQuotaData bool, threshold float64) Decision {
+	hasQuotaData = hasQuotaData && used != nil
 	over := used != nil && *used >= threshold
 	if (over || !hasQuotaData) && disabled {
 		reason := "未获取到可判断额度，保留账号"
 		if over {
 			reason = "额度达到阈值，但账号已禁用"
 		}
-		return Decision{Action: ActionKeep, ActionReason: reason, UsedPercent: used, IsQuota: over}
+		return Decision{Action: ActionKeep, ActionReason: reason, UsedPercent: used, IsQuota: over, QuotaUnknown: !hasQuotaData}
 	}
 	if over {
-		return Decision{Action: ActionDisable, ActionReason: "额度达到阈值，建议禁用账号", UsedPercent: used, IsQuota: true}
+		return Decision{Action: ActionDisable, ActionReason: "额度达到阈值，建议建立额度保护", UsedPercent: used, IsQuota: true}
 	}
 	if !hasQuotaData {
-		return Decision{Action: ActionKeep, ActionReason: "未获取到可判断额度，保留账号", UsedPercent: used}
+		return Decision{Action: ActionKeep, ActionReason: "未获取到可判断额度，保留账号", UsedPercent: used, QuotaUnknown: true}
 	}
 	if disabled {
 		return Decision{Action: ActionEnable, ActionReason: "额度可用，建议重新启用账号", UsedPercent: used}
@@ -90,7 +92,7 @@ func QuotaUnavailableDecision(disabled bool, reason, detail string) Decision {
 	action := ActionDisable
 	if disabled {
 		action = ActionKeep
-		reason = strings.TrimSuffix(reason, "，建议禁用账号") + "，但账号已禁用"
+		reason = strings.TrimSuffix(reason, "，建议建立额度保护") + "，但账号已禁用"
 	}
 	return Decision{Action: action, ActionReason: reason, IsQuota: true, ErrorDetail: detail}
 }
@@ -100,13 +102,19 @@ func CodexDecision(disabled bool, status int, used *float64, isQuota bool, thres
 		if disabled {
 			return Decision{Action: ActionKeep, ActionReason: "额度超阈值，但账号已禁用", UsedPercent: used, IsQuota: true}
 		}
-		return Decision{Action: ActionDisable, ActionReason: "额度超阈值，建议禁用账号", UsedPercent: used, IsQuota: true}
+		return Decision{Action: ActionDisable, ActionReason: "额度超阈值，建议建立额度保护", UsedPercent: used, IsQuota: true}
 	}
 	if status == 401 {
-		return Decision{Action: ActionDelete, ActionReason: "接口返回 401，建议删除失效账号", UsedPercent: used}
+		return Decision{Action: ActionKeep, ActionReason: "接口返回 401，需重新授权后重检", UsedPercent: used, Error: "HTTP 401"}
+	}
+	if status == 400 || status == 404 {
+		return Decision{Action: ActionKeep, ActionReason: fmt.Sprintf("接口返回 %d，无法判断账号状态", status), UsedPercent: used, Error: fmt.Sprintf("HTTP %d", status)}
 	}
 	if IsAccountErrorStatus(status) {
 		return AuthErrorDecision(disabled, status)
+	}
+	if status == 200 && used == nil {
+		return Decision{Action: ActionKeep, ActionReason: "未获取到可判断额度，保留账号", QuotaUnknown: true}
 	}
 	if status == 200 && disabled {
 		return Decision{Action: ActionEnable, ActionReason: "账号恢复健康，建议重新启用", UsedPercent: used}
@@ -115,8 +123,11 @@ func CodexDecision(disabled bool, status int, used *float64, isQuota bool, thres
 }
 
 func ErrorCode(status *int, fallback string) string {
-	if status != nil && IsAccountErrorStatus(*status) {
-		return "inspection_http_error"
+	if status != nil && *status >= 400 {
+		if IsAccountErrorStatus(*status) {
+			return "inspection_http_error"
+		}
+		return "inspection_probe_error"
 	}
 	return fallback
 }
@@ -134,8 +145,14 @@ func DecisionErrorCode(provider string, decision Decision, status *int) string {
 	if decision.DeepProbeStatus == DeepProbeTransientError {
 		return deepProbeErrorCode()
 	}
-	if status != nil && IsAccountErrorStatus(*status) {
-		return "inspection_http_error"
+	if status != nil && *status >= 400 {
+		if IsAccountErrorStatus(*status) {
+			return "inspection_http_error"
+		}
+		return "inspection_probe_error"
+	}
+	if decision.QuotaUnknown {
+		return "inspection_incomplete"
 	}
 	if decision.DeepProbeStatus == DeepProbeAuthError {
 		return deepProbeErrorCode()

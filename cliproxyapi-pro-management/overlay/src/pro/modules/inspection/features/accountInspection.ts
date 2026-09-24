@@ -48,6 +48,12 @@ export interface AccountInspectionAccount {
 }
 
 export interface AccountInspectionResultItem extends AccountInspectionAccount {
+  registrationEpoch?: string;
+  resultRef?: string;
+  observedAt?: number;
+  runId?: string;
+  parentResultRef?: string;
+  suggested?: boolean;
   action: AccountInspectionAction;
   actionReason: string;
   statusCode: number | null;
@@ -66,6 +72,10 @@ export interface AccountInspectionResultItem extends AccountInspectionAccount {
   quotaCooling?: boolean;
   quotaRetryAt?: number;
   executed?: boolean;
+  executedAction?: AccountInspectionExecutionAction | '';
+  executedAt?: number;
+  executedEffect?: 'quota_protection' | 'quota_recovery' | 'admin_disable' | 'admin_enable' | 'delete' | '';
+  executeError?: string;
 }
 
 export interface AccountInspectionSummary {
@@ -79,6 +89,10 @@ export interface AccountInspectionSummary {
   enableCount: number;
   keepCount: number;
   errorCount: number;
+  pendingActionCount?: number;
+  pendingDeleteCount?: number;
+  pendingDisableCount?: number;
+  pendingEnableCount?: number;
   usedPercentThreshold: number;
   sampled: boolean;
   plannedActionPreview: string[];
@@ -105,6 +119,7 @@ export interface AccountInspectionHealthCounts {
   quotaExhausted: number;
   inspectionError: number;
   recoverable: number;
+  unknown?: number;
 }
 
 export interface AccountInspectionPageInfo {
@@ -157,11 +172,20 @@ export type AccountInspectionBackendLog = {
 };
 
 export type AccountInspectionBackendResultItem = Omit<AccountInspectionResultItem, 'displayAccount' | 'accountId' | 'status' | 'state' | 'raw'> & {
+  registrationEpoch?: string;
   displayName: string;
   email?: string;
   name?: string;
   executed?: boolean;
   executeError?: string;
+  resultRef?: string;
+  observedAt?: number;
+  runId?: string;
+  parentResultRef?: string;
+  suggested?: boolean;
+  executedAction?: AccountInspectionExecutionAction | '';
+  executedAt?: number;
+  executedEffect?: 'quota_protection' | 'quota_recovery' | 'admin_disable' | 'admin_enable' | 'delete' | '';
 };
 
 export type AccountInspectionBackendStatus = {
@@ -173,9 +197,15 @@ export type AccountInspectionBackendStatus = {
   persistenceError?: string;
   progress?: AccountInspectionBackendProgress;
   summary: AccountInspectionSummary & {
+    pendingActionCount?: number;
+    pendingDeleteCount?: number;
+    pendingDisableCount?: number;
+    pendingEnableCount?: number;
     executedDeleteCount?: number;
     executedDisableCount?: number;
     executedEnableCount?: number;
+    executedQuotaProtectionCount?: number;
+    executedQuotaRecoveryCount?: number;
   };
   healthCounts?: AccountInspectionHealthCounts;
   providerHealthCounts?: Record<string, AccountInspectionHealthCounts>;
@@ -503,10 +533,17 @@ export const accountInspectionBackendResultToItem = (
   },
   action: item.action,
   actionReason: item.actionReason,
+  resultRef: item.resultRef,
+  registrationEpoch: item.registrationEpoch || '',
+  observedAt: item.observedAt ?? 0,
+  runId: item.runId || '',
+  parentResultRef: item.parentResultRef || '',
+  suggested: item.suggested ?? item.action !== 'keep',
   statusCode: item.statusCode ?? null,
   usedPercent: item.usedPercent ?? null,
   isQuota: item.isQuota,
-  error: item.executeError || item.error || '',
+  error: item.error || '',
+  executeError: item.executeError || '',
   errorDetail: item.errorDetail || '',
   errorCode: item.errorCode || '',
   deepProbeTriggered: item.deepProbeTriggered ?? false,
@@ -519,6 +556,9 @@ export const accountInspectionBackendResultToItem = (
   quotaCooling: item.quotaCooling ?? false,
   quotaRetryAt: item.quotaRetryAt ?? 0,
   executed: item.executed,
+  executedAction: item.executedAction ?? '',
+  executedAt: item.executedAt ?? 0,
+  executedEffect: item.executedEffect ?? '',
 });
 
 const accountInspectionBackendProgressStatus = (
@@ -610,6 +650,8 @@ export const buildAccountInspectionBackendViewState = (
       delete: response.status.summary.executedDeleteCount ?? 0,
       disable: response.status.summary.executedDisableCount ?? 0,
       enable: response.status.summary.executedEnableCount ?? 0,
+      quotaProtection: response.status.summary.executedQuotaProtectionCount ?? 0,
+      quotaRecovery: response.status.summary.executedQuotaRecoveryCount ?? 0,
     },
     restoredSnapshot: response.status.restoredSnapshot ?? false,
     lastError: response.status.lastError || '',
@@ -636,7 +678,7 @@ export const buildAccountInspectionBackendViewState = (
 export const buildExecutionFailureMessage = (outcome: AccountInspectionExecutionOutcome) =>
   `${formatAccountInspectionIdentity(outcome)}：${outcome.error || '执行失败'}`;
 
-export const isSuggestedAction = (item: AccountInspectionResultItem) => item.action !== 'keep';
+export const isSuggestedAction = (item: AccountInspectionResultItem) => item.suggested ?? item.action !== 'keep';
 
 export const hasAccountInspectionAutoExecutePolicies = (settings: AccountInspectionConfigurableSettings) =>
   settings.autoExecuteQuotaLimitDisable ||

@@ -98,7 +98,7 @@ func BuildXAIOfficialHealthBody(model string) string {
 }
 
 func XAIOfficialAPIQuotaDecision(disabled bool, body string) Decision {
-	reason := "xAI 官方 API 额度不足，建议禁用账号"
+	reason := "xAI 官方 API 额度不足，建议建立额度保护"
 	action := ActionDisable
 	if disabled {
 		reason = "xAI 官方 API 额度不足，但账号已禁用"

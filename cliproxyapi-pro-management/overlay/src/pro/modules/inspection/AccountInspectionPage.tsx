@@ -33,6 +33,7 @@ import {
 } from '@/pro/modules/inspection/features/accountInspection';
 import { readInspectionFocusLocationState } from '@/pro/shared/inspectionNavigation';
 import { SchedulingRecoveryDialog } from './SchedulingRecoveryDialog';
+import { InspectionRecordsPanel } from './InspectionRecordsPanel';
 import { ProDetailDialog, ProSettingsSheet } from '@/pro/shared/ProSurface';
 import { useProSurfaceState } from '@/pro/shared/useProSurfaceState';
 import {
@@ -68,6 +69,7 @@ import {
   formatAccountInspectionDuration,
   formatCurrentStateLabel,
   formatInspectionInterval,
+  formatInspectionExecutionLabel,
   formatInspectionResultToast,
   formatQuotaRemainingLabel,
   formatRunInspectionButtonLabel,
@@ -86,6 +88,7 @@ import {
   partitionInspectionActionTargets,
   resolveAccountInspectionAccountLabel,
   resolveAccountInspectionPlanLabel,
+  resolveResultHealthStatus,
   scheduleAuthFileAccountStats,
   summaryToneClass,
   toAccountInspectionApiItem,
@@ -119,10 +122,12 @@ import {
   nextAccountInspectionReconnectDelay,
   refreshAccountInspectionAfterReconnect,
   type AccountInspectionLogStreamMessage,
+  type AccountInspectionBatchKind,
+  type AccountInspectionBatchOperation,
+  type AccountInspectionBatchScope,
   type AccountInspectionScheduleResponse,
 } from './api';
 import { apiClient } from '@/services/api/client';
-import type { ApiError } from '@/types';
 import { authFilesApi } from '@/services/api/authFiles';
 import { quotaPersistenceMiddleware } from '@/pro/modules/quota';
 import { useAuthStore, useNotificationStore, useQuotaStore } from '@/stores';
@@ -133,7 +138,8 @@ import quotaStyles from '@/features/quota/QuotaPage.module.scss';
 import styles from '@/pro/modules/inspection/features/accountInspection.module.scss';
 import { useInspectionDetailsLoader } from '@/pro/modules/inspection/hooks/useInspectionDetailsLoader';
 
-type ResultBulkAction = 'suggested' | 'recheck' | ManualAccountInspectionAction;
+type ResultBulkAction = 'suggested' | 'recheck' | 'recover' | ManualAccountInspectionAction;
+type ResultBulkScope = 'selected' | 'filtered' | 'fixed';
 
 export function AccountInspectionPage() {
   const { t, i18n } = useTranslation();
@@ -222,8 +228,18 @@ export function AccountInspectionPage() {
   const [recheckingKey, setRecheckingKey] = useState<string | null>(null);
   const [selectedResultKeys, setSelectedResultKeys] = useState<Set<string>>(() => new Set());
   const [resultBulkAction, setResultBulkAction] = useState<ResultBulkAction>('suggested');
+  const [resultBulkScope, setResultBulkScope] = useState<ResultBulkScope>('selected');
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
-  const [bulkRecheckFailures, setBulkRecheckFailures] = useState<Array<{ item: AccountInspectionResultItem; error: string }>>([]);
+  const [batchOperations, setBatchOperations] = useState<AccountInspectionBatchOperation[]>([]);
+  const [batchError, setBatchError] = useState('');
+  const [batchHydrated, setBatchHydrated] = useState(false);
+  const batchStorageKey = useMemo(() => {
+    let hash = 2166136261;
+    for (const char of `${apiBase}\0${managementKey}`) {
+      hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+    }
+    return `account-inspection-batches:${(hash >>> 0).toString(16)}`;
+  }, [apiBase, managementKey]);
   const [detailsLoadError, setDetailsLoadError] = useState('');
   const [detailsRetryNonce, setDetailsRetryNonce] = useState(0);
   const [exportingAuthFiles, setExportingAuthFiles] = useState(false);
@@ -380,6 +396,74 @@ export function AccountInspectionPage() {
     logPageSize: ACCOUNT_INSPECTION_LOG_PAGE_SIZE,
     logLevel: logLevelFilter,
   }), [activeResultFilter, logLevelFilter, logPage, resultPage, resultPageSize, resultPendingOnly, resultSearch, selectedResultProvider]);
+
+  useEffect(() => {
+    if (connectionStatus !== 'connected') return;
+    let cancelled = false;
+    setBatchHydrated(false);
+    setBatchOperations([]);
+    let ids: string[] = [];
+    try {
+      const stored = JSON.parse(window.sessionStorage.getItem(batchStorageKey) || '[]');
+      if (Array.isArray(stored)) ids = stored.filter((id): id is string => typeof id === 'string' && /^[a-f0-9]{32}$/.test(id));
+    } catch {
+      // Browser storage may be unavailable; the current tab still keeps live receipts.
+    }
+    void Promise.allSettled(ids.map(accountInspectionApi.getBatch)).then((results) => {
+      if (cancelled) return;
+      setBatchOperations(results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []));
+      setBatchHydrated(true);
+    });
+    return () => { cancelled = true; };
+  }, [batchStorageKey, connectionStatus]);
+
+  useEffect(() => {
+    if (!batchHydrated || connectionStatus !== 'connected') return;
+    try {
+      window.sessionStorage.setItem(batchStorageKey, JSON.stringify(batchOperations.map((operation) => operation.operationId)));
+    } catch {
+      // Receipt persistence is best effort when session storage is unavailable.
+    }
+  }, [batchHydrated, batchOperations, batchStorageKey, connectionStatus]);
+
+  const batchRefreshRef = useRef({ currentInspectionDetailOptions, applyBackendResponse, loadAuthFiles });
+  batchRefreshRef.current = { currentInspectionDetailOptions, applyBackendResponse, loadAuthFiles };
+  const runningBatchIds = batchOperations.filter((operation) => operation.state === 'running').map((operation) => operation.operationId).join('|');
+
+  useEffect(() => {
+    if (!runningBatchIds) return;
+    const operationIds = runningBatchIds.split('|');
+    let cancelled = false;
+    let polling = false;
+    const refresh = async () => {
+      if (polling || cancelled) return;
+      polling = true;
+      try {
+        const operations = await Promise.all(operationIds.map(accountInspectionApi.getBatch));
+        if (cancelled) return;
+        const byId = new Map(operations.map((operation) => [operation.operationId, operation]));
+        setBatchOperations((current) => current.map((operation) => byId.get(operation.operationId) ?? operation));
+        if (operations.every((operation) => operation.state === 'completed')) {
+          const { currentInspectionDetailOptions: options, applyBackendResponse: apply, loadAuthFiles: load } = batchRefreshRef.current;
+          const response = await accountInspectionApi.getStatus(options);
+          if (!cancelled) {
+            apply(response);
+            void load();
+          }
+        }
+      } catch (error) {
+        if (!cancelled) setBatchError(error instanceof Error ? error.message : String(error));
+      } finally {
+        polling = false;
+      }
+    };
+    const timer = window.setInterval(() => void refresh(), 1500);
+    void refresh();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [runningBatchIds]);
 
   const loadBackendSchedule = useCallback(async () => {
     const requestId = backendScheduleRequestIdRef.current + 1;
@@ -647,12 +731,18 @@ export function AccountInspectionPage() {
       }
       const currentResult = result;
       if (!currentResult) return;
-      const targets = items.filter(isSuggestedAction);
+      const targets = items.filter((item) => item.action !== 'keep');
+      if (targets.some((item) => !item.resultRef)) {
+        showNotification(t('monitoring.account_inspection_result_ref_required'), 'warning');
+        return;
+      }
       const actionItems = targets.flatMap((item) => {
         if (item.action === 'keep') return [];
         return [{
           ...toAccountInspectionApiItem(item),
           action: item.action,
+          resultRef: item.resultRef!,
+          suggested: item.suggested ?? isSuggestedAction(item),
         }];
       });
       if (actionItems.length === 0) {
@@ -730,16 +820,28 @@ export function AccountInspectionPage() {
   const filteredResultRows = useMemo(() => {
     const rows = filterRows[activeResultFilter];
     return resultPendingOnly
-      ? rows.filter(({ item }) => isSuggestedAction(item) && !item.executed)
+      ? rows.filter(({ item }) => item.executedEffect !== 'delete' && isSuggestedAction(item) && !item.executed)
       : rows;
   }, [activeResultFilter, filterRows, resultPendingOnly]);
   const resultPageInfo = result?.resultsPage ?? null;
   const visibleResultRows = filteredResultRows;
   const selectedVisibleResultRows = useMemo(
-    () => visibleResultRows.filter(({ item }) => selectedResultKeys.has(item.key)),
+    () => visibleResultRows.filter(({ item }) => item.executedEffect !== 'delete' && selectedResultKeys.has(item.key)),
     [selectedResultKeys, visibleResultRows]
   );
-  const allVisibleResultsSelected = visibleResultRows.length > 0 && selectedVisibleResultRows.length === visibleResultRows.length;
+  const selectableVisibleResultRows = visibleResultRows.filter(({ item }) => item.executedEffect !== 'delete');
+  const allVisibleResultsSelected = selectableVisibleResultRows.length > 0 && selectedVisibleResultRows.length === selectableVisibleResultRows.length;
+  const batchFilterLabel = ({
+    all: t('monitoring.account_inspection_filter_all'),
+    accountIssues: t('monitoring.account_inspection_filter_account_issues'),
+    quotaChanges: t('monitoring.account_inspection_filter_quota_changes'),
+    highAvailable: t('monitoring.account_inspection_high_available'),
+    unknown: t('monitoring.account_inspection_health_unknown'),
+    accountInvalid: t('monitoring.account_inspection_account_invalid'),
+    requestError: t('monitoring.account_inspection_account_request_error'),
+    quotaExhausted: t('monitoring.account_inspection_health_quota_exhausted'),
+    recoverable: t('monitoring.account_inspection_health_recoverable'),
+  } as Record<typeof activeResultFilter, string>)[activeResultFilter];
 
   const filteredLogs = useMemo(
     () => (logLevelFilter === 'all' ? logs : logs.filter((entry) => entry.level === logLevelFilter)),
@@ -830,9 +932,11 @@ export function AccountInspectionPage() {
   }, [appendLog, executeItems, result, selectedResultProvider, showConfirmation, showNotification, t]);
 
   const handleExecuteSingle = useCallback(
-    (item: AccountInspectionResultItem, manualAction?: ManualAccountInspectionAction) => {
-      const target = manualAction ? buildManualActionItem(item, manualAction) : item;
-      const actionLabel = formatActionLabel(target.action, t);
+    (item: AccountInspectionResultItem, manualAction?: ManualAccountInspectionAction, isSuggestedOverride = false) => {
+      const target = manualAction
+        ? { ...buildManualActionItem(item, manualAction), suggested: isSuggestedOverride }
+        : { ...item, suggested: true };
+      const actionLabel = formatInspectionExecutionLabel(target, t);
       const isDelete = target.action === 'delete';
       showConfirmation({
         dedupeKey: `account-inspection:execute:${target.key}:${target.action}`,
@@ -888,127 +992,191 @@ export function AccountInspectionPage() {
   );
 
   const toggleResultSelection = useCallback((key: string, selected: boolean) => {
+    if (selected && visibleResultRows.some(({ item }) => item.key === key && item.executedEffect === 'delete')) return;
     setSelectedResultKeys((current) => {
       const next = new Set(current);
       if (selected) next.add(key);
       else next.delete(key);
       return next;
     });
-  }, []);
-
-  const toggleVisibleResultSelection = useCallback((selected: boolean) => {
-    setSelectedResultKeys(selected ? new Set(visibleResultRows.map(({ item }) => item.key)) : new Set());
   }, [visibleResultRows]);
 
-  const recheckSelectedResults = useCallback(async (items: AccountInspectionResultItem[]) => {
-    if (restoredSnapshot) {
-      showNotification(t('monitoring.account_inspection_restored_snapshot_action_blocked'), 'warning');
+  const toggleVisibleResultSelection = useCallback((selected: boolean) => {
+    setSelectedResultKeys(selected ? new Set(visibleResultRows.filter(({ item }) => item.executedEffect !== 'delete').map(({ item }) => item.key)) : new Set());
+  }, [visibleResultRows]);
+
+  const confirmBatch = useCallback((operations: AccountInspectionBatchOperation[], scope: ResultBulkScope, preservePrevious = false) => {
+    setBatchOperations((current) => preservePrevious
+      ? [...current.filter((existing) => !operations.some((operation) => operation.operationId === existing.operationId)), ...operations]
+      : operations);
+    const summary = operations.reduce((total, operation) => ({
+      total: total.total + operation.summary.total,
+      ready: total.ready + operation.summary.ready,
+      stale: total.stale + operation.summary.stale,
+      unsupported: total.unsupported + operation.summary.unsupported,
+    }), { total: 0, ready: 0, stale: 0, unsupported: 0 });
+    const actionGroups = new Map<string, number>();
+    for (const operation of operations) {
+      for (const entry of operation.items) {
+        if (entry.status !== 'ready') continue;
+        actionGroups.set(entry.effect, (actionGroups.get(entry.effect) ?? 0) + 1);
+      }
+    }
+    const scopeLabel = t(scope === 'selected'
+      ? 'monitoring.account_inspection_batch_scope_selected'
+      : scope === 'filtered'
+        ? 'monitoring.account_inspection_batch_scope_filtered'
+        : 'monitoring.account_inspection_batch_scope_fixed');
+    if (summary.ready === 0) {
+      showNotification(t('monitoring.account_inspection_batch_no_ready'), 'warning');
       return;
     }
+    showConfirmation({
+      dedupeKey: `account-inspection:batch:${operations.map((operation) => operation.operationId).join(':')}`,
+      title: t('monitoring.account_inspection_batch_preflight_title'),
+      message: (
+        <div className={styles.batchPreflight}>
+          <strong>{scopeLabel} · {t('monitoring.account_inspection_batch_ready_count', { count: summary.ready })}</strong>
+          {scope === 'filtered' && operations.some((operation) => operation.items.some(({ item }) => item.suggested))
+            ? <span>{t('monitoring.account_inspection_batch_filtered_suggestions')}</span> : null}
+          <span>{t('monitoring.account_inspection_batch_preflight_counts', {
+            total: summary.total,
+            ready: summary.ready,
+            stale: summary.stale,
+            unsupported: summary.unsupported,
+          })}</span>
+          <div className={styles.batchPreflightStats}>
+            {Array.from(actionGroups, ([group, count]) => (
+              <span key={group}>{t(`monitoring.account_inspection_batch_group_${group}`)} · {count}</span>
+            ))}
+          </div>
+          {actionGroups.has('inspect') || actionGroups.has('quota_recovery') || actionGroups.has('recovery_check')
+            ? <span>{t('monitoring.account_inspection_batch_upstream_cost')}</span> : null}
+          {scope !== 'fixed' ? <span>{t('monitoring.account_inspection_batch_filter_context', {
+            filter: batchFilterLabel,
+            provider: selectedResultProvider === ACCOUNT_INSPECTION_ALL_PROVIDER_TYPE
+              ? t('monitoring.filter_all_providers') : resolveProviderDisplayLabel(selectedResultProvider),
+            search: resultSearch || t('monitoring.account_inspection_batch_no_search'),
+            pending: resultPendingOnly || scope === 'filtered' && operations.some((operation) => operation.items.some(({ item }) => item.suggested))
+              ? t('monitoring.account_inspection_filter_pending_only')
+              : t('monitoring.account_inspection_batch_all_states'),
+          })}</span> : null}
+          <div className={styles.batchPreflightList}>
+            {operations.flatMap((operation) => operation.items.map(({ key, item, status, error }) => (
+              <span key={`${operation.operationId}:${key}`}>
+                {item.displayName || item.fileName} · {t(`monitoring.account_inspection_batch_status_${status}`)}
+                {error ? ` · ${error}` : ''}
+              </span>
+            )))}
+          </div>
+        </div>
+      ),
+      confirmText: t('monitoring.account_inspection_batch_confirm', { count: summary.ready }),
+      cancelText: t('common.cancel'),
+      variant: operations.some((operation) => operation.items.some(({ item, status }) => item.action === 'delete' && status === 'ready')) ? 'danger' : 'primary',
+      onConfirm: () => {
+        setSelectedResultKeys(new Set());
+        setBatchError('');
+        setBulkActionLoading(true);
+        void Promise.all(operations.map(async (operation) => {
+          try {
+            return await accountInspectionApi.executeBatch(operation.operationId);
+          } catch (error) {
+            try {
+              return await accountInspectionApi.getBatch(operation.operationId);
+            } catch {
+              throw error;
+            }
+          }
+        }))
+          .then((started) => {
+            const byId = new Map(started.map((operation) => [operation.operationId, operation]));
+            setBatchOperations((current) => current.map((operation) => byId.get(operation.operationId) ?? operation));
+            if (started.every((operation) => operation.state === 'completed')) {
+              const { currentInspectionDetailOptions: options, applyBackendResponse: apply, loadAuthFiles: load } = batchRefreshRef.current;
+              void accountInspectionApi.getStatus(options)
+                .then((response) => { apply(response); void load(); })
+                .catch((error) => setBatchError(error instanceof Error ? error.message : String(error)));
+            }
+          })
+          .catch((error) => setBatchError(error instanceof Error ? error.message : String(error)))
+          .finally(() => setBulkActionLoading(false));
+      },
+    });
+  }, [batchFilterLabel, resultPendingOnly, resultSearch, selectedResultProvider, showConfirmation, showNotification, t]);
+
+  const handleExecuteSelectedResults = useCallback(async () => {
+    if (restoredSnapshot || runStatus === 'running' || batchOperations.some((operation) => operation.state === 'running')) return;
     if (connectionStatus !== 'connected') {
       showNotification(t('notification.connection_required'), 'warning');
       return;
     }
-
-    setBulkActionLoading(true);
-    setLogsCollapsed(false);
-    appendLog('info', t('monitoring.account_inspection_recheck_selected_started', { count: items.length }));
-    try {
-      const response = await accountInspectionApi.inspectMany(items.map(toAccountInspectionApiItem), currentInspectionDetailOptions);
-      applyBackendResponse(response);
-      const itemByKey = new Map(items.map((item) => [item.key, item]));
-      const outcomes = response.outcomes.flatMap((outcome) => {
-        const item = itemByKey.get(outcome.key) ?? items.find((candidate) => candidate.fileName === outcome.fileName && candidate.authIndex === outcome.authIndex);
-        return item ? [{ success: outcome.success, item, error: outcome.error }] : [];
-      });
-      const success = outcomes.filter((outcome) => outcome.success).length;
-      const failed = outcomes.length - success;
-      setBulkRecheckFailures(outcomes.filter((outcome) => !outcome.success).map((outcome) => ({ item: outcome.item, error: outcome.error })));
-      showNotification(
-        t('monitoring.account_inspection_recheck_selected_summary', {
-          total: outcomes.length,
-          success,
-          failed,
-        }),
-        failed > 0 ? 'warning' : 'success'
-      );
-      setSelectedResultKeys(new Set());
-    } catch (error) {
-      const response = (error as ApiError | undefined)?.data;
-      if (isAccountInspectionBackendResponse(response)) {
-        applyBackendResponse(response);
-        const itemByKey = new Map(items.map((item) => [item.key, item]));
-        const responseWithOutcomes = response as AccountInspectionScheduleResponse & {
-          outcomes?: Array<{ key?: string; fileName?: string; authIndex?: string; success?: boolean; error?: string }>;
-        };
-        const failures = Array.isArray(responseWithOutcomes.outcomes)
-          ? responseWithOutcomes.outcomes.flatMap((outcome) => {
-              if (outcome.success) return [];
-              const item = itemByKey.get(outcome.key ?? '') ?? items.find((candidate) => candidate.fileName === outcome.fileName && candidate.authIndex === outcome.authIndex);
-              return item ? [{ item, error: outcome.error || t('common.unknown_error') }] : [];
-            })
-          : [];
-        setBulkRecheckFailures(failures);
+    const kind: AccountInspectionBatchKind = resultBulkAction === 'recheck'
+      ? 'inspect'
+      : resultBulkAction === 'recover' ? 'recover' : 'action';
+    let scope: AccountInspectionBatchScope;
+    if (resultBulkScope === 'selected') {
+      const selected = selectedVisibleResultRows.map(({ item }) => item);
+      const targets = resultBulkAction === 'suggested'
+        ? selected.filter((item) => isSuggestedAction(item) && !item.executed)
+        : selected;
+      if (targets.length === 0) {
+        showNotification(t('monitoring.account_inspection_no_selected_suggestions'), 'info');
+        return;
       }
-      handleAccountInspectionControlError(error, appendLog, showNotification, t('common.unknown_error'));
+      scope = {
+        type: 'selected',
+        items: targets.map((item) => ({
+          ...toAccountInspectionApiItem(item),
+          resultRef: item.resultRef || '',
+          action: resultBulkAction === 'recheck' ? 'keep'
+            : resultBulkAction === 'recover' ? 'enable'
+              : resultBulkAction === 'suggested' ? item.action : resultBulkAction,
+          suggested: resultBulkAction === 'suggested',
+        })),
+      };
+    } else {
+      scope = {
+        type: 'filtered',
+        filter: activeResultFilter,
+        provider: selectedResultProvider,
+        search: resultSearch,
+        pendingOnly: resultPendingOnly,
+      };
+      if (resultBulkAction === 'suggested') scope.suggested = true;
+      else if (resultBulkAction === 'recheck') scope.action = 'keep';
+      else if (resultBulkAction === 'recover') {
+        scope.action = 'enable';
+        scope.suggested = false;
+      } else if (resultBulkAction === 'disable' || resultBulkAction === 'enable' || resultBulkAction === 'delete') {
+        scope.action = resultBulkAction;
+        scope.suggested = false;
+      }
+    }
+    setBulkActionLoading(true);
+    setBatchError('');
+    try {
+      const operation = await accountInspectionApi.preflightBatch(kind, scope);
+      confirmBatch([operation], resultBulkScope);
+    } catch (error) {
+      setBatchError(error instanceof Error ? error.message : String(error));
     } finally {
       setBulkActionLoading(false);
     }
-  }, [appendLog, applyBackendResponse, connectionStatus, currentInspectionDetailOptions, restoredSnapshot, showNotification, t]);
+  }, [activeResultFilter, batchOperations, confirmBatch, connectionStatus, restoredSnapshot, resultBulkAction, resultBulkScope, resultPendingOnly, resultSearch, runStatus, selectedResultProvider, selectedVisibleResultRows, showNotification, t]);
 
-  const handleExecuteSelectedResults = useCallback(() => {
-    const items = selectedVisibleResultRows.map(({ item }) => item);
-    if (items.length === 0) return;
-
-    if (resultBulkAction === 'recheck') {
-      showConfirmation({
-        title: t('monitoring.account_inspection_recheck_selected_title'),
-        message: t('monitoring.account_inspection_recheck_selected_confirm', { count: items.length }),
-        confirmText: t('monitoring.account_inspection_recheck_account'),
-        cancelText: t('common.cancel'),
-        variant: 'primary',
-        onConfirm: () => void recheckSelectedResults(items),
-      });
-      return;
+  const handleRetryBatchFailures = useCallback(async (operationId: string) => {
+    setBulkActionLoading(true);
+    setBatchError('');
+    try {
+      const prepared = await accountInspectionApi.retryBatch(operationId);
+      confirmBatch([prepared], 'selected', true);
+    } catch (error) {
+      setBatchError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBulkActionLoading(false);
     }
-
-    const targets = resultBulkAction === 'suggested'
-      ? items.filter((item) => isSuggestedAction(item) && !item.executed)
-      : items.map((item) => buildManualActionItem(item, resultBulkAction));
-    if (targets.length === 0) {
-      showNotification(t('monitoring.account_inspection_no_selected_suggestions'), 'info');
-      return;
-    }
-    const { executable, recovery } = partitionInspectionActionTargets(targets);
-    if (recovery.length > 0) {
-      if (targets.length === 1 && recovery[0].authId && recovery[0].authIndex) {
-        openRecoveryForItem(recovery[0]);
-        return;
-      }
-      showNotification(t(executable.length > 0
-        ? 'routing_policy.recovery.bulk_skipped'
-        : 'routing_policy.recovery.bulk_notice', { count: recovery.length }), 'info');
-      if (executable.length === 0) {
-        return;
-      }
-    }
-    const counts = countActions(executable);
-    showConfirmation({
-      dedupeKey: `account-inspection:execute:${executable.map((item) => `${item.key}:${item.action}`).sort().join('|')}`,
-      title: t('monitoring.account_inspection_execute_confirm_title'),
-      message: buildExecuteConfirmationMessage(
-        executable,
-        t
-      ),
-      confirmText: t('monitoring.account_inspection_execute_confirm_button', { count: executable.length }),
-      cancelText: t('common.cancel'),
-      variant: counts.delete > 0 ? 'danger' : 'primary',
-      onConfirm: () => {
-        setSelectedResultKeys(new Set());
-        void executeItems(executable);
-      },
-    });
-  }, [executeItems, openRecoveryForItem, recheckSelectedResults, resultBulkAction, selectedVisibleResultRows, showConfirmation, showNotification, t]);
+  }, [confirmBatch]);
 
   const quotaStore = useMemo(
     () => ({ antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota }),
@@ -1095,17 +1263,19 @@ export function AccountInspectionPage() {
   ], [authFileStatsReady, selectedAssetLabel, selectedAssetStats, t]);
 
   const actionStats = useMemo(() => {
-    const autoTotal = autoExecutionCounts.delete + autoExecutionCounts.disable + autoExecutionCounts.enable;
-    const manualDelete = result?.summary.deleteCount ?? actionableActionCounts.delete;
-    const manualDisable = result?.summary.disableCount ?? actionableActionCounts.disable;
-    const manualEnable = result?.summary.enableCount ?? actionableActionCounts.enable;
-    const manualTotal = manualDelete + manualDisable + manualEnable;
+    const autoTotal = autoExecutionCounts.delete + autoExecutionCounts.disable + autoExecutionCounts.enable + autoExecutionCounts.quotaProtection + autoExecutionCounts.quotaRecovery;
+    const manualDelete = result?.summary.pendingDeleteCount ?? actionableActionCounts.delete;
+    const manualDisable = result?.summary.pendingDisableCount ?? actionableActionCounts.disable;
+    const manualEnable = result?.summary.pendingEnableCount ?? actionableActionCounts.enable;
+    const manualTotal = result?.summary.pendingActionCount ?? manualDelete + manualDisable + manualEnable;
     return {
       autoTotal,
       manualTotal,
       autoDelete: autoExecutionCounts.delete,
       autoDisable: autoExecutionCounts.disable,
       autoEnable: autoExecutionCounts.enable,
+      autoQuotaProtection: autoExecutionCounts.quotaProtection,
+      autoQuotaRecovery: autoExecutionCounts.quotaRecovery,
       manualDelete,
       manualDisable,
       manualEnable,
@@ -1140,10 +1310,12 @@ export function AccountInspectionPage() {
           `${t('monitoring.account_inspection_action_enable')}: ${actionStats.autoEnable}`,
           `${t('monitoring.account_inspection_action_disable')}: ${actionStats.autoDisable}`,
           `${t('monitoring.account_inspection_action_delete')}: ${actionStats.autoDelete}`,
+          `${t('monitoring.account_inspection_action_quota_protection')}: ${actionStats.autoQuotaProtection}`,
+          `${t('monitoring.account_inspection_quota_recovery_enable_short')}: ${actionStats.autoQuotaRecovery}`,
         ].join(' · ')
       : t('monitoring.account_inspection_auto_execute_no_actions');
   const showInspectionResults = useCallback((filter: ResultStatusFilter | ResultReasonFilter) => {
-    if (filter === 'all' || filter === 'accountIssues' || filter === 'quotaChanges' || filter === 'highAvailable') {
+    if (filter === 'all' || filter === 'accountIssues' || filter === 'quotaChanges' || filter === 'highAvailable' || filter === 'unknown') {
       setResultStatusFilter(filter);
       setResultReasonFilter(null);
     } else {
@@ -1183,7 +1355,8 @@ export function AccountInspectionPage() {
     { value: 'accountIssues', label: `${t('monitoring.account_inspection_filter_account_issues')} · ${accountIssueResultCount}` },
     { value: 'quotaChanges', label: `${t('monitoring.account_inspection_filter_quota_changes')} · ${quotaChangeResultCount}` },
     { value: 'highAvailable', label: `${t('monitoring.account_inspection_high_available')} · ${displayedHealthCounts.healthy}` },
-  ], [accountIssueResultCount, displayedHealthCounts.healthy, displayedHealthCounts.total, quotaChangeResultCount, t]);
+    { value: 'unknown', label: `${t('monitoring.account_inspection_health_unknown')} · ${displayedHealthCounts.unknown ?? 0}` },
+  ], [accountIssueResultCount, displayedHealthCounts.healthy, displayedHealthCounts.total, displayedHealthCounts.unknown, quotaChangeResultCount, t]);
   const resultReasonLabels = useMemo<Record<ResultReasonFilter, string>>(() => ({
     accountInvalid: t('monitoring.account_inspection_account_invalid'),
     requestError: t('monitoring.account_inspection_account_request_error'),
@@ -1193,6 +1366,7 @@ export function AccountInspectionPage() {
   const resultBulkActionOptions = useMemo(() => [
     { value: 'suggested', label: t('monitoring.account_inspection_bulk_action_suggested') },
     { value: 'recheck', label: t('monitoring.account_inspection_bulk_action_recheck') },
+    { value: 'recover', label: t('monitoring.account_inspection_bulk_action_recover') },
     { value: 'disable', label: t('monitoring.account_inspection_action_disable') },
     { value: 'enable', label: t('monitoring.account_inspection_action_enable') },
     { value: 'delete', label: t('monitoring.account_inspection_action_delete') },
@@ -1695,6 +1869,10 @@ export function AccountInspectionPage() {
                   <small>{t('monitoring.account_inspection_account_request_error')}</small>
                   <strong>{displayedHealthCounts.inspectionError}</strong>
                 </button>
+                <button type="button" className={`${styles.resultOverviewItem} ${styles.resultOverviewWarn}`} onClick={() => showInspectionResults('unknown')} disabled={!result}>
+                  <small>{t('monitoring.account_inspection_health_unknown')}</small>
+                  <strong>{displayedHealthCounts.unknown ?? 0}</strong>
+                </button>
               </div>
             </div>
 
@@ -1710,6 +1888,8 @@ export function AccountInspectionPage() {
                       <span>{`${t('monitoring.account_inspection_action_enable')} ${actionStats.autoEnable}`}</span>
                       <span>{`${t('monitoring.account_inspection_action_disable')} ${actionStats.autoDisable}`}</span>
                       <span>{`${t('monitoring.account_inspection_action_delete')} ${actionStats.autoDelete}`}</span>
+                      <span>{`${t('monitoring.account_inspection_action_quota_protection')} ${actionStats.autoQuotaProtection}`}</span>
+                      <span>{`${t('monitoring.account_inspection_quota_recovery_enable_short')} ${actionStats.autoQuotaRecovery}`}</span>
                       <span>{`${t('monitoring.account_inspection_action_keep')} ${actionStats.keep}`}</span>
                     </div>
                     <div className={styles.strategyActivityRow}>
@@ -1783,15 +1963,76 @@ export function AccountInspectionPage() {
           </div>
         ) : null}
 
-        {bulkRecheckFailures.length > 0 ? (
-          <div className={styles.bulkFailurePanel} role="alert">
-            <strong>{t('monitoring.account_inspection_recheck_failures_title', { count: bulkRecheckFailures.length })}</strong>
-            {bulkRecheckFailures.slice(0, 10).map(({ item, error }) => <span key={item.key}>{`${resolveAccountInspectionAccountLabel(item)}：${error}`}</span>)}
-            <Button size="sm" variant="secondary" onClick={() => void recheckSelectedResults(bulkRecheckFailures.map(({ item }) => item))}>
-              {t('monitoring.account_inspection_retry_failed')}
-            </Button>
-          </div>
-        ) : null}
+        {batchError ? <div className={styles.inspectionInlineError} role="alert">{batchError}</div> : null}
+        {batchOperations.map((operation) => (
+          <section key={operation.operationId} className={styles.batchReceiptPanel} aria-label={t('monitoring.account_inspection_batch_receipt_title')}>
+            <div className={styles.batchReceiptHeader}>
+              <div>
+                <strong>{t('monitoring.account_inspection_batch_receipt_title')}</strong>
+                <span>{t(`monitoring.account_inspection_batch_kind_${operation.kind}`)} · {t(`monitoring.account_inspection_batch_state_${operation.state}`)}</span>
+              </div>
+              <span>{t('monitoring.account_inspection_batch_receipt_counts', {
+                total: operation.summary.total,
+                succeeded: operation.summary.succeeded,
+                failed: operation.summary.failed,
+                pending: operation.summary.ready + operation.summary.running,
+                skipped: operation.summary.stale + operation.summary.unsupported,
+                interrupted: operation.summary.interrupted ?? 0,
+              })}</span>
+            </div>
+            <div className={styles.batchReceiptList} role="list">
+              {operation.items.map(({ key, item, status, effect, error, outcome }) => {
+                const detail = outcome?.outcome ?? outcome;
+                const receipts = detail?.receipts;
+                const recoveryRan = Boolean(receipts?.length);
+                const stillRestricted = Boolean(detail?.after && typeof detail.after === 'object' &&
+                  'authId' in detail.after && typeof detail.after.authId === 'string' && detail.after.authId.trim());
+                const inspected = detail?.result ? accountInspectionBackendResultToItem(detail.result) : null;
+                const inspectedHealth = inspected ? resolveResultHealthStatus(inspected) : null;
+                const successLabel = recoveryRan
+                  ? t(stillRestricted
+                    ? 'monitoring.account_inspection_batch_recovery_still_restricted'
+                    : 'monitoring.account_inspection_batch_recovery_released')
+                  : operation.kind === 'inspect'
+                    ? t(inspectedHealth === 'healthy'
+                      ? 'monitoring.account_inspection_batch_inspection_healthy'
+                      : 'monitoring.account_inspection_batch_inspection_unhealthy', {
+                        status: inspected && inspectedHealth ? buildHealthStatusLabel(inspected, inspectedHealth, t) : '-',
+                      })
+                    : t('monitoring.account_inspection_batch_action_completed');
+                return (
+                  <div key={key} className={styles.batchReceiptItem} role="listitem">
+                    <strong>{item.displayName || item.fileName}</strong>
+                    <small>{t(`monitoring.account_inspection_batch_group_${effect}`)}</small>
+                    <span>{status === 'succeeded' ? successLabel : t(`monitoring.account_inspection_batch_status_${status}`)}</span>
+                    {recoveryRan && stillRestricted && status !== 'succeeded'
+                      ? <small>{t('monitoring.account_inspection_batch_recovery_still_restricted')}</small> : null}
+                    {(error || detail?.error || detail?.warning) ? <small className={styles.inspectionStatusError}>{error || detail?.error || detail?.warning}</small> : null}
+                    {receipts?.flatMap((receipt, receiptIndex) => (receipt.phases ?? []).map((phase, phaseIndex) => (
+                      <small key={`${receiptIndex}:${phaseIndex}`}>
+                        {phase.source}{phase.model ? ` · ${phase.model}` : ''} · {t(`routing_policy.recovery.phase_${phase.status}`)}
+                        {phase.error ? ` · ${phase.error}` : ''}
+                      </small>
+                    )))}
+                  </div>
+                );
+              })}
+            </div>
+            {operation.state === 'interrupted' || (operation.summary.interrupted ?? 0) > 0 ? (
+              <p className={styles.inspectionStatusError}>{t('monitoring.account_inspection_batch_interrupted_notice')}</p>
+            ) : null}
+            {operation.state === 'prepared' && operation.summary.ready > 0 ? (
+              <Button size="sm" variant="secondary" onClick={() => confirmBatch([operation], 'fixed', true)}>
+                {t('monitoring.account_inspection_batch_resume_prepared')}
+              </Button>
+            ) : null}
+            {operation.state === 'completed' && operation.summary.failed + operation.summary.stale > 0 ? (
+              <Button size="sm" variant="secondary" loading={bulkActionLoading} onClick={() => void handleRetryBatchFailures(operation.operationId)}>
+                {t('monitoring.account_inspection_batch_retry_failed', { count: operation.summary.failed + operation.summary.stale })}
+              </Button>
+            ) : null}
+          </section>
+        ))}
 
         {result ? (
           <>
@@ -1853,10 +2094,32 @@ export function AccountInspectionPage() {
                 </span>
               </div>
             ) : null}
-            {selectedVisibleResultRows.length > 0 ? (
+            {resultPagination.total > 0 ? (
               <div className={styles.resultSelectionBar}>
-                <strong>{t('monitoring.account_inspection_selected_count', { count: selectedVisibleResultRows.length })}</strong>
+                <div className={styles.resultSelectionSummary}>
+                  <strong>{t(resultBulkScope === 'selected'
+                    ? 'monitoring.account_inspection_batch_scope_selected'
+                    : 'monitoring.account_inspection_batch_scope_filtered')}</strong>
+                  <span>{resultBulkScope === 'selected'
+                    ? t('monitoring.account_inspection_selected_count', { count: selectedVisibleResultRows.length })
+                    : t('monitoring.account_inspection_batch_filtered_count', { count: resultPagination.total })}</span>
+                  {resultBulkScope === 'filtered' ? <small>{t('monitoring.account_inspection_batch_filtered_hint')}</small> : null}
+                  {resultBulkScope === 'filtered' && resultBulkAction === 'suggested'
+                    ? <small>{t('monitoring.account_inspection_batch_filtered_suggestions')}</small> : null}
+                </div>
                 <div className={styles.resultSelectionActions}>
+                  <Select
+                    value={resultBulkScope}
+                    options={[
+                      { value: 'selected', label: t('monitoring.account_inspection_batch_scope_selected') },
+                      { value: 'filtered', label: t('monitoring.account_inspection_batch_scope_filtered') },
+                    ]}
+                    onChange={(value) => setResultBulkScope(value as ResultBulkScope)}
+                    ariaLabel={t('monitoring.account_inspection_batch_scope_label')}
+                    className={styles.resultBulkActionSelect}
+                    fullWidth={false}
+                    size="sm"
+                  />
                   <Select
                     value={resultBulkAction}
                     options={resultBulkActionOptions}
@@ -1870,15 +2133,17 @@ export function AccountInspectionPage() {
                   <Button
                     size="sm"
                     variant={resultBulkAction === 'delete' ? 'danger' : 'primary'}
-                    onClick={handleExecuteSelectedResults}
+                    onClick={() => void handleExecuteSelectedResults()}
                     loading={bulkActionLoading || executing}
-                    disabled={restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
+                    disabled={!batchHydrated || restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null || batchOperations.some((operation) => operation.state === 'running') || (resultBulkScope === 'selected' && selectedVisibleResultRows.length === 0)}
                   >
-                    {t('monitoring.account_inspection_apply_selected_action')}
+                    {t('monitoring.account_inspection_batch_preflight_button')}
                   </Button>
-                  <button type="button" className={styles.clearSelectionButton} onClick={() => setSelectedResultKeys(new Set())}>
-                    {t('monitoring.account_inspection_clear_selection')}
-                  </button>
+                  {selectedVisibleResultRows.length > 0 ? (
+                    <button type="button" className={styles.clearSelectionButton} onClick={() => setSelectedResultKeys(new Set())}>
+                      {t('monitoring.account_inspection_clear_selection')}
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : null}
@@ -1904,6 +2169,7 @@ export function AccountInspectionPage() {
                           type="checkbox"
                           checked={allVisibleResultsSelected}
                           onChange={(event) => toggleVisibleResultSelection(event.target.checked)}
+                          disabled={selectableVisibleResultRows.length === 0}
                           aria-label={t('monitoring.account_inspection_select_visible_results')}
                         />
                         <span>{t('monitoring.account_label')}</span>
@@ -1936,19 +2202,24 @@ export function AccountInspectionPage() {
                         <tr key={item.key}>
                           <td className={styles.accountTableCell} data-label={t('monitoring.account_label')}>
                             <div className={styles.accountCellLayout}>
-                              <input
+                              {item.executedEffect !== 'delete' ? <input
                                 type="checkbox"
                                 checked={selectedResultKeys.has(item.key)}
                                 onChange={(event) => toggleResultSelection(item.key, event.target.checked)}
                                 aria-label={t('monitoring.account_inspection_select_account', { account: accountLabel })}
-                              />
+                              /> : <span aria-hidden="true" />}
                               <div className={styles.primaryCell}>
                                 <strong title={item.fileName}>{accountLabel}</strong>
                                 <small>
                                   <span>{resolveProviderDisplayLabel(item.provider)}</span>
                                   <span aria-hidden="true"> · </span>
-                                  <span className={item.disabled ? styles.stateTextMuted : item.quotaCooling ? styles.stateTextWarn : styles.stateTextGood}>{formatCurrentStateLabel(item, t)}</span>
+                                  <span className={item.executedEffect === 'delete' ? styles.stateTextMuted : item.disabled ? styles.stateTextMuted : item.quotaCooling ? styles.stateTextWarn : styles.stateTextGood}>{item.executedEffect === 'delete' ? t('monitoring.account_inspection_effect_delete') : formatCurrentStateLabel(item, t)}</span>
                                   {item.quotaCooling && <span title={item.actionReason}> · {item.quotaRetryAt ? t('monitoring.account_inspection_quota_retry_at', { time: formatTimestamp(item.quotaRetryAt, i18n.language) }) : t('monitoring.account_inspection_quota_manual_release')}</span>}
+                                  {item.executed && <span> · {t('monitoring.account_inspection_suggestion_processed')}</span>}
+                                  {item.executedEffect && <span> · {t('monitoring.account_inspection_last_execution')}: {t(`monitoring.account_inspection_effect_${item.executedEffect}`)}</span>}
+                                  {!item.executedEffect && item.executedAction && <span> · {t('monitoring.account_inspection_last_manual_override')}: {formatActionLabel(item.executedAction, t)}{item.executedAt ? ` · ${formatTimestamp(item.executedAt, i18n.language)}` : ''}</span>}
+                                  {item.executeError && <span className={styles.stateTextBad}> · {item.executeError}</span>}
+                                  {item.isQuota && item.action === 'disable' && <span className={styles.stateTextWarn}> · {t('monitoring.account_inspection_quota_protection')}</span>}
                                 </small>
                               </div>
                             </div>
@@ -1977,7 +2248,7 @@ export function AccountInspectionPage() {
                           </td>
                           <td className={styles.operationCell} data-label={t('common.action')}>
                             <div className={styles.operationActions}>
-                              {item.authId && item.authIndex && !item.quotaCooling ? (
+                              {item.executedEffect !== 'delete' && item.authId && item.authIndex && !item.quotaCooling ? (
                                 <Button
                                   size="sm"
                                   variant="secondary"
@@ -1986,7 +2257,7 @@ export function AccountInspectionPage() {
                                   {t('routing_policy.recovery.open')}
                                 </Button>
                               ) : null}
-                              <button
+                              {item.executedEffect !== 'delete' ? <button
                                 type="button"
                                 className={styles.iconActionButton}
                                 onClick={() => void handleRecheckSingle(item)}
@@ -1995,8 +2266,8 @@ export function AccountInspectionPage() {
                                 aria-label={t('monitoring.account_inspection_recheck_account')}
                               >
                                 <IconRefreshCw size={15} className={recheckingKey === item.key ? styles.spinningIcon : undefined} />
-                              </button>
-                              {suggestedAction ? (
+                              </button> : null}
+                              {item.executedEffect !== 'delete' && suggestedAction ? (
                                 <Button
                                   size="sm"
                                   variant={suggestedAction === 'delete' ? 'danger' : 'primary'}
@@ -2004,17 +2275,17 @@ export function AccountInspectionPage() {
                                     if (isSchedulingRecoveryAction(buildManualActionItem(item, suggestedAction))) {
                                       openRecoveryForItem(item);
                                     } else {
-                                      handleExecuteSingle(item, suggestedAction);
+                                      handleExecuteSingle(item, suggestedAction, true);
                                     }
                                   }}
                                   disabled={restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
                                 >
                                   {isSchedulingRecoveryAction(buildManualActionItem(item, suggestedAction))
                                     ? t('monitoring.account_inspection_release_quota')
-                                    : formatActionLabel(suggestedAction, t)}
+                                    : formatInspectionExecutionLabel({ ...item, action: suggestedAction, suggested: true }, t)}
                                 </Button>
                               ) : null}
-                              {additionalActions.map((action) => (
+                              {item.executedEffect !== 'delete' && additionalActions.map((action) => (
                                 <Button
                                   key={action}
                                   size="sm"
@@ -2197,7 +2468,10 @@ export function AccountInspectionPage() {
         )}
       >
         {selectedDetailResult ? (
-          <InspectionErrorDetailsPanel item={selectedDetailResult} t={t} />
+          <>
+            <InspectionErrorDetailsPanel item={selectedDetailResult} t={t} />
+            <InspectionRecordsPanel key={`${selectedDetailResult.key}:${selectedDetailResult.resultRef || ''}`} item={selectedDetailResult} />
+          </>
         ) : null}
       </ProDetailDialog>
 

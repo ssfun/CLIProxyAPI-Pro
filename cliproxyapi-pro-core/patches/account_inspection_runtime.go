@@ -123,6 +123,11 @@ const (
 type accountInspectionLogStreamMessage = proinspection.LogStreamMessage
 
 type accountInspectionScheduler struct {
+	evidenceGeneration      string
+	history                 []accountInspectionResult
+	operations              []proinspection.OperationRecord
+	runID                   string
+	manualActionMu          sync.Mutex
 	h                       *Handler
 	quota                   proinspection.QuotaGateway
 	path                    string
@@ -298,6 +303,9 @@ func (s *accountInspectionScheduler) load() {
 	if err := s.loadResultSnapshot(); err != nil {
 		log.WithError(err).Warn("failed to load account inspection snapshot")
 	}
+	if err := s.loadInspectionEvidence(); err != nil {
+		log.WithError(err).Warn("failed to load inspection evidence")
+	}
 }
 
 func (s *accountInspectionScheduler) saveLocked() error {
@@ -328,20 +336,27 @@ func (s *accountInspectionScheduler) resultSnapshotLocked() (accountInspectionRe
 		settings = s.schedule.Settings
 	}
 	return accountInspectionResultSnapshot{
-		Version:        accountInspectionResultSnapshotVersion,
-		State:          proinspection.NormalizeSnapshotState(s.status.State),
-		LastStartedAt:  s.status.LastStartedAt,
-		LastFinishedAt: s.status.LastFinishedAt,
-		LastError:      s.status.LastError,
-		Settings:       settings,
-		Summary:        s.status.Summary,
-		HealthCounts:   s.healthCountsLocked(),
-		Results:        append([]accountInspectionResult(nil), s.status.Results...),
-		Confirmations:  s.autoActionConfirmations.State(),
+		Version:            accountInspectionResultSnapshotVersion,
+		EvidenceGeneration: s.evidenceGeneration,
+		History:            append([]accountInspectionResult(nil), s.history...),
+		Operations:         append([]proinspection.OperationRecord(nil), s.operations...),
+		State:              proinspection.NormalizeSnapshotState(s.status.State),
+		LastStartedAt:      s.status.LastStartedAt,
+		LastFinishedAt:     s.status.LastFinishedAt,
+		LastError:          s.status.LastError,
+		Settings:           settings,
+		Summary:            s.status.Summary,
+		HealthCounts:       s.healthCountsLocked(),
+		Results:            append([]accountInspectionResult(nil), s.status.Results...),
+		Confirmations:      s.autoActionConfirmations.State(),
 	}, true
 }
 
 func (s *accountInspectionScheduler) applyResultSnapshotLocked(snapshot accountInspectionResultSnapshot, restored bool, restoreConfirmations bool) {
+	s.evidenceGeneration = snapshot.EvidenceGeneration
+	s.history = append([]accountInspectionResult(nil), snapshot.History...)
+	s.operations = append([]proinspection.OperationRecord(nil), snapshot.Operations...)
+	s.normalizeEvidenceLocked()
 	s.lastRunSettings = snapshot.Settings
 	s.status.State = snapshot.State
 	s.status.LastStartedAt = snapshot.LastStartedAt
@@ -367,6 +382,9 @@ func (s *accountInspectionScheduler) applyResultSnapshotLocked(snapshot accountI
 }
 
 func (s *accountInspectionScheduler) saveResultSnapshotLocked() error {
+	if err := s.saveEvidenceLocked(); err != nil {
+		return err
+	}
 	snapshot, ok := s.resultSnapshotLocked()
 	if !ok {
 		return nil
@@ -409,6 +427,13 @@ func (s *accountInspectionScheduler) loadResultSnapshot() error {
 	// settings after restart.
 	currentSettings := normalizeAccountInspectionSchedule(accountInspectionSchedule{Settings: s.schedule.Settings}).Settings
 	restoreConfirmations := snapshot.Settings == currentSettings
+	if snapshot.Cleared {
+		s.evidenceGeneration = snapshot.EvidenceGeneration
+		s.status = accountInspectionStatus{State: accountInspectionStateIdle}
+		s.history = nil
+		s.operations = nil
+		return nil
+	}
 	s.applyResultSnapshotLocked(snapshot, true, restoreConfirmations)
 	return nil
 }
@@ -433,6 +458,9 @@ func (s *accountInspectionScheduler) exportResultSnapshot() ([]byte, bool, error
 			return nil, false, err
 		}
 	}
+	if snapshot.Cleared {
+		return nil, false, nil
+	}
 	// Consecutive automatic-action confirmation state is local runtime state.
 	// It must survive a restart, but must not travel to another instance in a
 	// portable backup where it could immediately trigger a destructive action.
@@ -448,40 +476,59 @@ func (s *accountInspectionScheduler) importResultSnapshot(raw []byte) error {
 	if s == nil {
 		return nil
 	}
-	if strings.TrimSpace(string(raw)) == "null" {
-		s.mu.Lock()
-		if s.isRunningLocked() {
-			s.mu.Unlock()
-			return fmt.Errorf("account inspection is running")
+	cleared := strings.TrimSpace(string(raw)) == "null"
+	var snapshot accountInspectionResultSnapshot
+	var err error
+	if !cleared {
+		snapshot, err = decodeAccountInspectionResultSnapshot(raw)
+		if err != nil {
+			return err
 		}
-		s.status = accountInspectionStatus{State: accountInspectionStateIdle}
-		s.healthCounts = accountInspectionHealthCounts{}
-		s.lastRunSettings = s.schedule.Settings
-		s.autoActionConfirmations.Reset()
-		err := os.Remove(s.snapshotPath)
-		if os.IsNotExist(err) {
-			err = nil
-		}
-		broadcast := s.statusBroadcastLocked()
-		s.mu.Unlock()
-		broadcast.send()
-		return err
-	}
-	snapshot, err := decodeAccountInspectionResultSnapshot(raw)
-	if err != nil {
-		return err
+		cleared = snapshot.Cleared
 	}
 	s.mu.Lock()
 	if s.isRunningLocked() {
 		s.mu.Unlock()
 		return fmt.Errorf("account inspection is running")
 	}
-	s.applyResultSnapshotLocked(snapshot, true, false)
-	err = s.saveResultSnapshotLocked()
+	generation := newInspectionEvidenceID()
+	if generation == "" {
+		s.mu.Unlock()
+		return fmt.Errorf("failed to create evidence generation")
+	}
+	if cleared {
+		now := time.Now().UnixMilli()
+		snapshot = accountInspectionResultSnapshot{Version: accountInspectionResultSnapshotVersion, Cleared: true, State: accountInspectionStateCompleted, LastStartedAt: now, LastFinishedAt: now, Settings: s.schedule.Settings}
+	}
+	snapshot.EvidenceGeneration = generation
+	snapshot.Confirmations = proinspection.ConfirmationState{}
+	// Normalize detached records before committing either file or live state.
+	normalized := &accountInspectionScheduler{history: append([]accountInspectionResult(nil), snapshot.History...), operations: append([]proinspection.OperationRecord(nil), snapshot.Operations...)}
+	normalized.normalizeEvidenceLocked()
+	snapshot.History = normalized.history
+	snapshot.Operations = normalized.operations
+	if err = s.commitImportedInspectionEvidenceLocked(snapshot); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	if cleared {
+		s.status = accountInspectionStatus{State: accountInspectionStateIdle}
+		s.healthCounts = accountInspectionHealthCounts{}
+		s.lastRunSettings = s.schedule.Settings
+		s.history = nil
+		s.operations = nil
+		s.evidenceGeneration = generation
+		s.runID = ""
+		if s.autoActionConfirmations != nil {
+			s.autoActionConfirmations.Reset()
+		}
+	} else {
+		s.applyResultSnapshotLocked(snapshot, true, false)
+	}
 	broadcast := s.statusBroadcastLocked()
 	s.mu.Unlock()
 	broadcast.send()
-	return err
+	return nil
 }
 
 func (s *accountInspectionScheduler) isRunningLocked() bool {
@@ -667,6 +714,16 @@ func (s *accountInspectionScheduler) startRun(manual bool) error {
 		release()
 		return errAccountInspectionAlreadyRunning
 	}
+	for _, old := range s.status.Results {
+		s.archiveInspectionResultLocked(old)
+	}
+	if err := s.saveEvidenceLocked(); err != nil {
+		s.mu.Unlock()
+		cancel()
+		release()
+		return err
+	}
+	s.runID = newInspectionEvidenceID()
 	s.cancel = cancel
 	s.lastRunSettings = s.schedule.Settings
 	if s.autoActionConfirmations == nil {
@@ -806,7 +863,7 @@ func (s *accountInspectionScheduler) stopRun() {
 	}
 }
 
-func (s *accountInspectionScheduler) inspectOne(ctx context.Context, item accountInspectionActionItem) (accountInspectionResult, error) {
+func (s *accountInspectionScheduler) inspectOneUnrecorded(ctx context.Context, item accountInspectionActionItem) (accountInspectionResult, error) {
 	release, err := s.beginLifecycle()
 	if err != nil {
 		return accountInspectionResult{}, err
@@ -830,6 +887,8 @@ func (s *accountInspectionScheduler) inspectOne(ctx context.Context, item accoun
 	s.mu.Unlock()
 	s.fullRunMu.RLock()
 	defer s.fullRunMu.RUnlock()
+	s.manualActionMu.Lock()
+	defer s.manualActionMu.Unlock()
 	s.mu.Lock()
 	if s.isRunningLocked() {
 		s.mu.Unlock()
@@ -888,6 +947,8 @@ func (s *accountInspectionScheduler) inspectMany(ctx context.Context, items []ac
 	s.mu.Unlock()
 	s.fullRunMu.RLock()
 	defer s.fullRunMu.RUnlock()
+	s.manualActionMu.Lock()
+	defer s.manualActionMu.Unlock()
 	s.mu.Lock()
 	if s.isRunningLocked() {
 		s.mu.Unlock()
@@ -966,7 +1027,7 @@ func (s *accountInspectionScheduler) inspectMany(ctx context.Context, items []ac
 	return outcomes, nil
 }
 
-func (s *accountInspectionScheduler) refreshTokenNow(ctx context.Context, item accountInspectionActionItem) (accountInspectionResult, error) {
+func (s *accountInspectionScheduler) refreshTokenNowUnrecorded(ctx context.Context, item accountInspectionActionItem) (accountInspectionResult, error) {
 	release, err := s.beginLifecycle()
 	if err != nil {
 		return accountInspectionResult{}, err
@@ -990,6 +1051,8 @@ func (s *accountInspectionScheduler) refreshTokenNow(ctx context.Context, item a
 	}
 	s.fullRunMu.RLock()
 	defer s.fullRunMu.RUnlock()
+	s.manualActionMu.Lock()
+	defer s.manualActionMu.Unlock()
 	s.mu.Lock()
 	restoredSnapshot = s.status.RestoredSnapshot
 	running = s.isRunningLocked()
@@ -1076,6 +1139,7 @@ func (s *accountInspectionScheduler) updateInspectionResultLocked(result account
 
 	for index, current := range s.status.Results {
 		if proinspection.SameResult(current, result) {
+			s.archiveInspectionResultLocked(current)
 			merged, updateSummary := update(current)
 			if updateSummary {
 				s.status.Summary = proinspection.AdjustSummaryForResult(s.status.Summary, current, -1)
@@ -1105,6 +1169,10 @@ func (s *accountInspectionScheduler) mergeTokenRefreshResultLocked(result accoun
 
 func (s *accountInspectionScheduler) mergeSingleInspectionResultLocked(result accountInspectionResult) {
 	s.updateInspectionResultLocked(result, false, func(current accountInspectionResult) (accountInspectionResult, bool) {
+		if result.RegistrationEpoch != "" && result.RegistrationEpoch == current.RegistrationEpoch {
+			result.RunID = current.RunID
+			result.ParentResultRef = current.ResultRef
+		}
 		return proinspection.MergeReinspectionResult(current, result)
 	})
 }
@@ -1132,6 +1200,15 @@ func (s *accountInspectionScheduler) executeSingleInspection(ctx context.Context
 		}
 		defer release()
 		result := s.inspectAccount(ctx, account, settings)
+		s.mu.Lock()
+		for _, previous := range s.status.Results {
+			if previous.ResultRef == item.ResultRef && result.RegistrationEpoch != "" && result.RegistrationEpoch == previous.RegistrationEpoch {
+				result.ParentResultRef = item.ResultRef
+				result.RunID = previous.RunID
+				break
+			}
+		}
+		s.mu.Unlock()
 		return result, summarizeAccountInspection(len(auths), 1, []accountInspectionAccount{account}, []accountInspectionResult{result}), nil
 	}
 	return accountInspectionResult{}, accountInspectionSummary{}, fmt.Errorf("account not found")

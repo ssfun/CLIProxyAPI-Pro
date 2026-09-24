@@ -2,6 +2,7 @@ package management
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -88,6 +90,9 @@ func (s *accountInspectionScheduler) executeInspection(ctx context.Context, sett
 			s.updateProgress(len(accounts), completed, inFlight, false)
 			progressMu.Unlock()
 			results[index] = s.inspectAccount(ctx, account, settings)
+			s.mu.Lock()
+			results[index].RunID = s.runID
+			s.mu.Unlock()
 			progressMu.Lock()
 			inFlight--
 			completed++
@@ -317,8 +322,15 @@ func sampleAccounts(accounts []accountInspectionAccount, sampleSize int) []accou
 }
 
 func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) accountInspectionResult {
+	result := s.inspectAccountObserved(ctx, account, settings)
+	result.ObservedAt = time.Now().UnixMilli()
+	return result
+}
+
+func (s *accountInspectionScheduler) inspectAccountObserved(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) accountInspectionResult {
 	observedCredentialFingerprint := account.CredentialFingerprint
 	result := account.baseResult()
+	result.ObservedSettings = settings
 	if account.AuthIndex == "" {
 		result.ActionReason = "缺少 auth_index，保留账号"
 		result.Error = "missing auth_index"
@@ -352,11 +364,13 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 	} else if refreshTriggered {
 		account = refreshed
 		result = account.baseResult()
+		result.ObservedSettings = settings
 		result.TokenRefreshTriggered = true
 		result.TokenRefreshStatus = "success"
 	} else if refreshed.Auth != nil {
 		account = refreshed
 		result = account.baseResult()
+		result.ObservedSettings = settings
 	}
 	result.CredentialObserved = observedCredentialFingerprint
 	result.NextRefreshAt = account.nextRefreshAtMillis()
@@ -391,6 +405,13 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 		return result
 	}
 	result.StatusCode = statusCode
+	if statusCode != nil && (*statusCode == http.StatusBadRequest || *statusCode == http.StatusNotFound) && !decision.IsQuota {
+		decision.Action = accountInspectionActionKeep
+		decision.ActionReason = fmt.Sprintf("接口返回 %d，无法判断账号状态", *statusCode)
+		if decision.Error == "" {
+			decision.Error = fmt.Sprintf("HTTP %d", *statusCode)
+		}
+	}
 	result.Action = decision.Action
 	result.ActionReason = decision.ActionReason
 	result.UsedPercent = decision.UsedPercent
@@ -427,7 +448,8 @@ func (s *accountInspectionScheduler) inspectAccount(ctx context.Context, account
 	if result.UsedPercent != nil {
 		percent = fmt.Sprintf("%.1f%%", *result.UsedPercent)
 	}
-	s.appendLog(level, fmt.Sprintf("%s -> %s (%s · 已用 %s)", account.identity(), result.Action, account.Provider, percent))
+	quotaAction := result.IsQuota && result.Action == accountInspectionActionDisable || result.QuotaCooling && result.Action == accountInspectionActionEnable
+	s.appendLog(level, fmt.Sprintf("%s -> %s (%s · 已用 %s)", account.identity(), accountInspectionActionLogLabel(result.Action, quotaAction), account.Provider, percent))
 	return result
 }
 
@@ -468,9 +490,22 @@ func (account accountInspectionAccount) nextRefreshAtMillis() int64 {
 }
 
 func (account accountInspectionAccount) baseResult() accountInspectionResult {
+	var ref [16]byte
+	// An empty ref fails closed at the action boundary if the random source fails.
+	_, refErr := rand.Read(ref[:])
+	resultRef := ""
+	if refErr == nil {
+		resultRef = hex.EncodeToString(ref[:])
+	}
+	epoch := ""
+	if account.Auth != nil {
+		epoch = strconv.FormatUint(account.Auth.RegistrationEpoch, 10)
+	}
 	return accountInspectionResult{
+		RegistrationEpoch:  epoch,
 		AuthID:             account.AuthID,
 		Key:                account.Key,
+		ResultRef:          resultRef,
 		Provider:           account.Provider,
 		FileName:           account.FileName,
 		DisplayName:        account.DisplayName,
@@ -621,6 +656,12 @@ func (s *accountInspectionScheduler) bindActionItemToSnapshot(item accountInspec
 		} else if result.FileName != item.FileName || result.AuthIndex != item.AuthIndex {
 			continue
 		}
+		if item.ResultRef != "" && (result.ResultRef == "" || result.ResultRef != item.ResultRef) {
+			return accountInspectionActionItem{}, errAccountInspectionResultStale
+		}
+		if item.Suggested && (result.Action != item.Action || result.Executed) {
+			return accountInspectionActionItem{}, errAccountInspectionResultStale
+		}
 		return proinspection.ActionItemFromResult(result, item.Action), nil
 	}
 	return accountInspectionActionItem{}, errAccountInspectionResultStale
@@ -631,6 +672,7 @@ func (s *accountInspectionScheduler) removeInspectionResultLocked(result account
 		if !proinspection.SameResult(current, result) {
 			continue
 		}
+		s.archiveInspectionResultLocked(current)
 		s.status.Summary = proinspection.AdjustSummaryForResult(s.status.Summary, current, -1)
 		s.healthCounts = proinspection.AdjustHealthCountsForResult(s.healthCounts, current, -1)
 		s.status.Results = append(s.status.Results[:index], s.status.Results[index+1:]...)
@@ -642,10 +684,6 @@ func (s *accountInspectionScheduler) removeInspectionResultLocked(result account
 func (s *accountInspectionScheduler) applyManualActionResultLocked(result accountInspectionResult) {
 	if result.Key == "" {
 		result.Key = proinspection.AccountKey(result.FileName, result.AuthIndex)
-	}
-	if result.Executed && result.Action == accountInspectionActionDelete {
-		s.removeInspectionResultLocked(result)
-		return
 	}
 	s.updateInspectionResultLocked(result, true, func(current accountInspectionResult) (accountInspectionResult, bool) {
 		return proinspection.MergeManualActionResult(current, result)
@@ -670,10 +708,16 @@ func (s *accountInspectionScheduler) executeManualActions(ctx context.Context, i
 	}
 	s.fullRunMu.RLock()
 	defer s.fullRunMu.RUnlock()
+	s.manualActionMu.Lock()
+	defer s.manualActionMu.Unlock()
 	s.mu.Lock()
 	restoredSnapshot = s.status.RestoredSnapshot
 	running = s.isRunningLocked()
 	workers := s.schedule.Settings.DeleteWorkers
+	settings := s.lastRunSettings
+	if strings.TrimSpace(settings.TargetType) == "" {
+		settings = s.schedule.Settings
+	}
 	s.mu.Unlock()
 	if restoredSnapshot {
 		return nil, errAccountInspectionRestoredSnapshotReadOnly
@@ -691,6 +735,7 @@ func (s *accountInspectionScheduler) executeManualActions(ctx context.Context, i
 			return nil, err
 		}
 		boundItems = append(boundItems, boundItem)
+		boundItems[len(boundItems)-1].Suggested = item.Suggested
 	}
 	executableItems := proinspection.DedupeActionItems(boundItems)
 	outcomes := make([]accountInspectionActionOutcome, len(executableItems))
@@ -702,22 +747,33 @@ func (s *accountInspectionScheduler) executeManualActions(ctx context.Context, i
 		item := executableItems[index]
 		result := item.ToResult()
 		action := item.Action
+		actionSettings := settings
+		if item.Suggested && strings.TrimSpace(item.ObservedSettings.TargetType) != "" {
+			actionSettings = item.ObservedSettings
+		}
+		result.OperationAction = action
+		quotaAction := item.Suggested && (result.IsQuota && action == accountInspectionActionDisable || result.QuotaCooling && action == accountInspectionActionEnable)
+		quotaSuggestion := result.IsQuota && action == accountInspectionActionDisable || result.QuotaCooling && action == accountInspectionActionEnable
 		outcome := accountInspectionActionOutcome{Action: action, FileName: item.FileName, DisplayName: item.DisplayName, Email: item.Email, Name: item.Name, Provider: item.Provider, AuthIndex: item.AuthIndex}
-		if err := s.executeActionWithLimit(ctx, result, action, workers); err != nil {
+		if err := s.executeRecordedInspectionAction(ctx, &result, actionSettings, action, item.Suggested, workers, "manual"); err != nil {
 			outcome.Error = err.Error()
 			result.ExecuteError = err.Error()
-			s.appendLog("error", fmt.Sprintf("%s -> %s 执行失败：%s", proinspection.ResultIdentity(result), action, err.Error()))
+			s.appendLog("error", fmt.Sprintf("%s -> %s 执行失败：%s", proinspection.ResultIdentity(result), accountInspectionActionLogLabel(action, quotaAction), err.Error()))
 		} else {
 			outcome.Success = true
-			result.Executed = true
+			result.Executed = item.Suggested || (action == item.RecommendedAction && !quotaSuggestion)
+			result.ExecutedAction = action
+			result.ExecutedEffect = proinspection.EffectForAction(action, quotaAction)
+			result.ExecutedAt = time.Now().UnixMilli()
+			result.ExecutedSuggested = item.Suggested
 			result.ExecuteError = ""
-			if action == accountInspectionActionDisable {
+			if action == accountInspectionActionDisable && !quotaAction {
 				result.Disabled = true
 			}
 			if action == accountInspectionActionEnable {
 				result.Disabled = false
 			}
-			s.appendLog("success", fmt.Sprintf("%s %s 成功", proinspection.ResultIdentity(result), action))
+			s.appendLog("success", fmt.Sprintf("%s %s 成功", proinspection.ResultIdentity(result), accountInspectionActionLogLabel(action, quotaAction)))
 		}
 		if current := s.h.authByIndex(result.AuthIndex); current != nil {
 			s.fillQuotaProtectionResult(current, &result)
@@ -758,12 +814,14 @@ func (s *accountInspectionScheduler) applyAutomaticActions(ctx context.Context, 
 			s.clearAutoActionConfirmation(results[index])
 			return true
 		}
+		quotaAction := results[index].IsQuota && action == accountInspectionActionDisable || results[index].QuotaCooling && action == accountInspectionActionEnable
+		label := accountInspectionActionLogLabel(action, quotaAction)
 		confirmed, count, required := s.confirmAutoAction(results[index], action, settings.AutoExecuteConfirmations)
 		if !confirmed {
 			if results[index].ActionReason != "" {
 				results[index].ActionReason += fmt.Sprintf("；等待连续确认 %d/%d 后自动执行", count, required)
 			}
-			s.appendLog("info", fmt.Sprintf("%s -> %s 等待连续确认 %d/%d", proinspection.ResultIdentity(results[index]), action, count, required))
+			s.appendLog("info", fmt.Sprintf("%s -> %s 等待连续确认 %d/%d", proinspection.ResultIdentity(results[index]), label, count, required))
 			return true
 		}
 		if action == accountInspectionActionDelete {
@@ -776,20 +834,18 @@ func (s *accountInspectionScheduler) applyAutomaticActions(ctx context.Context, 
 			deletedFiles[results[index].FileName] = struct{}{}
 			mu.Unlock()
 		}
-		quotaAction := results[index].IsQuota && action == accountInspectionActionDisable || results[index].QuotaCooling && action == accountInspectionActionEnable
-		var err error
-		if quotaAction {
-			err = s.executeQuotaProtection(ctx, &results[index], settings, action)
-		} else {
-			err = s.executeActionWithLimit(ctx, results[index], action, workers)
-		}
+		results[index].OperationAction = action
+		err := s.executeRecordedInspectionAction(ctx, &results[index], settings, action, true, workers, "automatic")
 		mu.Lock()
 		if err != nil {
 			results[index].ExecuteError = err.Error()
-			s.appendLog("error", fmt.Sprintf("%s -> %s 执行失败：%s", proinspection.ResultIdentity(results[index]), action, err.Error()))
+			s.appendLog("error", fmt.Sprintf("%s -> %s 执行失败：%s", proinspection.ResultIdentity(results[index]), label, err.Error()))
 		} else {
 			results[index].Executed = true
-			results[index].Action = action
+			results[index].ExecutedAction = action
+			results[index].ExecutedEffect = proinspection.EffectForAction(action, quotaAction)
+			results[index].ExecutedAt = time.Now().UnixMilli()
+			results[index].ExecutedSuggested = true
 			s.clearAutoActionConfirmation(results[index])
 			if action == accountInspectionActionDisable && !quotaAction {
 				results[index].Disabled = true
@@ -797,11 +853,43 @@ func (s *accountInspectionScheduler) applyAutomaticActions(ctx context.Context, 
 			if action == accountInspectionActionEnable {
 				results[index].Disabled = false
 			}
-			s.appendLog("success", fmt.Sprintf("%s %s 成功", proinspection.ResultIdentity(results[index]), action))
+			s.appendLog("success", fmt.Sprintf("%s %s 成功", proinspection.ResultIdentity(results[index]), label))
 		}
 		mu.Unlock()
 		return true
 	})
+}
+
+func accountInspectionActionLogLabel(action accountInspectionAction, quotaAction bool) string {
+	if quotaAction {
+		if action == accountInspectionActionDisable {
+			return "建立额度保护"
+		}
+		if action == accountInspectionActionEnable {
+			return "检查并恢复"
+		}
+	}
+	switch action {
+	case accountInspectionActionDisable:
+		return "禁用账号"
+	case accountInspectionActionEnable:
+		return "启用账号"
+	case accountInspectionActionDelete:
+		return "删除账号"
+	case accountInspectionActionKeep:
+		return "保留账号"
+	default:
+		return string(action)
+	}
+}
+
+// Suggested actions share the automatic path, including versioned quota holds.
+// Explicit administrative overrides retain the ordinary auth mutation path.
+func (s *accountInspectionScheduler) executeResolvedAction(ctx context.Context, result *accountInspectionResult, settings accountInspectionSettings, action accountInspectionAction, suggested bool, workers int) error {
+	if suggested && (result.IsQuota && action == accountInspectionActionDisable || result.QuotaCooling && action == accountInspectionActionEnable) {
+		return s.executeQuotaProtection(ctx, result, settings, action)
+	}
+	return s.executeActionWithLimit(ctx, *result, action, workers)
 }
 
 func (s *accountInspectionScheduler) confirmAutoAction(result accountInspectionResult, action accountInspectionAction, required int) (bool, int, int) {

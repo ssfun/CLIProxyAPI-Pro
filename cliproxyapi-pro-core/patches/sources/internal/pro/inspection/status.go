@@ -115,6 +115,18 @@ func ProjectStatus(status Status, healthCounts HealthCounts, options SnapshotOpt
 }
 
 func MergeTokenRefreshResult(current, incoming Result) (Result, bool) {
+	current.ObservedAt = incoming.ObservedAt
+	current.ParentResultRef = incoming.ParentResultRef
+	current.RunID = incoming.RunID
+	current.RegistrationEpoch = incoming.RegistrationEpoch
+	current.ResultRef = incoming.ResultRef
+	current.Executed = false
+	current.ExecutedAction = ""
+	current.ExecutedEffect = ""
+	current.ExecutedAt = 0
+	current.ExecutedSuggested = false
+	current.OperationAction = ""
+	current.ExecuteError = ""
 	current.Provider = incoming.Provider
 	current.FileName = incoming.FileName
 	current.DisplayName = incoming.DisplayName
@@ -126,6 +138,8 @@ func MergeTokenRefreshResult(current, incoming Result) (Result, bool) {
 	current.TokenRefreshStatus = incoming.TokenRefreshStatus
 	current.TokenRefreshError = incoming.TokenRefreshError
 	current.NextRefreshAt = incoming.NextRefreshAt
+	current.Action = ActionKeep
+	current.ActionReason = "凭据刷新后需重新巡检"
 	if incoming.TokenRefreshStatus == "failed" {
 		current.Error = incoming.Error
 		current.ErrorDetail = incoming.ErrorDetail
@@ -144,7 +158,5 @@ func MergeTokenRefreshResult(current, incoming Result) (Result, bool) {
 }
 
 func MergeReinspectionResult(current, incoming Result) (Result, bool) {
-	incoming.Executed = current.Executed
-	incoming.ExecuteError = current.ExecuteError
 	return incoming, true
 }

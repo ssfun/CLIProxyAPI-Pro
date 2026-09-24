@@ -278,6 +278,32 @@ func (h *Handler) CheckRoutingAccount(c *gin.Context) {
 	steps := make([]string, 0, 2)
 	phases := make([]routingRecoveryPhase, 0, 2)
 	var test *authFileConnectionTestResponse
+	if ctx.Value(inspectionBatchAuditContextKey{}) == nil {
+		if scheduler := schedulerForHandler(h); scheduler != nil {
+			evidence := scheduler.currentInspectionEvidence(accountFromAuth(auth).Key)
+			auditID, auditErr := scheduler.beginInspectionOperation("recovery", "recovery_check", evidence)
+			if auditErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist recovery intent"})
+				return
+			}
+			defer func() {
+				after := scheduler.currentInspectionEvidence(evidence.Key)
+				var operationErr error
+				current, ok := h.authManager.GetByID(request.AuthID)
+				if !ok || current == nil || current.RegistrationEpoch != observedEpoch || schedulingBoardAccount(current, time.Now()).AuthID != "" || c.Writer.Status() >= 400 {
+					operationErr = errors.New("recovery did not complete")
+				}
+				for _, phase := range phases {
+					if phase.Status == "failed" || phase.Status == "timeout" {
+						operationErr = errors.New("recovery probe failed")
+					}
+				}
+				if err := scheduler.finishInspectionOperation(auditID, &after, operationErr); err != nil {
+					scheduler.appendLog("error", "recovery audit persistence failed")
+				}
+			}()
+		}
+	}
 	writeResult := func() {
 		current, ok := h.authManager.GetByID(request.AuthID)
 		if !ok || current == nil || current.EnsureIndex() != request.AuthIndex || current.RegistrationEpoch != observedEpoch {

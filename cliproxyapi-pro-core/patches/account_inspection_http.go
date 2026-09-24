@@ -268,6 +268,8 @@ func writeAccountInspectionWebSocketMessage(conn *websocket.Conn, message accoun
 }
 
 func (h *Handler) RegisterAccountInspectionRoutes(group *gin.RouterGroup) {
+	h.RegisterAccountInspectionBatchRoutes(group)
+	h.RegisterAccountInspectionHistoryRoutes(group)
 	group.GET("/account-inspection/logs", h.StreamAccountInspectionLogs)
 	group.GET("/account-inspection/schedule", h.GetAccountInspectionSchedule)
 	group.PUT("/account-inspection/schedule", h.PutAccountInspectionSchedule)
@@ -435,6 +437,12 @@ func (h *Handler) ExecuteAccountInspectionActions(c *gin.Context) {
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
+	}
+	for _, item := range request.Items {
+		if strings.TrimSpace(item.ResultRef) == "" {
+			c.JSON(http.StatusConflict, gin.H{"error": errAccountInspectionResultStale.Error()})
+			return
+		}
 	}
 	outcomes, err := scheduler.executeManualActions(c.Request.Context(), request.Items)
 	snapshot := scheduler.snapshotForRequest(c)

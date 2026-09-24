@@ -8,6 +8,10 @@ import (
 )
 
 type Result struct {
+	RegistrationEpoch     string   `json:"registrationEpoch,omitempty"`
+	ObservedAt            int64    `json:"observedAt,omitempty"`
+	RunID                 string   `json:"runId,omitempty"`
+	ParentResultRef       string   `json:"parentResultRef,omitempty"`
 	QuotaResetAt          int64    `json:"quotaResetAt,omitempty"`
 	QuotaModel            string   `json:"-"`
 	QuotaKnown            bool     `json:"-"`
@@ -18,7 +22,9 @@ type Result struct {
 	AccessTokenSHA256     string   `json:"-"`
 	CredentialObserved    string   `json:"-"`
 	CredentialFinal       string   `json:"-"`
+	ObservedSettings      Settings `json:"-"`
 	Key                   string   `json:"key"`
+	ResultRef             string   `json:"resultRef,omitempty"`
 	Provider              string   `json:"provider"`
 	FileName              string   `json:"fileName"`
 	DisplayName           string   `json:"displayName"`
@@ -42,23 +48,34 @@ type Result struct {
 	TokenRefreshError     string   `json:"tokenRefreshError"`
 	NextRefreshAt         int64    `json:"nextRefreshAt"`
 	Executed              bool     `json:"executed"`
+	ExecutedAction        Action   `json:"executedAction,omitempty"`
+	ExecutedEffect        string   `json:"executedEffect,omitempty"`
+	ExecutedAt            int64    `json:"executedAt,omitempty"`
+	ExecutedSuggested     bool     `json:"executedSuggested,omitempty"`
+	OperationAction       Action   `json:"operationAction,omitempty"`
 	ExecuteError          string   `json:"executeError"`
 }
 
 type Summary struct {
-	TotalFiles           int `json:"totalFiles"`
-	ProbeSetCount        int `json:"probeSetCount"`
-	SampledCount         int `json:"sampledCount"`
-	DisabledCount        int `json:"disabledCount"`
-	EnabledCount         int `json:"enabledCount"`
-	DeleteCount          int `json:"deleteCount"`
-	DisableCount         int `json:"disableCount"`
-	EnableCount          int `json:"enableCount"`
-	KeepCount            int `json:"keepCount"`
-	ErrorCount           int `json:"errorCount"`
-	ExecutedDeleteCount  int `json:"executedDeleteCount"`
-	ExecutedDisableCount int `json:"executedDisableCount"`
-	ExecutedEnableCount  int `json:"executedEnableCount"`
+	TotalFiles                   int `json:"totalFiles"`
+	ProbeSetCount                int `json:"probeSetCount"`
+	SampledCount                 int `json:"sampledCount"`
+	DisabledCount                int `json:"disabledCount"`
+	EnabledCount                 int `json:"enabledCount"`
+	DeleteCount                  int `json:"deleteCount"`
+	DisableCount                 int `json:"disableCount"`
+	EnableCount                  int `json:"enableCount"`
+	KeepCount                    int `json:"keepCount"`
+	ErrorCount                   int `json:"errorCount"`
+	ExecutedDeleteCount          int `json:"executedDeleteCount"`
+	ExecutedDisableCount         int `json:"executedDisableCount"`
+	ExecutedEnableCount          int `json:"executedEnableCount"`
+	ExecutedQuotaProtectionCount int `json:"executedQuotaProtectionCount"`
+	ExecutedQuotaRecoveryCount   int `json:"executedQuotaRecoveryCount"`
+	PendingActionCount           int `json:"pendingActionCount"`
+	PendingDeleteCount           int `json:"pendingDeleteCount"`
+	PendingDisableCount          int `json:"pendingDisableCount"`
+	PendingEnableCount           int `json:"pendingEnableCount"`
 }
 
 type HealthCounts struct {
@@ -68,6 +85,7 @@ type HealthCounts struct {
 	AuthInvalid     int `json:"authInvalid"`
 	QuotaExhausted  int `json:"quotaExhausted"`
 	InspectionError int `json:"inspectionError"`
+	Unknown         int `json:"unknown"`
 	Recoverable     int `json:"recoverable"`
 }
 
@@ -87,6 +105,7 @@ const (
 	HealthAuthInvalid     HealthBucket = "authInvalid"
 	HealthQuotaExhausted  HealthBucket = "quotaExhausted"
 	HealthInspectionError HealthBucket = "inspectionError"
+	HealthUnknown         HealthBucket = "unknown"
 	HealthRecoverable     HealthBucket = "recoverable"
 )
 
@@ -121,6 +140,8 @@ func adjustHealthBucket(counts HealthCounts, bucket HealthBucket, delta int) Hea
 		counts.AuthInvalid += delta
 	case HealthInspectionError:
 		counts.InspectionError += delta
+	case HealthUnknown:
+		counts.Unknown += delta
 	case HealthQuotaExhausted:
 		counts.QuotaExhausted += delta
 	case HealthRecoverable:
@@ -135,6 +156,8 @@ func adjustHealthBucket(counts HealthCounts, bucket HealthBucket, delta int) Hea
 
 func HealthBucketOf(result Result) HealthBucket {
 	switch {
+	case result.ErrorCode == "inspection_incomplete":
+		return HealthUnknown
 	case IsQuotaResult(result):
 		return HealthQuotaExhausted
 	case IsAccountInvalidResult(result):
@@ -182,12 +205,14 @@ func ResultMatchesFilter(result Result, filter string) bool {
 		return HealthBucketOf(result) != HealthHealthy
 	case "accountissues", "account-issues", "account_issues":
 		bucket := HealthBucketOf(result)
-		return bucket == HealthAuthInvalid || bucket == HealthInspectionError
+		return bucket == HealthAuthInvalid || bucket == HealthInspectionError || bucket == HealthUnknown
+	case "unknown", "incomplete":
+		return HealthBucketOf(result) == HealthUnknown
 	case "quotachanges", "quota-changes", "quota_changes":
 		bucket := HealthBucketOf(result)
 		return bucket == HealthQuotaExhausted || bucket == HealthRecoverable
 	case "pending":
-		return result.Action != ActionKeep && !result.Executed
+		return result.Action != ActionNone && result.Action != ActionKeep && result.Action != "" && !result.Executed
 	case "accountinvalid", "account-invalid", "account_invalid", "authinvalid", "auth-invalid", "auth_invalid":
 		return HealthBucketOf(result) == HealthAuthInvalid
 	case "requesterror", "request-error", "request_error", "inspectionerror", "inspection-error", "inspection_error":
@@ -321,6 +346,9 @@ func IsAccountInvalidResult(result Result) bool {
 }
 
 func IsRequestErrorResult(result Result) bool {
+	if result.ErrorCode == "inspection_incomplete" {
+		return false
+	}
 	if IsQuotaResult(result) || IsAccountInvalidResult(result) {
 		return false
 	}
@@ -331,6 +359,15 @@ func IsRequestErrorResult(result Result) bool {
 }
 
 func AutoActionForResult(result Result, settings Settings) Action {
+	if result.StatusCode != nil && *result.StatusCode == 401 {
+		return ActionNone
+	}
+	if result.ErrorCode == "inspection_incomplete" {
+		return ActionNone
+	}
+	if result.StatusCode != nil && (*result.StatusCode == 400 || *result.StatusCode == 404) && !result.IsQuota {
+		return ActionNone
+	}
 	if result.ErrorCode == "inspection_identity_changed" {
 		return ActionNone
 	}
@@ -362,6 +399,17 @@ func SummarizeResults(totalFiles, probeSetCount, disabledCount, enabledCount int
 
 func AdjustSummaryForResult(summary Summary, result Result, delta int) Summary {
 	summary.SampledCount += delta
+	if !result.Executed && result.Action != ActionNone && result.Action != ActionKeep && result.Action != "" {
+		summary.PendingActionCount += delta
+		switch result.Action {
+		case ActionDelete:
+			summary.PendingDeleteCount += delta
+		case ActionDisable:
+			summary.PendingDisableCount += delta
+		case ActionEnable:
+			summary.PendingEnableCount += delta
+		}
+	}
 	switch result.Action {
 	case ActionDelete:
 		summary.DeleteCount += delta
@@ -375,17 +423,70 @@ func AdjustSummaryForResult(summary Summary, result Result, delta int) Summary {
 	if result.Error != "" {
 		summary.ErrorCount += delta
 	}
-	if result.Executed {
-		switch result.Action {
-		case ActionDelete:
+	if result.Executed || result.ExecutedAt > 0 {
+		switch EffectiveExecutedEffect(result) {
+		case EffectDelete:
 			summary.ExecutedDeleteCount += delta
-		case ActionDisable:
+		case EffectAdminDisable:
 			summary.ExecutedDisableCount += delta
-		case ActionEnable:
+		case EffectAdminEnable:
 			summary.ExecutedEnableCount += delta
+		case EffectQuotaProtection:
+			summary.ExecutedQuotaProtectionCount += delta
+		case EffectQuotaRecovery:
+			summary.ExecutedQuotaRecoveryCount += delta
 		}
 	}
 	return summary
+}
+
+const (
+	EffectQuotaProtection = "quota_protection"
+	EffectQuotaRecovery   = "quota_recovery"
+	EffectAdminDisable    = "admin_disable"
+	EffectAdminEnable     = "admin_enable"
+	EffectDelete          = "delete"
+)
+
+func EffectForAction(action Action, quotaAction bool) string {
+	switch action {
+	case ActionDelete:
+		return EffectDelete
+	case ActionDisable:
+		if quotaAction {
+			return EffectQuotaProtection
+		}
+		return EffectAdminDisable
+	case ActionEnable:
+		if quotaAction {
+			return EffectQuotaRecovery
+		}
+		return EffectAdminEnable
+	default:
+		return ""
+	}
+}
+
+// Legacy snapshots predate executedEffect. Infer only effects supported by the
+// stored observation; ambiguous legacy rows stay unclassified.
+func EffectiveExecutedEffect(result Result) string {
+	if result.ExecutedEffect != "" {
+		return result.ExecutedEffect
+	}
+	if !result.Executed && result.ExecutedAt <= 0 {
+		return ""
+	}
+	if strings.Contains(result.ActionReason, "解除额度保护") {
+		return EffectQuotaRecovery
+	}
+	action := result.ExecutedAction
+	if action == "" {
+		action = result.Action
+	}
+	if action == ActionDisable && result.IsQuota && !result.Disabled {
+		return EffectQuotaProtection
+	}
+	return EffectForAction(action, false)
 }
 
 func SortResults(results []Result) []Result {
@@ -419,7 +520,7 @@ func resultIdentity(result Result) string {
 }
 
 func IsAccountErrorStatus(status int) bool {
-	return status == 400 || status == 401 || status == 403 || status == 404
+	return status == 401 || status == 403
 }
 
 func IsXAIQuotaFailure(body string) bool {

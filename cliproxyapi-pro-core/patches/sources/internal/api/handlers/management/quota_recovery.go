@@ -93,7 +93,6 @@ func (s *accountInspectionScheduler) executeQuotaProtection(ctx context.Context,
 	var hold *prorouting.QuotaProtection
 	if action == accountInspectionActionDisable {
 		if coveredByUpstreamQuota(auth, result) {
-			result.ActionReason = "上游冷却已覆盖该额度窗口，未叠加巡检保护"
 			return nil
 		}
 		hold = newInspectionQuotaHold(auth, result, settings)
@@ -106,11 +105,6 @@ func (s *accountInspectionScheduler) executeQuotaProtection(ctx context.Context,
 	}
 	current, _ := s.inspectionAuthManager().GetByID(auth.ID)
 	s.fillQuotaProtectionResult(current, result)
-	if hold != nil {
-		result.ActionReason = "额度保护已暂停调度"
-	} else {
-		result.ActionReason = "额度已恢复，解除额度保护"
-	}
 	return nil
 }
 
@@ -325,6 +319,8 @@ func (s *accountInspectionScheduler) deferQuotaRecoveryFailure(ctx context.Conte
 }
 
 func (s *accountInspectionScheduler) recoverQuotaAccountWithMode(ctx context.Context, auth *coreauth.Auth, manual bool) error {
+	s.manualActionMu.Lock()
+	defer s.manualActionMu.Unlock()
 	hold := prorouting.QuotaProtections(auth.Metadata)[inspectionQuotaSource]
 	var settings accountInspectionSettings
 	if err := json.Unmarshal(hold.Settings, &settings); err != nil {
@@ -379,6 +375,9 @@ func (s *accountInspectionScheduler) recoverQuotaAccountWithMode(ctx context.Con
 	result.Executed = true
 	if recovered {
 		result.ActionReason = "额度已恢复，自动解除额度保护"
+		result.ExecutedAction = accountInspectionActionEnable
+		result.ExecutedEffect = proinspection.EffectQuotaRecovery
+		result.ExecutedAt = time.Now().UnixMilli()
 	} else {
 		result.ActionReason = "额度保护中，等待下次定向复查"
 	}
@@ -447,6 +446,9 @@ func (s *accountInspectionScheduler) recoverQuotaWithProbeRequest(ctx context.Co
 	switch {
 	case succeeded:
 		result.ActionReason = "真实请求验证成功，解除额度保护"
+		result.ExecutedAction = accountInspectionActionEnable
+		result.ExecutedEffect = proinspection.EffectQuotaRecovery
+		result.ExecutedAt = time.Now().UnixMilli()
 		s.appendLog("success", fmt.Sprintf("%s 真实请求验证成功，已解除调度保护", proinspection.ResultIdentity(result)))
 	case failedWithResponse:
 		result.ActionReason = "真实请求验证失败，保留额度保护并等待下次重试"

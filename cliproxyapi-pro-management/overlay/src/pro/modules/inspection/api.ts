@@ -4,8 +4,10 @@ import type {
   AccountInspectionBackendLog as BackendLog,
   AccountInspectionBackendResponse,
   AccountInspectionBackendResultItem,
+  AccountInspectionPageInfo,
   AccountInspectionBackendSchedule,
   AccountInspectionBackendStatus,
+  AccountInspectionAction,
   AccountInspectionExecutionAction,
   AccountInspectionResultItem,
 } from '@/pro/modules/inspection/features/accountInspection';
@@ -31,11 +33,13 @@ export type AccountInspectionActionOutcome = {
   authIndex: string;
   success: boolean;
   error: string;
+  executedAction?: 'delete' | 'disable' | 'enable' | '';
+  executedAt?: number;
 };
 
 export type AccountInspectionInspectOneItem = Pick<
   AccountInspectionResultItem,
-  'key' | 'provider' | 'fileName' | 'email' | 'name' | 'authIndex' | 'disabled'
+  'key' | 'provider' | 'fileName' | 'email' | 'name' | 'authIndex' | 'disabled' | 'resultRef'
 > & {
   displayName: string;
 };
@@ -45,12 +49,99 @@ export type AccountInspectionActionItem = Pick<
   'key' | 'provider' | 'fileName' | 'email' | 'name' | 'authIndex' | 'disabled'
 > & {
   displayName: string;
+  resultRef: string;
+  suggested: boolean;
   action: AccountInspectionExecutionAction;
+};
+
+export type AccountInspectionBatchTarget = Omit<AccountInspectionActionItem, 'action'> & {
+  action: AccountInspectionAction;
 };
 
 export type AccountInspectionActionsResponse = AccountInspectionBackendResponse & {
   outcomes: AccountInspectionActionOutcome[];
   summary: { total: number; success: number; failed: number };
+};
+
+export type AccountInspectionBatchKind = 'inspect' | 'action' | 'recover';
+export type AccountInspectionBatchItemStatus = 'ready' | 'running' | 'succeeded' | 'failed' | 'stale' | 'unsupported' | 'interrupted';
+export type AccountInspectionBatchEffect = 'inspect' | 'quota_protection' | 'quota_recovery' | 'admin_disable' | 'admin_enable' | 'delete' | 'recovery_check' | 'unknown';
+export type AccountInspectionBatchScope =
+  | { type: 'selected'; items: AccountInspectionBatchTarget[] }
+  | {
+      type: 'filtered';
+      filter: string;
+      provider: string;
+      search: string;
+      pendingOnly: boolean;
+      action?: AccountInspectionAction;
+      suggested?: boolean;
+    };
+export type AccountInspectionBatchOutcome = {
+  success?: boolean;
+  error?: string;
+  warning?: string;
+  result?: AccountInspectionBackendResultItem;
+  after?: unknown;
+  receipts?: Array<{
+    before?: unknown;
+    after?: unknown;
+    steps?: string[];
+    phases?: Array<{ source: string; model?: string; status: 'completed' | 'failed' | 'timeout' | 'skipped'; error?: string }>;
+    error?: string;
+  }>;
+  outcome?: AccountInspectionBatchOutcome;
+};
+export type AccountInspectionBatchOperation = {
+  operationId: string;
+  kind: AccountInspectionBatchKind;
+  state: 'prepared' | 'running' | 'completed' | 'interrupted';
+  createdAt: number;
+  expiresAt: number;
+  items: Array<{
+    key: string;
+    status: AccountInspectionBatchItemStatus;
+    effect: AccountInspectionBatchEffect;
+    error?: string;
+    outcome?: AccountInspectionBatchOutcome;
+    item: AccountInspectionBatchTarget;
+  }>;
+  summary: {
+    total: number;
+    ready: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+    stale: number;
+    unsupported: number;
+    interrupted?: number;
+  };
+};
+
+export type AccountInspectionHistoryResponse = {
+  items: AccountInspectionBackendResultItem[];
+  pageInfo: AccountInspectionPageInfo;
+  retention: { maxResults: number };
+};
+
+export type AccountInspectionOperationRecord = {
+  batchOperationId?: string;
+  operationId: string;
+  source: 'manual' | 'automatic' | 'batch' | 'recovery';
+  action: string;
+  effect?: string;
+  status: 'running' | 'succeeded' | 'failed' | 'interrupted';
+  startedAt: number;
+  finishedAt?: number;
+  before?: Partial<AccountInspectionBackendResultItem>;
+  after?: Partial<AccountInspectionBackendResultItem>;
+  error?: string;
+};
+
+export type AccountInspectionOperationsResponse = {
+  items: AccountInspectionOperationRecord[];
+  pageInfo: AccountInspectionPageInfo;
+  retention: { maxOperations: number };
 };
 
 export type AccountInspectionInspectOneResponse = AccountInspectionBackendResponse & {
@@ -174,5 +265,29 @@ export const accountInspectionApi = {
   executeActions: (items: AccountInspectionActionItem[], options: boolean | AccountInspectionDetailsOptions = true) =>
     apiClient.post<AccountInspectionActionsResponse>('/account-inspection/actions', { items }, {
       params: buildAccountInspectionDetailParams(options),
+    }),
+  preflightBatch: (kind: AccountInspectionBatchKind, scope: AccountInspectionBatchScope) =>
+    apiClient.post<AccountInspectionBatchOperation>('/account-inspection/batches/preflight', { kind, scope }),
+  executeBatch: (operationId: string) =>
+    apiClient.post<AccountInspectionBatchOperation>(`/account-inspection/batches/${encodeURIComponent(operationId)}/execute`, {}),
+  getBatch: (operationId: string) =>
+    apiClient.get<AccountInspectionBatchOperation>(`/account-inspection/batches/${encodeURIComponent(operationId)}`),
+  retryBatch: (operationId: string) =>
+    apiClient.post<AccountInspectionBatchOperation>(`/account-inspection/batches/${encodeURIComponent(operationId)}/retry`, {}),
+  getHistory: (params: { key: string; page: number; pageSize: number; resultRef?: string; runId?: string }, signal?: AbortSignal) =>
+    apiClient.get<AccountInspectionHistoryResponse>('/account-inspection/history', {
+      params: {
+        key: params.key,
+        page: params.page,
+        page_size: params.pageSize,
+        ...(params.resultRef ? { result_ref: params.resultRef } : {}),
+        ...(params.runId ? { run_id: params.runId } : {}),
+      },
+      signal,
+    }),
+  getOperations: (params: { key: string; page: number; pageSize: number }, signal?: AbortSignal) =>
+    apiClient.get<AccountInspectionOperationsResponse>('/account-inspection/operations', {
+      params: { key: params.key, page: params.page, page_size: params.pageSize },
+      signal,
     }),
 };

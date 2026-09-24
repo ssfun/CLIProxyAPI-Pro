@@ -3,17 +3,28 @@ package inspection
 import "strings"
 
 type ActionItem struct {
-	AuthID            string `json:"-"`
-	AccessTokenSHA256 string `json:"-"`
-	Key               string `json:"key"`
-	Provider          string `json:"provider"`
-	FileName          string `json:"fileName"`
-	DisplayName       string `json:"displayName"`
-	Email             string `json:"email"`
-	Name              string `json:"name"`
-	AuthIndex         string `json:"authIndex"`
-	Disabled          bool   `json:"disabled"`
-	Action            Action `json:"action"`
+	AuthID            string   `json:"-"`
+	AccessTokenSHA256 string   `json:"-"`
+	Key               string   `json:"key"`
+	ResultRef         string   `json:"resultRef"`
+	Suggested         bool     `json:"suggested"`
+	RecommendedAction Action   `json:"-"`
+	ObservedSettings  Settings `json:"-"`
+	QuotaResetAt      int64    `json:"-"`
+	QuotaModel        string   `json:"-"`
+	QuotaKnown        bool     `json:"-"`
+	QuotaCooling      bool     `json:"-"`
+	QuotaRetryAt      int64    `json:"-"`
+	QuotaRevision     int64    `json:"-"`
+	IsQuota           bool     `json:"-"`
+	Provider          string   `json:"provider"`
+	FileName          string   `json:"fileName"`
+	DisplayName       string   `json:"displayName"`
+	Email             string   `json:"email"`
+	Name              string   `json:"name"`
+	AuthIndex         string   `json:"authIndex"`
+	Disabled          bool     `json:"disabled"`
+	Action            Action   `json:"action"`
 }
 
 type ActionRequest struct {
@@ -76,6 +87,15 @@ func (item ActionItem) ToResult() Result {
 		AuthID:            item.AuthID,
 		AccessTokenSHA256: item.AccessTokenSHA256,
 		Key:               item.Key,
+		ResultRef:         item.ResultRef,
+		ObservedSettings:  item.ObservedSettings,
+		QuotaResetAt:      item.QuotaResetAt,
+		QuotaModel:        item.QuotaModel,
+		QuotaKnown:        item.QuotaKnown,
+		QuotaCooling:      item.QuotaCooling,
+		QuotaRetryAt:      item.QuotaRetryAt,
+		QuotaRevision:     item.QuotaRevision,
+		IsQuota:           item.IsQuota,
 		Provider:          item.Provider,
 		FileName:          item.FileName,
 		DisplayName:       item.DisplayName,
@@ -92,6 +112,17 @@ func ActionItemFromResult(result Result, action Action) ActionItem {
 		AuthID:            result.AuthID,
 		AccessTokenSHA256: result.AccessTokenSHA256,
 		Key:               result.Key,
+		ResultRef:         result.ResultRef,
+		Suggested:         false,
+		RecommendedAction: result.Action,
+		ObservedSettings:  result.ObservedSettings,
+		QuotaResetAt:      result.QuotaResetAt,
+		QuotaModel:        result.QuotaModel,
+		QuotaKnown:        result.QuotaKnown,
+		QuotaCooling:      result.QuotaCooling,
+		QuotaRetryAt:      result.QuotaRetryAt,
+		QuotaRevision:     result.QuotaRevision,
+		IsQuota:           result.IsQuota,
 		Provider:          result.Provider,
 		FileName:          result.FileName,
 		DisplayName:       result.DisplayName,
@@ -150,12 +181,14 @@ func MergeManualActionResult(current, executed Result) (Result, bool) {
 	current.Disabled = executed.Disabled
 	current.QuotaCooling = executed.QuotaCooling
 	current.QuotaRetryAt = executed.QuotaRetryAt
-	current.Executed = executed.Executed
-	current.ExecuteError = executed.ExecuteError
-	if executed.Executed && (executed.Action == ActionDisable || executed.Action == ActionEnable) {
-		current.Action = ActionKeep
-		current.ActionReason = "无需处理"
-		current.Error = ""
+	current.Executed = current.Executed || executed.Executed
+	current.OperationAction = executed.Action
+	if executed.ExecutedAt > 0 {
+		current.ExecutedAction = executed.Action
+		current.ExecutedEffect = executed.ExecutedEffect
+		current.ExecutedAt = executed.ExecutedAt
+		current.ExecutedSuggested = executed.ExecutedSuggested
 	}
+	current.ExecuteError = executed.ExecuteError
 	return current, true
 }
