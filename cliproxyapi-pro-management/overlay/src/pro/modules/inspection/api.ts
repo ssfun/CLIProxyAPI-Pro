@@ -239,12 +239,13 @@ export const accountInspectionApi = {
     apiClient.post<AccountInspectionActionsResponse>('/account-inspection/actions', { items }, {
       params: buildAccountInspectionDetailParams(options),
     }),
-  preflightBatch: (kind: AccountInspectionBatchKind, scope: AccountInspectionBatchScope) =>
-    apiClient.post<AccountInspectionBatchOperation>('/account-inspection/batches/preflight', { kind, scope }),
-  executeBatch: (operationId: string) =>
-    apiClient.post<AccountInspectionBatchOperation>(`/account-inspection/batches/${encodeURIComponent(operationId)}/execute`, {}),
+  startBatch: (kind: AccountInspectionBatchKind, scope: AccountInspectionBatchScope, clientRequestId: string) =>
+    apiClient.post<AccountInspectionBatchOperation>('/account-inspection/batches', { kind, scope, clientRequestId }),
   getBatch: (operationId: string) =>
     apiClient.get<AccountInspectionBatchOperation>(`/account-inspection/batches/${encodeURIComponent(operationId)}`),
-  retryBatch: (operationId: string) =>
-    apiClient.post<AccountInspectionBatchOperation>(`/account-inspection/batches/${encodeURIComponent(operationId)}/retry`, {}),
+  retryExecuteBatch: (operationId: string) =>
+    apiClient.post<AccountInspectionBatchOperation>(
+      `/account-inspection/batches/${encodeURIComponent(operationId)}/retry-execute`,
+      {}
+    ),
 };

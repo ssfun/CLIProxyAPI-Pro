@@ -170,6 +170,18 @@ def preflight(items, kind="action"):
     return ok("POST", "/batches/preflight", {"kind": kind, "scope": {"type": "selected", "items": items}})
 
 
+def start_batch(items, kind="action", client_request_id="inspection-e2e-start"):
+    return ok("POST", "/batches", {
+        "kind": kind,
+        "scope": {"type": "selected", "items": items},
+        "clientRequestId": client_request_id,
+    }, 202)
+
+
+def batch_total():
+    return ok("GET", "/batches?page=1&page_size=100")["pageInfo"]["total"]
+
+
 def wait_until(description, reader, condition, seconds=35):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -291,6 +303,61 @@ try:
         assert filtered_total(result_filter, file_name) == 1, (result_filter, file_name)
     note("exact_result_filters_with_legacy_aliases", exact=list(exact_filters), legacy=list(legacy_filters))
 
+    # The collection POST is the atomic mutation contract: it resolves the
+    # scope, persists running intent, and starts execution without exposing a
+    # prepared receipt that the client must execute separately.
+    before_total = batch_total()
+    with request_lock:
+        g_calls_before = requests.get("g", 0)
+    direct_payload = item(row("xai-g.json"))
+    direct = start_batch([direct_payload], "inspect", "inspection-e2e-direct-g")
+    duplicate = start_batch([direct_payload], "inspect", "inspection-e2e-direct-g")
+    assert direct["operationId"] == duplicate["operationId"], (direct, duplicate)
+    assert direct["state"] in ("running", "completed") and batch_total() == before_total + 1, direct
+    completed_direct = wait_batch(direct["operationId"])
+    assert completed_direct["summary"]["succeeded"] == 1, completed_direct
+    completed_duplicate = start_batch([direct_payload], "inspect", "inspection-e2e-direct-g")
+    assert completed_duplicate["operationId"] == direct["operationId"] and completed_duplicate["state"] == "completed", completed_duplicate
+    with request_lock:
+        assert requests.get("g", 0) == g_calls_before + 1, requests
+    conflict_status, conflict = call("POST", "/batches", {
+        "kind": "inspect",
+        "scope": {"type": "selected", "items": [item(row("xai-d.json"))]},
+        "clientRequestId": "inspection-e2e-direct-g",
+    })
+    assert conflict_status == 409 and "different batch request" in conflict.get("error", ""), (conflict_status, conflict)
+    assert batch_total() == before_total + 1, batch_total()
+    note("atomic_batch_start_idempotent", operationId=direct["operationId"], providerCalls=1, conflictingReuseStatus=conflict_status)
+
+    # A scope that resolves only to stale/unsupported targets must not create a
+    # durable operation or start background work.
+    zero_ready_item = item(row("xai-c.json"), "disable")
+    zero_ready_item["resultRef"] = "missing-result-ref"
+    zero_before = batch_total()
+    zero_status, zero_body = call("POST", "/batches", {
+        "kind": "action",
+        "scope": {"type": "selected", "items": [zero_ready_item]},
+        "clientRequestId": "inspection-e2e-zero-ready",
+    })
+    assert zero_status == 409 and "no executable targets" in zero_body.get("error", ""), (zero_status, zero_body)
+    assert batch_total() == zero_before, (zero_before, batch_total())
+    note("atomic_batch_zero_ready_rejected", status=zero_status)
+
+    oversized_status, oversized = call("POST", "/batches", {
+        "kind": "action",
+        "scope": {"type": "selected", "items": [item(row("xai-d.json"), "disable") for _ in range(501)]},
+        "clientRequestId": "inspection-e2e-oversized",
+    })
+    assert oversized_status == 400 and "1 to 500" in oversized.get("error", ""), (oversized_status, oversized)
+    note("atomic_batch_capacity_rejected", maxTargets=500)
+
+    # Keep the legacy two-step route functional for older Management clients.
+    legacy = preflight([item(row("xai-h.json"))], "inspect")
+    assert legacy["state"] == "prepared" and legacy["summary"]["ready"] == 1, legacy
+    ok("POST", f'/batches/{legacy["operationId"]}/execute', {}, 202)
+    assert wait_batch(legacy["operationId"])["summary"]["succeeded"] == 1
+    note("legacy_batch_preflight_execute_compatible", operationId=legacy["operationId"])
+
     # A manual confirmation uses one Responses request for official xAI.
     deep_schedule = ok("GET", "/status?details=1")["schedule"]
     deep_schedule["settings"]["xaiDeepProbeEnabled"] = True
@@ -355,9 +422,16 @@ try:
     retry = ok("POST", f'/batches/{prepared["operationId"]}/retry', {})
     assert retry["operationId"] != prepared["operationId"] and retry["parentOperationId"] == prepared["operationId"]
     assert retry["items"][0]["status"] == "ready" and retry["items"][0]["item"]["resultRef"] == newest_c["resultRef"], retry
-    ok("POST", f'/batches/{retry["operationId"]}/execute', {}, 202)
-    assert wait_batch(retry["operationId"])["summary"]["succeeded"] == 1
+    retry_started = ok("POST", f'/batches/{prepared["operationId"]}/retry-execute', {}, 202)
+    assert retry_started["operationId"] == retry["operationId"], (retry_started, retry)
+    retry_duplicate = ok("POST", f'/batches/{prepared["operationId"]}/retry-execute', {}, 202)
+    assert retry_duplicate["operationId"] == retry["operationId"], (retry_duplicate, retry)
+    completed_retry = wait_batch(retry["operationId"])
+    assert completed_retry["summary"]["succeeded"] == 1
+    retry_after_completion = ok("POST", f'/batches/{prepared["operationId"]}/retry-execute', {}, 202)
+    assert retry_after_completion["operationId"] == retry["operationId"] and retry_after_completion["state"] == "completed", retry_after_completion
     assert row("xai-c.json")["disabled"]
+    note("atomic_retry_execute_idempotent", parentOperationId=prepared["operationId"], retryOperationId=retry["operationId"])
     note("execute_stale_and_retry_rebind", staleOperationId=prepared["operationId"], retryOperationId=retry["operationId"], newRef=newest_c["resultRef"])
 
     quota = preflight([item(a, "disable", True)])

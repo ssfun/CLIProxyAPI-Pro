@@ -18,6 +18,57 @@ afterEach(() => {
 });
 
 describe('account inspection API', () => {
+  test('starts a batch atomically with an idempotency identity', async () => {
+    let capturedUrl = '';
+    let capturedBody: unknown;
+    internalClient.instance.defaults.adapter = (async (config: unknown) => {
+      const request = config as { url?: string; data?: string };
+      capturedUrl = request.url ?? '';
+      capturedBody = request.data ? JSON.parse(request.data) : undefined;
+      return {
+        data: { operationId: 'batch-1', kind: 'inspect', state: 'running', items: [], summary: {} },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      };
+    }) as AxiosAdapter;
+
+    await accountInspectionApi.startBatch('inspect', {
+      type: 'selected',
+      items: [],
+    }, 'request-1');
+
+    expect(capturedUrl).toBe('/account-inspection/batches');
+    expect(capturedBody).toEqual({
+      kind: 'inspect',
+      scope: { type: 'selected', items: [] },
+      clientRequestId: 'request-1',
+    });
+  });
+
+  test('retries failed batch items through the atomic retry endpoint', async () => {
+    let capturedUrl = '';
+    let capturedBody: unknown;
+    internalClient.instance.defaults.adapter = (async (config: unknown) => {
+      const request = config as { url?: string; data?: string };
+      capturedUrl = request.url ?? '';
+      capturedBody = request.data ? JSON.parse(request.data) : undefined;
+      return {
+        data: { operationId: 'batch-2', kind: 'action', state: 'running', items: [], summary: {} },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      };
+    }) as AxiosAdapter;
+
+    await accountInspectionApi.retryExecuteBatch('batch/1');
+
+    expect(capturedUrl).toBe('/account-inspection/batches/batch%2F1/retry-execute');
+    expect(capturedBody).toEqual({});
+  });
+
   test('gives bulk rechecks enough time to reach the backend run deadline', async () => {
     let capturedTimeout: number | undefined;
     internalClient.instance.defaults.adapter = (async (config: unknown) => {

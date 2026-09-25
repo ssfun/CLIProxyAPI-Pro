@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,16 +42,18 @@ type inspectionBatchItem struct {
 	recovery []routingRecoveryRequest
 }
 type inspectionBatchOperation struct {
-	OperationID       string                `json:"operationId"`
-	Kind              string                `json:"kind"`
-	State             string                `json:"state"`
-	CreatedAt         int64                 `json:"createdAt"`
-	ExpiresAt         int64                 `json:"expiresAt"`
-	Items             []inspectionBatchItem `json:"items"`
-	Summary           map[string]int        `json:"summary"`
-	RetryID           string                `json:"retryOperationId,omitempty"`
-	ParentOperationID string                `json:"parentOperationId,omitempty"`
-	PersistenceError  string                `json:"persistenceError,omitempty"`
+	OperationID        string                `json:"operationId"`
+	ClientRequestID    string                `json:"clientRequestId,omitempty"`
+	RequestFingerprint string                `json:"requestFingerprint,omitempty"`
+	Kind               string                `json:"kind"`
+	State              string                `json:"state"`
+	CreatedAt          int64                 `json:"createdAt"`
+	ExpiresAt          int64                 `json:"expiresAt"`
+	Items              []inspectionBatchItem `json:"items"`
+	Summary            map[string]int        `json:"summary"`
+	RetryID            string                `json:"retryOperationId,omitempty"`
+	ParentOperationID  string                `json:"parentOperationId,omitempty"`
+	PersistenceError   string                `json:"persistenceError,omitempty"`
 }
 type inspectionBatchStore struct {
 	sync.Mutex
@@ -60,6 +64,24 @@ type inspectionBatchStore struct {
 }
 
 var inspectionBatchStores sync.Map
+
+type inspectionBatchScope struct {
+	Type        string                        `json:"type"`
+	Items       []accountInspectionActionItem `json:"items"`
+	Filter      string                        `json:"filter"`
+	Provider    string                        `json:"provider"`
+	Search      string                        `json:"search"`
+	PendingOnly bool                          `json:"pendingOnly"`
+	Action      accountInspectionAction       `json:"action"`
+	Suggested   bool                          `json:"suggested"`
+}
+
+type inspectionBatchRequest struct {
+	Kind            string                        `json:"kind"`
+	Items           []accountInspectionActionItem `json:"items"`
+	Scope           *inspectionBatchScope         `json:"scope"`
+	ClientRequestID string                        `json:"clientRequestId"`
+}
 
 func inspectionBatches(h *Handler) *inspectionBatchStore {
 	value, _ := inspectionBatchStores.LoadOrStore(h, &inspectionBatchStore{operations: make(map[string]*inspectionBatchOperation)})
@@ -82,10 +104,12 @@ func (operation *inspectionBatchOperation) snapshot() json.RawMessage {
 }
 func (h *Handler) RegisterAccountInspectionBatchRoutes(group *gin.RouterGroup) {
 	group.GET("/account-inspection/batches", h.ListAccountInspectionBatches)
+	group.POST("/account-inspection/batches", h.StartAccountInspectionBatch)
 	group.POST("/account-inspection/batches/preflight", h.PreflightAccountInspectionBatch)
 	group.GET("/account-inspection/batches/:operationId", h.GetAccountInspectionBatch)
 	group.POST("/account-inspection/batches/:operationId/execute", h.ExecuteAccountInspectionBatch)
 	group.POST("/account-inspection/batches/:operationId/retry", h.RetryAccountInspectionBatch)
+	group.POST("/account-inspection/batches/:operationId/retry-execute", h.RetryExecuteAccountInspectionBatch)
 }
 func inspectionBatchPage(c *gin.Context, total int) (int, int, accountInspectionPageInfo) {
 	page := parseAccountInspectionQueryInt(c, "page", 1)
@@ -267,62 +291,181 @@ func (store *inspectionBatchStore) insert(operation *inspectionBatchOperation) b
 	store.operations[operation.OperationID] = operation
 	return true
 }
-func (h *Handler) PreflightAccountInspectionBatch(c *gin.Context) {
-	var request struct {
-		Kind  string                        `json:"kind"`
-		Items []accountInspectionActionItem `json:"items"`
-		Scope *struct {
-			Type        string                        `json:"type"`
-			Items       []accountInspectionActionItem `json:"items"`
-			Filter      string                        `json:"filter"`
-			Provider    string                        `json:"provider"`
-			Search      string                        `json:"search"`
-			PendingOnly bool                          `json:"pendingOnly"`
-			Action      accountInspectionAction       `json:"action"`
-			Suggested   bool                          `json:"suggested"`
-		} `json:"scope"`
+
+func (store *inspectionBatchStore) operationForClientRequestID(clientRequestID string) *inspectionBatchOperation {
+	if clientRequestID == "" {
+		return nil
 	}
+	for _, operation := range store.operations {
+		if operation.ClientRequestID == clientRequestID {
+			return operation
+		}
+	}
+	return nil
+}
+
+func inspectionBatchReadyCount(operation *inspectionBatchOperation) int {
+	count := 0
+	for _, item := range operation.Items {
+		if item.Status == "ready" {
+			count++
+		}
+	}
+	return count
+}
+
+func inspectionBatchRequestFingerprint(request inspectionBatchRequest) (string, error) {
+	payload, err := json.Marshal(struct {
+		Kind  string                        `json:"kind"`
+		Items []accountInspectionActionItem `json:"items,omitempty"`
+		Scope *inspectionBatchScope         `json:"scope,omitempty"`
+	}{Kind: request.Kind, Items: request.Items, Scope: request.Scope})
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(payload)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func inspectionBatchIdempotencyConflict(operation *inspectionBatchOperation, requestFingerprint string) bool {
+	return operation.RequestFingerprint != "" && operation.RequestFingerprint != requestFingerprint
+}
+
+func (h *Handler) resolveInspectionBatchItems(request inspectionBatchRequest) ([]accountInspectionActionItem, int, error) {
+	if request.Scope == nil {
+		return request.Items, 0, nil
+	}
+	scope := request.Scope
+	switch scope.Type {
+	case "selected":
+		return scope.Items, 0, nil
+	case "filtered":
+		scheduler := schedulerForHandler(h)
+		if scheduler == nil {
+			return nil, http.StatusServiceUnavailable, errors.New("scheduler unavailable")
+		}
+		scheduler.mu.Lock()
+		results, info := proinspection.PaginateResults(scheduler.status.Results, 1, 501, 501, scope.Filter, scope.PendingOnly || request.Kind == "action" && scope.Suggested, scope.Provider, scope.Search)
+		items := make([]accountInspectionActionItem, 0, len(results))
+		for _, result := range results {
+			action := scope.Action
+			if scope.Suggested {
+				action = result.Action
+			}
+			item := proinspection.ActionItemFromResult(result, action)
+			item.Suggested = scope.Suggested
+			items = append(items, item)
+		}
+		scheduler.mu.Unlock()
+		maxItems := 500
+		if request.Kind == "recover" {
+			maxItems = inspectionRecoveryBatchMaxItems
+		}
+		if info.Total > maxItems {
+			return nil, http.StatusBadRequest, fmt.Errorf("filtered scope exceeds %d targets; narrow the filters", maxItems)
+		}
+		return items, 0, nil
+	default:
+		return nil, http.StatusBadRequest, errors.New("invalid scope type")
+	}
+}
+
+func (h *Handler) StartAccountInspectionBatch(c *gin.Context) {
+	var request inspectionBatchRequest
+	if c.ShouldBindJSON(&request) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	request.ClientRequestID = strings.TrimSpace(request.ClientRequestID)
+	if request.ClientRequestID == "" || len(request.ClientRequestID) > 200 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "clientRequestId is required and must not exceed 200 characters"})
+		return
+	}
+	requestFingerprint, err := inspectionBatchRequestFingerprint(request)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid batch request"})
+		return
+	}
+	store := inspectionBatches(h)
+	store.Lock()
+	if store.loadErr != nil {
+		store.Unlock()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "operation receipts could not be loaded"})
+		return
+	}
+	if existing := store.operationForClientRequestID(request.ClientRequestID); existing != nil {
+		if inspectionBatchIdempotencyConflict(existing, requestFingerprint) {
+			store.Unlock()
+			c.JSON(http.StatusConflict, gin.H{"error": "clientRequestId was already used for a different batch request"})
+			return
+		}
+		response := existing.snapshot()
+		store.Unlock()
+		c.Data(http.StatusAccepted, "application/json", response)
+		return
+	}
+	store.Unlock()
+
+	items, status, err := h.resolveInspectionBatchItems(request)
+	if err != nil {
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	operation, err := h.preflightInspectionBatch(request.Kind, items, false)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if inspectionBatchReadyCount(operation) == 0 {
+		operation.snapshot()
+		c.JSON(http.StatusConflict, gin.H{"error": "batch has no executable targets", "items": operation.Items, "summary": operation.Summary})
+		return
+	}
+	operation.ClientRequestID = request.ClientRequestID
+	operation.RequestFingerprint = requestFingerprint
+	operation.State = "running"
+
+	store.Lock()
+	if existing := store.operationForClientRequestID(request.ClientRequestID); existing != nil {
+		if inspectionBatchIdempotencyConflict(existing, requestFingerprint) {
+			store.Unlock()
+			c.JSON(http.StatusConflict, gin.H{"error": "clientRequestId was already used for a different batch request"})
+			return
+		}
+		response := existing.snapshot()
+		store.Unlock()
+		c.Data(http.StatusAccepted, "application/json", response)
+		return
+	}
+	if !store.insert(operation) {
+		store.Unlock()
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "batch receipt capacity reached; retry after retention expires"})
+		return
+	}
+	if err := store.save(); err != nil {
+		delete(store.operations, operation.OperationID)
+		store.Unlock()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist execution intent"})
+		return
+	}
+	response := operation.snapshot()
+	store.Unlock()
+	go h.runInspectionBatch(store, operation)
+	c.Data(http.StatusAccepted, "application/json", response)
+}
+
+func (h *Handler) PreflightAccountInspectionBatch(c *gin.Context) {
+	var request inspectionBatchRequest
 	if c.ShouldBindJSON(&request) != nil {
 		c.JSON(400, gin.H{"error": "invalid request body"})
 		return
 	}
-	if scope := request.Scope; scope != nil {
-		switch scope.Type {
-		case "selected":
-			request.Items = scope.Items
-		case "filtered":
-			scheduler := schedulerForHandler(h)
-			if scheduler == nil {
-				c.JSON(503, gin.H{"error": "scheduler unavailable"})
-				return
-			}
-			scheduler.mu.Lock()
-			results, info := proinspection.PaginateResults(scheduler.status.Results, 1, 501, 501, scope.Filter, scope.PendingOnly || request.Kind == "action" && scope.Suggested, scope.Provider, scope.Search)
-			request.Items = make([]accountInspectionActionItem, 0, len(results))
-			for _, result := range results {
-				action := scope.Action
-				if scope.Suggested {
-					action = result.Action
-				}
-				item := proinspection.ActionItemFromResult(result, action)
-				item.Suggested = scope.Suggested
-				request.Items = append(request.Items, item)
-			}
-			scheduler.mu.Unlock()
-			maxItems := 500
-			if request.Kind == "recover" {
-				maxItems = inspectionRecoveryBatchMaxItems
-			}
-			if info.Total > maxItems {
-				c.JSON(400, gin.H{"error": fmt.Sprintf("filtered scope exceeds %d targets; narrow the filters", maxItems)})
-				return
-			}
-		default:
-			c.JSON(400, gin.H{"error": "invalid scope type"})
-			return
-		}
+	items, status, err := h.resolveInspectionBatchItems(request)
+	if err != nil {
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
 	}
-	operation, err := h.preflightInspectionBatch(request.Kind, request.Items, false)
+	operation, err := h.preflightInspectionBatch(request.Kind, items, false)
 	if err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
@@ -390,20 +533,67 @@ func (h *Handler) ExecuteAccountInspectionBatch(c *gin.Context) {
 	c.Data(http.StatusAccepted, "application/json", response)
 }
 func (h *Handler) RetryAccountInspectionBatch(c *gin.Context) {
+	h.retryAccountInspectionBatch(c, false)
+}
+
+func (h *Handler) RetryExecuteAccountInspectionBatch(c *gin.Context) {
+	h.retryAccountInspectionBatch(c, true)
+}
+
+func (h *Handler) retryAccountInspectionBatch(c *gin.Context, execute bool) {
 	store := inspectionBatches(h)
 	store.Lock()
-	defer store.Unlock()
 	parent := store.operations[c.Param("operationId")]
 	if parent == nil {
+		store.Unlock()
 		c.JSON(404, gin.H{"error": "operation not found"})
 		return
 	}
 	if parent.State != "completed" && parent.State != "interrupted" {
+		store.Unlock()
 		c.JSON(409, gin.H{"error": "operation must complete before retry"})
 		return
 	}
 	if previous := store.operations[parent.RetryID]; previous != nil {
-		c.Data(200, "application/json", previous.snapshot())
+		if !execute {
+			response := previous.snapshot()
+			store.Unlock()
+			c.Data(http.StatusOK, "application/json", response)
+			return
+		}
+		if previous.State == "interrupted" {
+			store.Unlock()
+			c.JSON(http.StatusConflict, gin.H{"error": "interrupted operation cannot be replayed; inspect current state and retry explicitly"})
+			return
+		}
+		if previous.State == "prepared" {
+			if inspectionBatchReadyCount(previous) == 0 {
+				previous.snapshot()
+				store.Unlock()
+				c.JSON(http.StatusConflict, gin.H{"error": "batch has no executable targets", "items": previous.Items, "summary": previous.Summary})
+				return
+			}
+			if time.Now().UnixMilli() > previous.ExpiresAt {
+				store.Unlock()
+				c.JSON(http.StatusConflict, gin.H{"error": "retry preflight expired; prepare a new retry"})
+				return
+			}
+			previous.State = "running"
+			if err := store.save(); err != nil {
+				previous.State = "prepared"
+				store.Unlock()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist execution intent"})
+				return
+			}
+			response := previous.snapshot()
+			store.Unlock()
+			go h.runInspectionBatch(store, previous)
+			c.Data(http.StatusAccepted, "application/json", response)
+			return
+		}
+		response := previous.snapshot()
+		store.Unlock()
+		c.Data(http.StatusAccepted, "application/json", response)
 		return
 	}
 	items := make([]accountInspectionActionItem, 0)
@@ -413,27 +603,98 @@ func (h *Handler) RetryAccountInspectionBatch(c *gin.Context) {
 		}
 	}
 	if len(items) == 0 {
+		store.Unlock()
 		c.JSON(409, gin.H{"error": "operation has no failed items"})
 		return
 	}
-	operation, err := h.preflightInspectionBatch(parent.Kind, items, true)
+	parentID, parentKind := parent.OperationID, parent.Kind
+	store.Unlock()
+
+	operation, err := h.preflightInspectionBatch(parentKind, items, true)
 	if err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
+	if execute && inspectionBatchReadyCount(operation) == 0 {
+		operation.snapshot()
+		c.JSON(http.StatusConflict, gin.H{"error": "batch has no executable targets", "items": operation.Items, "summary": operation.Summary})
+		return
+	}
+
+	store.Lock()
+	parent = store.operations[parentID]
+	if parent == nil {
+		store.Unlock()
+		c.JSON(http.StatusNotFound, gin.H{"error": "operation not found"})
+		return
+	}
+	if previous := store.operations[parent.RetryID]; previous != nil {
+		if execute {
+			if previous.State == "interrupted" {
+				store.Unlock()
+				c.JSON(http.StatusConflict, gin.H{"error": "interrupted operation cannot be replayed; inspect current state and retry explicitly"})
+				return
+			}
+			if previous.State == "prepared" {
+				if inspectionBatchReadyCount(previous) == 0 {
+					previous.snapshot()
+					store.Unlock()
+					c.JSON(http.StatusConflict, gin.H{"error": "batch has no executable targets", "items": previous.Items, "summary": previous.Summary})
+					return
+				}
+				if time.Now().UnixMilli() > previous.ExpiresAt {
+					store.Unlock()
+					c.JSON(http.StatusConflict, gin.H{"error": "retry preflight expired; prepare a new retry"})
+					return
+				}
+				previous.State = "running"
+				if err := store.save(); err != nil {
+					previous.State = "prepared"
+					store.Unlock()
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist execution intent"})
+					return
+				}
+				response := previous.snapshot()
+				store.Unlock()
+				go h.runInspectionBatch(store, previous)
+				c.Data(http.StatusAccepted, "application/json", response)
+				return
+			}
+		}
+		response := previous.snapshot()
+		store.Unlock()
+		status := http.StatusOK
+		if execute {
+			status = http.StatusAccepted
+		}
+		c.Data(status, "application/json", response)
+		return
+	}
 	if !store.insert(operation) {
+		store.Unlock()
 		c.JSON(429, gin.H{"error": "batch receipt capacity reached"})
 		return
 	}
 	parent.RetryID = operation.OperationID
 	operation.ParentOperationID = parent.OperationID
+	if execute {
+		operation.State = "running"
+	}
 	if err := store.save(); err != nil {
 		delete(store.operations, operation.OperationID)
 		parent.RetryID = ""
+		store.Unlock()
 		c.JSON(500, gin.H{"error": "failed to persist operation"})
 		return
 	}
-	c.Data(200, "application/json", operation.snapshot())
+	response := operation.snapshot()
+	store.Unlock()
+	status := http.StatusOK
+	if execute {
+		status = http.StatusAccepted
+		go h.runInspectionBatch(store, operation)
+	}
+	c.Data(status, "application/json", response)
 }
 func (h *Handler) runInspectionBatch(store *inspectionBatchStore, operation *inspectionBatchOperation) {
 	// A disconnected HTTP client must not abandon a mutation with an unknown result.

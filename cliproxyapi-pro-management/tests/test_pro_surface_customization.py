@@ -109,18 +109,55 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
         self.assertNotIn('.slice(0, 5)', inspection_model)
         self.assertNotIn('-webkit-line-clamp', inspection_styles)
 
-    def test_account_inspection_batch_preflight_uses_decision_dialog_theme(self) -> None:
+    def test_account_inspection_batch_flow_is_atomic_and_keeps_primary_actions_visible(self) -> None:
         inspection = (PRO_ROOT / 'modules/inspection/AccountInspectionPage.tsx').read_text()
-        preflight = inspection[
-            inspection.index('const confirmBatch = useCallback'):inspection.index(
-                'const handleExecuteSelectedResults',
-            )
-        ]
-        self.assertIn('const hasDangerousReadyItem =', preflight)
-        self.assertIn('styles.confirmationDecisionBody', preflight)
-        self.assertIn('styles.confirmationBatchBody', preflight)
-        self.assertIn('hasDangerousReadyItem ? styles.confirmationDecisionDanger', preflight)
-        self.assertIn("variant: hasDangerousReadyItem ? 'danger' : 'primary'", preflight)
+        api = (PRO_ROOT / 'modules/inspection/api.ts').read_text()
+        self.assertIn("post<AccountInspectionBatchOperation>('/account-inspection/batches',", api)
+        self.assertIn('clientRequestId', api)
+        self.assertNotIn("'/account-inspection/batches/preflight'", api)
+        self.assertNotIn('const [resultBulkAction,', inspection)
+        self.assertNotIn('account_inspection_batch_preflight_button', inspection)
+        self.assertNotIn('account_inspection_batch_preflight_title', inspection)
+        self.assertNotIn('account_inspection_batch_resume_prepared', inspection)
+        self.assertNotIn('styles.batchPreflightList', inspection)
+        self.assertIn("['suggested', 'recheck', 'recover', 'disable', 'enable', 'delete']", inspection)
+        self.assertIn('onClick={() => handleExecuteSelectedResults(action)}', inspection)
+        self.assertIn("variant={action === 'delete' ? 'danger'", inspection)
+        self.assertIn('account_inspection_batch_select_all_filtered', inspection)
+        self.assertIn('account_inspection_batch_filtered_selected', inspection)
+        self.assertIn('const scopeFingerprint =', inspection)
+        self.assertIn('batchClientRequestIdsRef.current.get(requestIdentity)', inspection)
+        self.assertIn('batchClientRequestIdsRef.current.delete(requestIdentity)', inspection)
+        locales = json.loads(LOCALES.read_text())
+        for locale_name in ('en.json', 'ru.json', 'zh-CN.json', 'zh-TW.json'):
+            monitoring = locales[locale_name]['monitoring']
+            for key in (
+                'account_inspection_batch_select_all_filtered',
+                'account_inspection_batch_filtered_selected',
+                'account_inspection_batch_clear_filtered',
+                'account_inspection_batch_confirm_title',
+                'account_inspection_batch_confirm_scope',
+                'account_inspection_batch_risk_suggested',
+                'account_inspection_batch_risk_recheck',
+                'account_inspection_batch_risk_recover',
+                'account_inspection_batch_risk_disable',
+                'account_inspection_batch_risk_enable',
+                'account_inspection_batch_risk_delete',
+                'account_inspection_batch_problem_details',
+            ):
+                self.assertTrue(monitoring[key])
+            self.assertNotIn('account_inspection_batch_preflight_button', monitoring)
+            self.assertNotIn('account_inspection_batch_preflight_title', monitoring)
+
+    def test_account_inspection_only_renders_the_latest_batch_receipt(self) -> None:
+        inspection = (PRO_ROOT / 'modules/inspection/AccountInspectionPage.tsx').read_text()
+        self.assertIn('const [batchOperation, setBatchOperation]', inspection)
+        self.assertNotIn('const [batchOperations, setBatchOperations]', inspection)
+        self.assertNotIn('batchOperations.map(', inspection)
+        self.assertNotIn("operation.state === 'prepared'", inspection)
+        self.assertIn('const batchProblemItems =', inspection)
+        self.assertIn('<details className={styles.batchReceiptDetails}>', inspection)
+        self.assertNotIn('batchOperation.items.map(', inspection)
 
     def test_inspection_detail_omits_history_and_operation_modules(self) -> None:
         inspection = (PRO_ROOT / 'modules/inspection/AccountInspectionPage.tsx').read_text()
@@ -408,12 +445,15 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
 
     def test_rich_account_confirmations_use_business_dedupe_keys(self) -> None:
         inspection = (PRO_ROOT / 'modules/inspection/AccountInspectionPage.tsx').read_text()
-        self.assertGreaterEqual(
-            inspection.count('dedupeKey: `account-inspection:execute:'),
-            3,
-        )
+        self.assertGreaterEqual(inspection.count('dedupeKey: `account-inspection:execute:'), 1)
+        self.assertIn('dedupeKey: `account-inspection:batch:${requestIdentity}`', inspection)
+        self.assertIn('const scopeFingerprint = scope.type === \'selected\'', inspection)
+        self.assertIn('key, resultRef, action, suggested', inspection)
+        self.assertIn('filter: scope.filter', inspection)
+        self.assertIn('provider: scope.provider', inspection)
+        self.assertIn('search: scope.search', inspection)
+        self.assertIn('pendingOnly: scope.pendingOnly', inspection)
         self.assertIn('${target.key}:${target.action}', inspection)
-        self.assertIn('${item.key}:${item.action}', inspection)
 
     def test_auth_surface_extensions_keep_one_external_active_surface(self) -> None:
         source = CUSTOMIZER.read_text()

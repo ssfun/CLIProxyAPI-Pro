@@ -620,6 +620,22 @@
   font-size: 12px;
 }
 
+.selectAllFilteredButton {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--inspect-accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.selectAllFilteredButton:hover,
+.selectAllFilteredButton:focus-visible {
+  text-decoration: underline;
+}
+
 .resultSelectionActions {
   display: flex;
   flex-wrap: wrap;
@@ -628,43 +644,11 @@
   gap: 8px;
 }
 
-.resultBulkActionSelect {
-  width: 174px;
-}
-
-.resultBulkActionTrigger {
-  min-height: 32px;
-  border-radius: 7px;
-  font-size: 12px;
-}
-
-.batchPreflight {
-  display: grid;
-  gap: 8px;
-}
-
-.batchPreflightList,
 .batchReceiptList {
   display: grid;
   gap: 6px;
   max-height: 320px;
   overflow-y: auto;
-}
-
-.batchPreflightStats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.batchPreflightStats > span {
-  padding: 4px 7px;
-  border: 1px solid var(--inspect-line);
-  border-radius: 6px;
-}
-
-.batchPreflightList > span {
-  overflow-wrap: anywhere;
 }
 
 .batchReceiptPanel {
@@ -700,6 +684,23 @@
 .batchReceiptItem small {
   color: var(--inspect-muted);
   font-size: 12px;
+}
+
+.batchReceiptDetails {
+  display: grid;
+  gap: 8px;
+}
+
+.batchReceiptDetails > summary {
+  width: fit-content;
+  color: var(--inspect-accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.batchReceiptDetails[open] > summary {
+  margin-bottom: 8px;
 }
 
 .batchReceiptItem {
