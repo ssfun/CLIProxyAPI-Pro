@@ -764,8 +764,7 @@
   gap: 12px;
 }
 
-.strategySectionHeader button,
-.strategyActivityRow button {
+.strategySectionHeader button {
   border: 0;
   background: transparent;
   color: var(--inspect-accent);
@@ -776,7 +775,7 @@
 
 .strategyTotalsRow {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 6px;
   padding-top: 10px;
   border-top: 1px solid color-mix(in srgb, var(--inspect-line) 70%, transparent);
@@ -794,50 +793,6 @@
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.strategyActivityRow {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--inspect-line) 66%, transparent);
-  border-radius: 10px;
-  background: var(--inspect-surface);
-}
-
-.strategyActivityIcon {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--inspect-green);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--inspect-green) 12%, transparent);
-}
-
-.strategyActivityRow span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.strategyActivityRow strong {
-  min-width: 0;
-}
-
-.strategyActivityRow span {
-  color: var(--inspect-muted);
-  font-size: 12px;
-}
-
-.strategyActivityRow strong {
-  color: var(--inspect-ink);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
 }
 
 .manualPendingSection {

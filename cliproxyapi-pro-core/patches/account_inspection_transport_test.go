@@ -1430,8 +1430,8 @@ func TestAntigravityQuotaResponseEvidenceClassification(t *testing.T) {
 		wantCode   string
 		wantBucket proinspection.HealthBucket
 	}{
-		{"malformed 200", http.StatusOK, `{"broken":`, "inspection_incomplete", proinspection.HealthUnknown},
-		{"unknown schema 200", http.StatusOK, `{"unknown":true}`, "inspection_incomplete", proinspection.HealthUnknown},
+		{"malformed 200", http.StatusOK, `{"broken":`, "inspection_incomplete", proinspection.HealthInspectionError},
+		{"unknown schema 200", http.StatusOK, `{"unknown":true}`, "inspection_incomplete", proinspection.HealthInspectionError},
 		{"server error", http.StatusServiceUnavailable, `{"error":"unavailable"}`, "inspection_probe_error", proinspection.HealthInspectionError},
 		{"invalid credential", http.StatusUnauthorized, `{"error":"invalid token"}`, "inspection_http_error", proinspection.HealthAuthInvalid},
 		{"explicit quota", http.StatusPaymentRequired, `{"error":"quota exhausted"}`, "", proinspection.HealthQuotaExhausted},
@@ -1483,8 +1483,8 @@ func TestXAICLIBillingResponseEvidenceClassification(t *testing.T) {
 		wantCode   string
 		wantBucket proinspection.HealthBucket
 	}{
-		{"malformed 200", http.StatusOK, `{"broken":`, "inspection_incomplete", proinspection.HealthUnknown},
-		{"unknown schema 200", http.StatusOK, `{"unknown":true}`, "inspection_incomplete", proinspection.HealthUnknown},
+		{"malformed 200", http.StatusOK, `{"broken":`, "inspection_incomplete", proinspection.HealthInspectionError},
+		{"unknown schema 200", http.StatusOK, `{"unknown":true}`, "inspection_incomplete", proinspection.HealthInspectionError},
 		{"server error", http.StatusServiceUnavailable, `{"error":"unavailable"}`, "inspection_probe_error", proinspection.HealthInspectionError},
 		{"invalid credential", http.StatusUnauthorized, `{"error":"invalid token"}`, "inspection_http_error", proinspection.HealthAuthInvalid},
 		{"explicit quota", http.StatusPaymentRequired, `{"error":"quota exhausted"}`, "", proinspection.HealthQuotaExhausted},
@@ -1525,8 +1525,8 @@ func TestXAICLIMixedBillingEvidencePriority(t *testing.T) {
 		wantCode      string
 		wantBucket    proinspection.HealthBucket
 	}{
-		{"weekly schema, monthly healthy", 200, `{"unknown":true}`, 200, `{"config":{"monthly_limit":1000,"used":1}}`, "inspection_incomplete", proinspection.HealthUnknown},
-		{"weekly healthy, monthly schema", 200, `{"config":{"credit_usage_percent":10}}`, 200, `{"unknown":true}`, "inspection_incomplete", proinspection.HealthUnknown},
+		{"weekly schema, monthly healthy", 200, `{"unknown":true}`, 200, `{"config":{"monthly_limit":1000,"used":1}}`, "inspection_incomplete", proinspection.HealthInspectionError},
+		{"weekly healthy, monthly schema", 200, `{"config":{"credit_usage_percent":10}}`, 200, `{"unknown":true}`, "inspection_incomplete", proinspection.HealthInspectionError},
 		{"weekly schema, monthly server error", 200, `{"unknown":true}`, 503, `{"error":"unavailable"}`, "inspection_probe_error", proinspection.HealthInspectionError},
 		{"weekly healthy, monthly server error", 200, `{"config":{"credit_usage_percent":10}}`, 503, `{"error":"unavailable"}`, "inspection_probe_error", proinspection.HealthInspectionError},
 		{"weekly schema, monthly explicit quota", 200, `{"unknown":true}`, 200, `{"config":{"monthly_limit":1000,"used":1000}}`, "", proinspection.HealthQuotaExhausted},

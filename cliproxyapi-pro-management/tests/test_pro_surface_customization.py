@@ -290,6 +290,19 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
         self.assertIn("useProSurfaceState<'settings' | 'detail' | 'recovery'>", inspection)
         self.assertIn("useProSurfaceState<'node' | 'import' | 'takeover'>", proxy_pool)
 
+    def test_account_inspection_summary_merges_incomplete_results_and_deduplicates_auto_execution(self) -> None:
+        inspection = (PRO_ROOT / 'modules/inspection/AccountInspectionPage.tsx').read_text()
+        model = (PRO_ROOT / 'modules/inspection/features/accountInspectionPageModel.tsx').read_text()
+        strategy_start = inspection.index('{hasAutoExecutionPolicy ? (')
+        strategy_end = inspection.index(') : (', strategy_start)
+        strategy = inspection[strategy_start:strategy_end]
+        self.assertNotIn("showInspectionResults('unknown')", inspection)
+        self.assertNotIn("value: 'unknown'", inspection)
+        self.assertNotIn('autoExecutionResultLabel', inspection)
+        self.assertNotIn('account_inspection_action_keep', strategy)
+        self.assertIn("showInspectionResults('all')", strategy)
+        self.assertNotIn("'recoverable' | 'unknown'", model)
+
     def test_detail_data_is_cleared_only_after_the_exit_animation(self) -> None:
         surface = SURFACE.read_text()
         monitoring = (PRO_ROOT / 'modules/monitoring/MonitoringCenterPage.tsx').read_text()

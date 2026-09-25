@@ -157,7 +157,7 @@ func adjustHealthBucket(counts HealthCounts, bucket HealthBucket, delta int) Hea
 func HealthBucketOf(result Result) HealthBucket {
 	switch {
 	case result.ErrorCode == "inspection_incomplete":
-		return HealthUnknown
+		return HealthInspectionError
 	case IsQuotaResult(result):
 		return HealthQuotaExhausted
 	case IsAccountInvalidResult(result):
@@ -207,7 +207,7 @@ func ResultMatchesFilter(result Result, filter string) bool {
 		bucket := HealthBucketOf(result)
 		return bucket == HealthAuthInvalid || bucket == HealthInspectionError || bucket == HealthUnknown
 	case "unknown", "incomplete":
-		return HealthBucketOf(result) == HealthUnknown
+		return HealthBucketOf(result) == HealthInspectionError
 	case "quotachanges", "quota-changes", "quota_changes":
 		bucket := HealthBucketOf(result)
 		return bucket == HealthQuotaExhausted || bucket == HealthRecoverable

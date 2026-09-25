@@ -837,7 +837,6 @@ export function AccountInspectionPage() {
     accountIssues: t('monitoring.account_inspection_filter_account_issues'),
     quotaChanges: t('monitoring.account_inspection_filter_quota_changes'),
     highAvailable: t('monitoring.account_inspection_high_available'),
-    unknown: t('monitoring.account_inspection_health_unknown'),
     accountInvalid: t('monitoring.account_inspection_account_invalid'),
     requestError: t('monitoring.account_inspection_account_request_error'),
     quotaExhausted: t('monitoring.account_inspection_health_quota_exhausted'),
@@ -1299,8 +1298,6 @@ export function AccountInspectionPage() {
       manualDelete,
       manualDisable,
       manualEnable,
-      keep: result?.summary.keepCount ?? 0,
-      error: result?.summary.errorCount ?? 0,
     };
   }, [actionableActionCounts, autoExecutionCounts, result]);
 
@@ -1319,19 +1316,15 @@ export function AccountInspectionPage() {
   const scheduleStatusLabel = schedule?.enabled
     ? formatInspectionInterval(schedule.intervalMinutes, i18n.language)
     : settingDisabledLabel;
-  const autoExecutionResultLabel = !result
-    ? t('monitoring.account_inspection_auto_execute_pending')
-    : actionStats.autoTotal > 0
-      ? [
-          `${t('monitoring.account_inspection_action_enable')}: ${actionStats.autoEnable}`,
-          `${t('monitoring.account_inspection_action_disable')}: ${actionStats.autoDisable}`,
-          `${t('monitoring.account_inspection_action_delete')}: ${actionStats.autoDelete}`,
-          `${t('monitoring.account_inspection_action_quota_protection')}: ${actionStats.autoQuotaProtection}`,
-          `${t('monitoring.account_inspection_quota_recovery_enable_short')}: ${actionStats.autoQuotaRecovery}`,
-        ].join(' · ')
-      : t('monitoring.account_inspection_auto_execute_no_actions');
+  const autoExecutionItems = [
+    { key: 'enable', label: t('monitoring.account_inspection_action_enable'), count: actionStats.autoEnable },
+    { key: 'disable', label: t('monitoring.account_inspection_action_disable'), count: actionStats.autoDisable },
+    { key: 'delete', label: t('monitoring.account_inspection_action_delete'), count: actionStats.autoDelete },
+    { key: 'quota-protection', label: t('monitoring.account_inspection_action_quota_protection'), count: actionStats.autoQuotaProtection },
+    { key: 'quota-recovery', label: t('monitoring.account_inspection_quota_recovery_enable_short'), count: actionStats.autoQuotaRecovery },
+  ].filter((item) => item.count > 0);
   const showInspectionResults = useCallback((filter: ResultStatusFilter | ResultReasonFilter) => {
-    if (filter === 'all' || filter === 'accountIssues' || filter === 'quotaChanges' || filter === 'highAvailable' || filter === 'unknown') {
+    if (filter === 'all' || filter === 'accountIssues' || filter === 'quotaChanges' || filter === 'highAvailable') {
       setResultStatusFilter(filter);
       setResultReasonFilter(null);
     } else {
@@ -1364,15 +1357,15 @@ export function AccountInspectionPage() {
     : runStatus === 'failed'
       ? t('monitoring.account_inspection_results_error_empty')
       : t('monitoring.account_inspection_empty');
-  const accountIssueResultCount = displayedHealthCounts.authInvalid + displayedHealthCounts.inspectionError;
+  const inspectionErrorResultCount = displayedHealthCounts.inspectionError + (displayedHealthCounts.unknown ?? 0);
+  const accountIssueResultCount = displayedHealthCounts.authInvalid + inspectionErrorResultCount;
   const quotaChangeResultCount = displayedHealthCounts.quotaExhausted + displayedHealthCounts.recoverable;
   const resultStatusFilterOptions = useMemo(() => [
     { value: 'all', label: `${t('monitoring.account_inspection_filter_all')} · ${displayedHealthCounts.total}` },
     { value: 'accountIssues', label: `${t('monitoring.account_inspection_filter_account_issues')} · ${accountIssueResultCount}` },
     { value: 'quotaChanges', label: `${t('monitoring.account_inspection_filter_quota_changes')} · ${quotaChangeResultCount}` },
     { value: 'highAvailable', label: `${t('monitoring.account_inspection_high_available')} · ${displayedHealthCounts.healthy}` },
-    { value: 'unknown', label: `${t('monitoring.account_inspection_health_unknown')} · ${displayedHealthCounts.unknown ?? 0}` },
-  ], [accountIssueResultCount, displayedHealthCounts.healthy, displayedHealthCounts.total, displayedHealthCounts.unknown, quotaChangeResultCount, t]);
+  ], [accountIssueResultCount, displayedHealthCounts.healthy, displayedHealthCounts.total, quotaChangeResultCount, t]);
   const resultReasonLabels = useMemo<Record<ResultReasonFilter, string>>(() => ({
     accountInvalid: t('monitoring.account_inspection_account_invalid'),
     requestError: t('monitoring.account_inspection_account_request_error'),
@@ -1869,11 +1862,7 @@ export function AccountInspectionPage() {
                 </button>
                 <button type="button" className={`${styles.resultOverviewItem} ${styles.resultOverviewBad}`} onClick={() => showInspectionResults('requestError')} disabled={!result}>
                   <small>{t('monitoring.account_inspection_account_request_error')}</small>
-                  <strong>{displayedHealthCounts.inspectionError}</strong>
-                </button>
-                <button type="button" className={`${styles.resultOverviewItem} ${styles.resultOverviewWarn}`} onClick={() => showInspectionResults('unknown')} disabled={!result}>
-                  <small>{t('monitoring.account_inspection_health_unknown')}</small>
-                  <strong>{displayedHealthCounts.unknown ?? 0}</strong>
+                  <strong>{inspectionErrorResultCount}</strong>
                 </button>
               </div>
               {result?.runStats && Object.keys(result.runStats.providers).length > 0 ? (
@@ -1898,29 +1887,24 @@ export function AccountInspectionPage() {
               <div className={styles.strategyResultSection}>
                 <div className={styles.strategySectionHeader}>
                   <h3>{t('monitoring.account_inspection_auto_execution_breakdown')}</h3>
-                  {result ? <button type="button" onClick={() => showInspectionResults('accountInvalid')}>{t('monitoring.account_inspection_view_results')}</button> : null}
+                  {result ? <button type="button" onClick={() => showInspectionResults('all')}>{t('monitoring.account_inspection_view_results')}</button> : null}
                 </div>
                 {result ? (
-                  <>
+                  autoExecutionItems.length > 0 ? (
                     <div className={styles.strategyTotalsRow}>
-                      <span>{`${t('monitoring.account_inspection_action_enable')} ${actionStats.autoEnable}`}</span>
-                      <span>{`${t('monitoring.account_inspection_action_disable')} ${actionStats.autoDisable}`}</span>
-                      <span>{`${t('monitoring.account_inspection_action_delete')} ${actionStats.autoDelete}`}</span>
-                      <span>{`${t('monitoring.account_inspection_action_quota_protection')} ${actionStats.autoQuotaProtection}`}</span>
-                      <span>{`${t('monitoring.account_inspection_quota_recovery_enable_short')} ${actionStats.autoQuotaRecovery}`}</span>
-                      <span>{`${t('monitoring.account_inspection_action_keep')} ${actionStats.keep}`}</span>
+                      {autoExecutionItems.map((item) => <span key={item.key}>{`${item.label} ${item.count}`}</span>)}
                     </div>
-                    <div className={styles.strategyActivityRow}>
-                      <span className={styles.strategyActivityIcon} aria-hidden="true" />
-                      <span>{formatTimestamp(result.finishedAt, i18n.language)}</span>
-                      <strong>{autoExecutionResultLabel}</strong>
+                  ) : (
+                    <div className={styles.manualPendingEmpty}>
+                      <span aria-hidden="true">✓</span>
+                      <strong>{t('monitoring.account_inspection_auto_execute_no_actions')}</strong>
                     </div>
-                  </>
+                  )
                 ) : (
                   <div className={styles.manualPendingEmpty}>
                     <span aria-hidden="true">•</span>
                     <strong>{t('monitoring.account_inspection_auto_execution_waiting_title')}</strong>
-                    <small>{autoExecutionResultLabel}</small>
+                    <small>{t('monitoring.account_inspection_auto_execute_pending')}</small>
                   </div>
                 )}
               </div>

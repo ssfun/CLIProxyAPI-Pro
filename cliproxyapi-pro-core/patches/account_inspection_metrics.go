@@ -91,8 +91,6 @@ func inspectionMetricsStartAccount(ctx context.Context, provider string, queuedA
 		}
 		total.stats.Accounts++
 		switch {
-		case proinspection.HealthBucketOf(result) == proinspection.HealthUnknown:
-			total.stats.Unknown++
 		case result.Error != "" || result.ErrorCode != "":
 			total.stats.Failed++
 		default:

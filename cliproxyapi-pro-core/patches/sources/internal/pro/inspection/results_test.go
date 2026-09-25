@@ -23,6 +23,14 @@ func TestResultSemanticsClassifiesQuotaAndErrors(t *testing.T) {
 	if !IsRequestErrorResult(requestError) || HealthBucketOf(requestError) != HealthInspectionError {
 		t.Fatalf("request-error result = %+v", requestError)
 	}
+
+	incomplete := Result{Provider: "codex", ErrorCode: "inspection_incomplete"}
+	if HealthBucketOf(incomplete) != HealthInspectionError {
+		t.Fatalf("incomplete result bucket = %q, want %q", HealthBucketOf(incomplete), HealthInspectionError)
+	}
+	if !ResultMatchesFilter(incomplete, "requestError") || !ResultMatchesFilter(incomplete, "accountIssues") {
+		t.Fatal("incomplete result should be included in inspection-error filters")
+	}
 }
 
 func TestResultPaginationFiltersAndCopies(t *testing.T) {

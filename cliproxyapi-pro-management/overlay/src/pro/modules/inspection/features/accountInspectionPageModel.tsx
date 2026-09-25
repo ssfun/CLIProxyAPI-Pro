@@ -66,9 +66,9 @@ export const formatAccountInspectionDuration = (
   return parts.map((part) => t(part.key, { count: part.value })).join('');
 };
 
-export type ResultHealthStatus = 'healthy' | 'disabled' | 'authInvalid' | 'quotaExhausted' | 'inspectionError' | 'recoverable' | 'unknown';
+export type ResultHealthStatus = 'healthy' | 'disabled' | 'authInvalid' | 'quotaExhausted' | 'inspectionError' | 'recoverable';
 
-export type ResultStatusFilter = 'all' | 'accountIssues' | 'quotaChanges' | 'highAvailable' | 'unknown';
+export type ResultStatusFilter = 'all' | 'accountIssues' | 'quotaChanges' | 'highAvailable';
 
 export type ResultReasonFilter = 'accountInvalid' | 'requestError' | 'quotaExhausted' | 'recoverable';
 
@@ -262,7 +262,6 @@ const createEmptyFilterRows = (): Record<ResultFilter, InspectionResultViewRow[]
   requestError: [],
   quotaExhausted: [],
   recoverable: [],
-  unknown: [],
   highAvailable: [],
 });
 
@@ -280,7 +279,6 @@ export const healthToneClass: Record<ResultHealthStatus, string> = {
   quotaExhausted: styles.healthQuota,
   inspectionError: styles.healthError,
   recoverable: styles.healthRecoverable,
-  unknown: styles.healthQuota,
 };
 
 const healthLabelKey: Record<ResultHealthStatus, string> = {
@@ -290,7 +288,6 @@ const healthLabelKey: Record<ResultHealthStatus, string> = {
   quotaExhausted: 'monitoring.account_inspection_health_quota_exhausted',
   inspectionError: 'monitoring.account_inspection_account_request_error',
   recoverable: 'monitoring.account_inspection_health_recoverable',
-  unknown: 'monitoring.account_inspection_health_unknown',
 };
 
 const extractHealthHttpStatusCode = (item: AccountInspectionResultItem) => {
@@ -380,7 +377,6 @@ export const isResultRequestError = (item: AccountInspectionResultItem) => {
 };
 
 export const resolveResultHealthStatus = (item: AccountInspectionResultItem): ResultHealthStatus => {
-  if (item.errorCode === 'inspection_incomplete') return 'unknown';
   if (item.isQuota) return 'quotaExhausted';
   if (isResultAccountInvalid(item)) return 'authInvalid';
   if (isResultRequestError(item)) return 'inspectionError';
@@ -456,7 +452,6 @@ export function InspectionErrorDetailsPanel({
     quotaExhausted: 'warning',
     authInvalid: 'danger',
     inspectionError: 'danger',
-    unknown: 'warning',
   };
 
   return (
@@ -860,7 +855,6 @@ export const buildInspectionResultsViewState = (items: AccountInspectionResultIt
     quotaExhausted: 0,
     requestError: 0,
     recoverable: 0,
-    unknown: 0,
     pending: 0,
   };
   const rows: InspectionResultViewRow[] = [];
@@ -927,11 +921,6 @@ export const buildInspectionResultsViewState = (items: AccountInspectionResultIt
         row = pushResultRow(filterRows.quotaChanges, item, healthStatus, row);
         filterRowCounts.recoverable += 1;
         row = pushResultRow(filterRows.recoverable, item, healthStatus, row);
-        break;
-      case 'unknown':
-        healthCounts.unknown += 1;
-        filterRowCounts.unknown += 1;
-        row = pushResultRow(filterRows.unknown, item, healthStatus, row);
         break;
     }
 
@@ -1129,8 +1118,6 @@ const formatInspectionVerdictPrimary = (
   if (item.tokenRefreshStatus === 'failed') return t('monitoring.account_inspection_verdict_token_refresh_failed');
 
   switch (healthStatus) {
-    case 'unknown':
-      return t('monitoring.account_inspection_health_unknown');
     case 'inspectionError':
       return t('monitoring.account_inspection_verdict_probe_error');
     case 'authInvalid':

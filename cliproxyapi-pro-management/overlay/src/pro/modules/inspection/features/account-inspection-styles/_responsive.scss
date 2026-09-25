@@ -254,23 +254,8 @@
     grid-column: 1 / -1;
   }
 
-  .strategyTotalsRow {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .strategyTotalsRow::-webkit-scrollbar {
-    display: none;
-  }
-
-  .strategyActivityRow,
   .inspectionOperationGrid .actionBreakdownCard div {
     grid-template-columns: 1fr;
-  }
-
-  .strategyActivityRow {
-    justify-items: start;
   }
 
   .executionTaskGrid,

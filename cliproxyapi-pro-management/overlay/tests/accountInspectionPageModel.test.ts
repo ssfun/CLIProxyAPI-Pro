@@ -164,6 +164,22 @@ describe('account inspection page model', () => {
     expect(view.actionableActionCounts).toMatchObject({ delete: 1, disable: 1 });
   });
 
+  test('merges incomplete results into inspection errors', () => {
+    const incomplete = result({
+      key: 'incomplete',
+      statusCode: null,
+      errorCode: 'inspection_incomplete',
+      error: 'inspection did not finish',
+    });
+    const view = buildInspectionResultsViewState([incomplete]);
+
+    expect(resolveResultHealthStatus(incomplete)).toBe('inspectionError');
+    expect(view.healthCounts).toMatchObject({ total: 1, inspectionError: 1, unknown: 0 });
+    expect(view.filterRowCounts).toMatchObject({ accountIssues: 1, requestError: 1 });
+    expect(view.filterRows.accountIssues.map(({ item }) => item.key)).toEqual(['incomplete']);
+    expect(view.filterRows.requestError.map(({ item }) => item.key)).toEqual(['incomplete']);
+  });
+
   test('routes only live quota enable actions through scheduling recovery', () => {
     const quotaRecovery = result({ key: 'quota-recovery', action: 'enable', quotaCooling: true });
     const manualEnable = result({ key: 'manual-enable', action: 'enable', quotaCooling: true, disabled: true });
