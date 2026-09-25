@@ -155,6 +155,12 @@ def row(name):
     return next(entry for entry in body["status"]["results"] if entry["fileName"] == name)
 
 
+def filtered_total(result_filter, search):
+    query = urllib.parse.urlencode({"details": 1, "result_filter": result_filter, "result_search": search})
+    body = ok("GET", f"/status?{query}")
+    return body["status"]["resultsPage"]["total"]
+
+
 def inspect(current):
     result = ok("POST", "/inspect-one?details=1", {"item": item(current)})
     return next(entry for entry in result["status"]["results"] if entry["key"] == current["key"])
@@ -265,6 +271,25 @@ try:
     assert xai_stats["accounts"] == 14 and xai_stats["httpRequests"] == 14, stats
     assert xai_stats["realProbeRequests"] == 14 and stats["wallTimeMs"] >= 0, stats
     note("provider_metrics_and_rate_limit", wallTimeMs=stats["wallTimeMs"], provider=xai_stats, rateLimited=limited["errorCode"], autoRequestErrorAction="none", retained=["xai-i.json", "xai-j.json"])
+
+    # Exact result filters are the canonical UI contract. Legacy grouped filter
+    # names remain accepted so stored links and older Management clients keep working.
+    exact_filters = {
+        "accountInvalid": "xai-b.json",
+        "quotaExhausted": "xai-a.json",
+        "requestError": "xai-j.json",
+        "healthy": "xai-c.json",
+    }
+    for result_filter, file_name in exact_filters.items():
+        assert filtered_total(result_filter, file_name) == 1, (result_filter, file_name)
+    legacy_filters = {
+        "accountIssues": "xai-b.json",
+        "quotaChanges": "xai-a.json",
+        "highAvailable": "xai-c.json",
+    }
+    for result_filter, file_name in legacy_filters.items():
+        assert filtered_total(result_filter, file_name) == 1, (result_filter, file_name)
+    note("exact_result_filters_with_legacy_aliases", exact=list(exact_filters), legacy=list(legacy_filters))
 
     # A manual confirmation uses one Responses request for official xAI.
     deep_schedule = ok("GET", "/status?details=1")["schedule"]

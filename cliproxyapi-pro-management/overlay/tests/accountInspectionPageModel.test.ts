@@ -161,8 +161,9 @@ describe('account inspection page model', () => {
     expect(view.healthCounts.authInvalid).toBe(1);
     expect(view.healthCounts.quotaExhausted).toBe(1);
     expect(view.filterRowCounts.all).toBe(3);
-    expect(view.filterRowCounts.accountIssues).toBe(1);
-    expect(view.filterRowCounts.quotaChanges).toBe(1);
+    expect(view.filterRowCounts.accountInvalid).toBe(1);
+    expect(view.filterRowCounts.quotaExhausted).toBe(1);
+    expect(view.filterRowCounts.healthy).toBe(1);
     expect(view.filterRowCounts.pending).toBe(2);
     expect(view.actionableActionCounts).toMatchObject({ delete: 1, disable: 1 });
   });
@@ -196,8 +197,7 @@ describe('account inspection page model', () => {
 
     expect(resolveResultHealthStatus(incomplete)).toBe('inspectionError');
     expect(view.healthCounts).toMatchObject({ total: 1, inspectionError: 1, unknown: 0 });
-    expect(view.filterRowCounts).toMatchObject({ accountIssues: 1, requestError: 1 });
-    expect(view.filterRows.accountIssues.map(({ item }) => item.key)).toEqual(['incomplete']);
+    expect(view.filterRowCounts).toMatchObject({ requestError: 1 });
     expect(view.filterRows.requestError.map(({ item }) => item.key)).toEqual(['incomplete']);
   });
 

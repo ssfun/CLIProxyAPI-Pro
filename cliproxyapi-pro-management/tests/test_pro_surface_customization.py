@@ -339,6 +339,32 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
         self.assertIn("showInspectionResults('all')", strategy)
         self.assertNotIn("'recoverable' | 'unknown'", model)
 
+    def test_account_inspection_uses_exact_result_filters(self) -> None:
+        inspection = (PRO_ROOT / 'modules/inspection/AccountInspectionPage.tsx').read_text()
+        model = (PRO_ROOT / 'modules/inspection/features/accountInspectionPageModel.tsx').read_text()
+        locales = json.loads(LOCALES.read_text())
+        self.assertIn("export type ResultStatusFilter = 'all' | 'accountInvalid' | 'quotaExhausted' | 'requestError' | 'recoverable' | 'healthy';", model)
+        self.assertNotIn("'accountIssues'", model)
+        self.assertNotIn("'quotaChanges'", model)
+        self.assertNotIn("'highAvailable'", model)
+        self.assertIn("useState<ResultStatusFilter>('all')", inspection)
+        self.assertIn("showInspectionResults('healthy')", inspection)
+        self.assertNotIn("showInspectionResults('highAvailable')", inspection)
+        self.assertNotIn("resultReasonFilter", inspection)
+        self.assertIn("disabled={resultStatusFilter === 'healthy'}", inspection)
+        self.assertNotIn("!hasAutoExecutionPolicy ? (", inspection)
+        expected_recovered_labels = {
+            'en.json': 'Quota Recovered',
+            'ru.json': 'Квота восстановлена',
+            'zh-CN.json': '配额已恢复',
+            'zh-TW.json': '配額已恢復',
+        }
+        for locale_name, label in expected_recovered_labels.items():
+            self.assertEqual(
+                label,
+                locales[locale_name]['monitoring']['account_inspection_health_recoverable'],
+            )
+
     def test_detail_data_is_cleared_only_after_the_exit_animation(self) -> None:
         surface = SURFACE.read_text()
         monitoring = (PRO_ROOT / 'modules/monitoring/MonitoringCenterPage.tsx').read_text()

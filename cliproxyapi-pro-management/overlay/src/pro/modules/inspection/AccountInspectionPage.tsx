@@ -12,7 +12,6 @@ import {
   IconDownload,
   IconRefreshCw,
   IconSearch,
-  IconX,
 } from '@/components/ui/icons';
 import { getAuthFileIcon } from '@/features/authFiles/constants';
 import {
@@ -94,7 +93,6 @@ import {
   type ManualAccountInspectionAction,
   type ProviderAccountStats,
   type ResolvedTheme,
-  type ResultReasonFilter,
   type ResultStatusFilter,
   type SummaryCard,
 } from '@/pro/modules/inspection/features/accountInspectionPageModel';
@@ -149,10 +147,6 @@ export function AccountInspectionPage() {
   const geminiCliQuota = useQuotaStore((state) => state.geminiCliQuota);
   const kimiQuota = useQuotaStore((state) => state.kimiQuota);
   const xaiQuota = useQuotaStore((state) => state.xaiQuota);
-  const [initialAutoExecutionPolicy] = useState(() =>
-    hasAccountInspectionAutoExecutePolicies(loadAccountInspectionConfigurableSettings())
-  );
-
   const [backendState, dispatchBackendState] = useReducer(
     inspectionBackendReducer,
     undefined,
@@ -192,11 +186,8 @@ export function AccountInspectionPage() {
   }, [activeSurface, closeSurface, openSurface]);
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [logsCollapsed, setLogsCollapsed] = useState(false);
-  const [resultStatusFilter, setResultStatusFilter] = useState<ResultStatusFilter>(
-    initialAutoExecutionPolicy ? 'accountIssues' : 'all'
-  );
-  const [resultReasonFilter, setResultReasonFilter] = useState<ResultReasonFilter | null>(null);
-  const [resultPendingOnly, setResultPendingOnly] = useState(!initialAutoExecutionPolicy);
+  const [resultStatusFilter, setResultStatusFilter] = useState<ResultStatusFilter>('all');
+  const [resultPendingOnly, setResultPendingOnly] = useState(false);
   const [selectedResultProvider, setSelectedResultProvider] = useState<string>(ACCOUNT_INSPECTION_ALL_PROVIDER_TYPE);
   const [resultSearchInput, setResultSearchInput] = useState('');
   const deferredResultSearchInput = useDeferredValue(resultSearchInput);
@@ -242,7 +233,7 @@ export function AccountInspectionPage() {
   const [exportingAuthFiles, setExportingAuthFiles] = useState(false);
   const [selectedAssetProvider, setSelectedAssetProvider] = useState<string>('all');
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => getDocumentTheme());
-  const activeResultFilter = resultReasonFilter ?? resultStatusFilter;
+  const activeResultFilter = resultStatusFilter;
   const paginationCopy = resolveProPaginationCopy(i18n.resolvedLanguage ?? i18n.language);
   const logListRef = useRef<HTMLDivElement | null>(null);
   const resultsPanelRef = useRef<HTMLDivElement | null>(null);
@@ -267,7 +258,6 @@ export function AccountInspectionPage() {
     const query = focus.fileName || focus.authIndex || focus.authId;
     if (!query) return;
     setResultStatusFilter('all');
-    setResultReasonFilter(null);
     setResultPendingOnly(false);
     setSelectedResultProvider(ACCOUNT_INSPECTION_ALL_PROVIDER_TYPE);
     setResultSearchInput(query);
@@ -807,16 +797,6 @@ export function AccountInspectionPage() {
   const displayedHealthCounts = result?.healthCounts ?? healthCounts;
 
   const hasAutoExecutionPolicy = hasAccountInspectionAutoExecutePolicies(inspectionSettings);
-  const previousAutoExecutionPolicyRef = useRef(hasAutoExecutionPolicy);
-
-  useEffect(() => {
-    if (previousAutoExecutionPolicyRef.current === hasAutoExecutionPolicy) return;
-    previousAutoExecutionPolicyRef.current = hasAutoExecutionPolicy;
-    setResultReasonFilter(null);
-    setResultStatusFilter(hasAutoExecutionPolicy ? 'accountIssues' : 'all');
-    setResultPendingOnly(!hasAutoExecutionPolicy);
-  }, [hasAutoExecutionPolicy]);
-
   const filteredResultRows = useMemo(() => {
     const rows = filterRows[activeResultFilter];
     return resultPendingOnly
@@ -833,13 +813,11 @@ export function AccountInspectionPage() {
   const allVisibleResultsSelected = selectableVisibleResultRows.length > 0 && selectedVisibleResultRows.length === selectableVisibleResultRows.length;
   const batchFilterLabel = ({
     all: t('monitoring.account_inspection_filter_all'),
-    accountIssues: t('monitoring.account_inspection_filter_account_issues'),
-    quotaChanges: t('monitoring.account_inspection_filter_quota_changes'),
-    highAvailable: t('monitoring.account_inspection_high_available'),
     accountInvalid: t('monitoring.account_inspection_account_invalid'),
     requestError: t('monitoring.account_inspection_account_request_error'),
     quotaExhausted: t('monitoring.account_inspection_health_quota_exhausted'),
     recoverable: t('monitoring.account_inspection_health_recoverable'),
+    healthy: t('monitoring.account_inspection_health_healthy'),
   } as Record<typeof activeResultFilter, string>)[activeResultFilter];
 
   const filteredLogs = useMemo(
@@ -1322,14 +1300,8 @@ export function AccountInspectionPage() {
     { key: 'quota-protection', label: t('monitoring.account_inspection_action_quota_protection'), count: actionStats.autoQuotaProtection },
     { key: 'quota-recovery', label: t('monitoring.account_inspection_quota_recovery_enable_short'), count: actionStats.autoQuotaRecovery },
   ].filter((item) => item.count > 0);
-  const showInspectionResults = useCallback((filter: ResultStatusFilter | ResultReasonFilter) => {
-    if (filter === 'all' || filter === 'accountIssues' || filter === 'quotaChanges' || filter === 'highAvailable') {
-      setResultStatusFilter(filter);
-      setResultReasonFilter(null);
-    } else {
-      setResultStatusFilter(filter === 'accountInvalid' || filter === 'requestError' ? 'accountIssues' : 'quotaChanges');
-      setResultReasonFilter(filter);
-    }
+  const showInspectionResults = useCallback((filter: ResultStatusFilter) => {
+    setResultStatusFilter(filter);
     setResultPendingOnly(false);
     requestAnimationFrame(() => resultsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }, []);
@@ -1357,20 +1329,14 @@ export function AccountInspectionPage() {
       ? t('monitoring.account_inspection_results_error_empty')
       : t('monitoring.account_inspection_empty');
   const inspectionErrorResultCount = displayedHealthCounts.inspectionError + (displayedHealthCounts.unknown ?? 0);
-  const accountIssueResultCount = displayedHealthCounts.authInvalid + inspectionErrorResultCount;
-  const quotaChangeResultCount = displayedHealthCounts.quotaExhausted + displayedHealthCounts.recoverable;
   const resultStatusFilterOptions = useMemo(() => [
     { value: 'all', label: `${t('monitoring.account_inspection_filter_all')} · ${displayedHealthCounts.total}` },
-    { value: 'accountIssues', label: `${t('monitoring.account_inspection_filter_account_issues')} · ${accountIssueResultCount}` },
-    { value: 'quotaChanges', label: `${t('monitoring.account_inspection_filter_quota_changes')} · ${quotaChangeResultCount}` },
-    { value: 'highAvailable', label: `${t('monitoring.account_inspection_high_available')} · ${displayedHealthCounts.healthy}` },
-  ], [accountIssueResultCount, displayedHealthCounts.healthy, displayedHealthCounts.total, quotaChangeResultCount, t]);
-  const resultReasonLabels = useMemo<Record<ResultReasonFilter, string>>(() => ({
-    accountInvalid: t('monitoring.account_inspection_account_invalid'),
-    requestError: t('monitoring.account_inspection_account_request_error'),
-    quotaExhausted: t('monitoring.account_inspection_health_quota_exhausted'),
-    recoverable: t('monitoring.account_inspection_health_recoverable'),
-  }), [t]);
+    { value: 'accountInvalid', label: `${t('monitoring.account_inspection_account_invalid')} · ${displayedHealthCounts.authInvalid}` },
+    { value: 'quotaExhausted', label: `${t('monitoring.account_inspection_health_quota_exhausted')} · ${displayedHealthCounts.quotaExhausted}` },
+    { value: 'requestError', label: `${t('monitoring.account_inspection_account_request_error')} · ${inspectionErrorResultCount}` },
+    { value: 'recoverable', label: `${t('monitoring.account_inspection_health_recoverable')} · ${displayedHealthCounts.recoverable}` },
+    { value: 'healthy', label: `${t('monitoring.account_inspection_health_healthy')} · ${displayedHealthCounts.healthy}` },
+  ], [displayedHealthCounts.authInvalid, displayedHealthCounts.healthy, displayedHealthCounts.quotaExhausted, displayedHealthCounts.recoverable, displayedHealthCounts.total, inspectionErrorResultCount, t]);
   const resultBulkActionOptions = useMemo(() => [
     { value: 'suggested', label: t('monitoring.account_inspection_bulk_action_suggested') },
     { value: 'recheck', label: t('monitoring.account_inspection_bulk_action_recheck') },
@@ -1843,8 +1809,8 @@ export function AccountInspectionPage() {
                   <small>{t('monitoring.account_inspection_result_total')}</small>
                   <strong>{displayedHealthCounts.total}</strong>
                 </button>
-                <button type="button" className={`${styles.resultOverviewItem} ${styles.resultOverviewGood}`} onClick={() => showInspectionResults('highAvailable')} disabled={!result}>
-                  <small>{t('monitoring.account_inspection_high_available')}</small>
+                <button type="button" className={`${styles.resultOverviewItem} ${styles.resultOverviewGood}`} onClick={() => showInspectionResults('healthy')} disabled={!result}>
+                  <small>{t('monitoring.account_inspection_health_healthy')}</small>
                   <strong>{displayedHealthCounts.healthy}</strong>
                 </button>
                 <button type="button" className={styles.resultOverviewItem} onClick={() => showInspectionResults('recoverable')} disabled={!result}>
@@ -2042,7 +2008,7 @@ export function AccountInspectionPage() {
             <div className={[
               styles.filterGrid,
               styles.resultToolbar,
-              !hasAutoExecutionPolicy ? styles.resultToolbarWithPending : '',
+              styles.resultToolbarWithPending,
             ].filter(Boolean).join(' ')}>
               <Input
                 type="search"
@@ -2065,38 +2031,20 @@ export function AccountInspectionPage() {
                 onChange={(value) => {
                   const nextFilter = value as ResultStatusFilter;
                   setResultStatusFilter(nextFilter);
-                  setResultReasonFilter(null);
-                  if (nextFilter === 'highAvailable') setResultPendingOnly(false);
+                  if (nextFilter === 'healthy') setResultPendingOnly(false);
                 }}
                 ariaLabel={t('monitoring.account_inspection_result')}
               />
-              {!hasAutoExecutionPolicy ? (
-                <div className={styles.resultPendingToggle}>
-                  <ToggleSwitch
-                    checked={resultPendingOnly}
-                    onChange={setResultPendingOnly}
-                    label={t('monitoring.account_inspection_filter_pending_only')}
-                    ariaLabel={t('monitoring.account_inspection_filter_pending_only')}
-                    disabled={resultStatusFilter === 'highAvailable'}
-                  />
-                </div>
-              ) : null}
-            </div>
-            {resultReasonFilter ? (
-              <div className={styles.resultActiveFilters}>
-                <span className={styles.resultReasonChip}>
-                  {resultReasonLabels[resultReasonFilter]}
-                  <button
-                    type="button"
-                    onClick={() => setResultReasonFilter(null)}
-                    title={t('common.close')}
-                    aria-label={t('common.close')}
-                  >
-                    <IconX size={13} />
-                  </button>
-                </span>
+              <div className={styles.resultPendingToggle}>
+                <ToggleSwitch
+                  checked={resultPendingOnly}
+                  onChange={setResultPendingOnly}
+                  label={t('monitoring.account_inspection_filter_pending_only')}
+                  ariaLabel={t('monitoring.account_inspection_filter_pending_only')}
+                  disabled={resultStatusFilter === 'healthy'}
+                />
               </div>
-            ) : null}
+            </div>
             {resultPagination.total > 0 ? (
               <div className={styles.resultSelectionBar}>
                 <div className={styles.resultSelectionSummary}>
