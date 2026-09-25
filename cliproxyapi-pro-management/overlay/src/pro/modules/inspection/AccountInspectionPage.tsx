@@ -32,7 +32,6 @@ import {
 } from '@/pro/modules/inspection/features/accountInspection';
 import { readInspectionFocusLocationState } from '@/pro/shared/inspectionNavigation';
 import { SchedulingRecoveryDialog } from './SchedulingRecoveryDialog';
-import { InspectionRecordsPanel } from './InspectionRecordsPanel';
 import { ProDetailDialog, ProSettingsSheet } from '@/pro/shared/ProSurface';
 import { useProSurfaceState } from '@/pro/shared/useProSurfaceState';
 import {
@@ -2472,12 +2471,7 @@ export function AccountInspectionPage() {
           </div>
         )}
       >
-        {selectedDetailResult ? (
-          <>
-            <InspectionErrorDetailsPanel item={selectedDetailResult} t={t} />
-            <InspectionRecordsPanel key={`${selectedDetailResult.key}:${selectedDetailResult.resultRef || ''}`} item={selectedDetailResult} />
-          </>
-        ) : null}
+        {selectedDetailResult ? <InspectionErrorDetailsPanel item={selectedDetailResult} t={t} /> : null}
       </ProDetailDialog>
 
       <SchedulingRecoveryDialog

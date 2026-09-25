@@ -226,6 +226,24 @@ func TestAccountInspectionScheduleDoesNotRegisterPatchRoute(t *testing.T) {
 	}
 }
 
+func TestAccountInspectionDoesNotRegisterDetailHistoryRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	handler := &Handler{}
+	handler.RegisterAccountInspectionRoutes(engine.Group("/v0/management"))
+
+	for _, path := range []string{
+		"/v0/management/account-inspection/history",
+		"/v0/management/account-inspection/operations",
+	} {
+		recorder := httptest.NewRecorder()
+		engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("GET %s status = %d body=%s, want not found", path, recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
 func TestInspectOneAccountReturnsConflictWhenInspectionIsRunning(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := &Handler{}

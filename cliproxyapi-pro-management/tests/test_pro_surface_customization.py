@@ -84,6 +84,17 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
         self.assertNotIn('.slice(0, 5)', inspection_model)
         self.assertNotIn('-webkit-line-clamp', inspection_styles)
 
+    def test_inspection_detail_omits_history_and_operation_modules(self) -> None:
+        inspection = (PRO_ROOT / 'modules/inspection/AccountInspectionPage.tsx').read_text()
+        api = (PRO_ROOT / 'modules/inspection/api.ts').read_text()
+        records = PRO_ROOT / 'modules/inspection/InspectionRecordsPanel.tsx'
+        self.assertFalse(records.exists())
+        self.assertNotIn('InspectionRecordsPanel', inspection)
+        self.assertNotIn('AccountInspectionHistoryResponse', api)
+        self.assertNotIn('AccountInspectionOperationsResponse', api)
+        self.assertNotIn('getHistory:', api)
+        self.assertNotIn('getOperations:', api)
+
     def test_workspace_settings_use_sheets_and_shared_footer_contract(self) -> None:
         monitoring_settings = (PRO_ROOT / 'modules/monitoring/features/components/MonitoringSettingsModal.tsx').read_text()
         prices = (PRO_ROOT / 'modules/monitoring/features/components/ModelPriceManagerModal.tsx').read_text()

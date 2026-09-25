@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
   buildAuthFileAccountStats,
   buildActionPreview,
@@ -13,6 +14,7 @@ import {
   isResultRequestError,
   isSchedulingRecoveryAction,
   isXaiQuotaLow,
+  InspectionErrorDetailsPanel,
   partitionInspectionActionTargets,
   resolveAccountInspectionAccountLabel,
   resolveAccountInspectionPlanLabel,
@@ -178,6 +180,39 @@ describe('account inspection page model', () => {
     expect(view.filterRowCounts).toMatchObject({ accountIssues: 1, requestError: 1 });
     expect(view.filterRows.accountIssues.map(({ item }) => item.key)).toEqual(['incomplete']);
     expect(view.filterRows.requestError.map(({ item }) => item.key)).toEqual(['incomplete']);
+  });
+
+  test('organizes inspection details around the current observation and collapses diagnostics', () => {
+    const labels: Record<string, string> = {
+      'monitoring.account_inspection_account_details_title': '账号信息',
+      'monitoring.account_inspection_observation_details_title': '本次观察',
+      'monitoring.account_inspection_diagnostics_title': '诊断信息',
+      'monitoring.account_inspection_technical_details_title': '技术信息',
+      'monitoring.account_inspection_raw_error_response': '原始错误响应',
+    };
+    const t = ((key: string) => labels[key] ?? key) as TFunction;
+    const html = renderToStaticMarkup(InspectionErrorDetailsPanel({
+      item: result({
+        statusCode: 401,
+        errorCode: 'inspection_http_error',
+        error: 'Invalid credentials',
+        errorDetail: '{"error":"Invalid credentials"}',
+        runId: 'run-1',
+        resultRef: 'result-1',
+        registrationEpoch: 'epoch-1',
+      }),
+      t,
+    }));
+
+    expect(html).toContain('账号信息');
+    expect(html).toContain('本次观察');
+    expect(html).toContain('<details');
+    expect(html).toContain('诊断信息');
+    expect(html).toContain('技术信息');
+    expect(html).toContain('原始错误响应');
+    expect(html).not.toContain('<details open=""');
+    expect(html.indexOf('账号信息')).toBeLessThan(html.indexOf('本次观察'));
+    expect(html.indexOf('本次观察')).toBeLessThan(html.indexOf('诊断信息'));
   });
 
   test('routes only live quota enable actions through scheduling recovery', () => {

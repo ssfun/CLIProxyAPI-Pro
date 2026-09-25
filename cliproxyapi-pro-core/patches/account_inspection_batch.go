@@ -81,10 +81,33 @@ func (operation *inspectionBatchOperation) snapshot() json.RawMessage {
 	return data
 }
 func (h *Handler) RegisterAccountInspectionBatchRoutes(group *gin.RouterGroup) {
+	group.GET("/account-inspection/batches", h.ListAccountInspectionBatches)
 	group.POST("/account-inspection/batches/preflight", h.PreflightAccountInspectionBatch)
 	group.GET("/account-inspection/batches/:operationId", h.GetAccountInspectionBatch)
 	group.POST("/account-inspection/batches/:operationId/execute", h.ExecuteAccountInspectionBatch)
 	group.POST("/account-inspection/batches/:operationId/retry", h.RetryAccountInspectionBatch)
+}
+func inspectionBatchPage(c *gin.Context, total int) (int, int, accountInspectionPageInfo) {
+	page := parseAccountInspectionQueryInt(c, "page", 1)
+	if page < 1 {
+		page = 1
+	}
+	size := parseAccountInspectionQueryInt(c, "page_size", 20)
+	if size < 1 {
+		size = 20
+	}
+	if size > 100 {
+		size = 100
+	}
+	start := (page - 1) * size
+	if start > total {
+		start = total
+	}
+	end := start + size
+	if end > total {
+		end = total
+	}
+	return start, end, proinspection.ResultPageInfo(total, page, size)
 }
 func (h *Handler) preflightInspectionBatch(kind string, items []accountInspectionActionItem, refresh bool) (*inspectionBatchOperation, error) {
 	if kind != "inspect" && kind != "action" && kind != "recover" {
@@ -860,7 +883,7 @@ func (h *Handler) ListAccountInspectionBatches(c *gin.Context) {
 		items = append(items, operation)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt > items[j].CreatedAt })
-	start, end, page := inspectionEvidencePage(c, len(items))
+	start, end, page := inspectionBatchPage(c, len(items))
 	output := make([]json.RawMessage, 0, end-start)
 	for _, operation := range items[start:end] {
 		output = append(output, operation.snapshot())

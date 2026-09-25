@@ -396,54 +396,61 @@ export function InspectionErrorDetailsPanel({
   const httpStatusCode = extractHealthHttpStatusCode(item);
   const errorPresentation = buildInspectionErrorPresentation(item);
   const accountItems = [
-    { label: t('monitoring.account_label'), value: resolveAccountInspectionAccountLabel(item) },
+    { label: t('monitoring.account_label'), value: resolveAccountInspectionAccountLabel(item), mono: false },
     { label: t('monitoring.account_inspection_file_name'), value: item.fileName },
-    { label: t('monitoring.filter_provider'), value: item.provider },
+    { label: t('monitoring.filter_provider'), value: item.provider, mono: false },
     {
       label: t('monitoring.account_inspection_enabled_status'),
       value: item.executedEffect === 'delete' ? t('monitoring.account_inspection_effect_delete') : formatCurrentStateLabel(item, t),
+      mono: false,
     },
   ].filter((detail) => detail.value);
-  const inspectionItems = [
+  const observationItems = [
     {
       label: t('monitoring.account_inspection_observed_at'),
       value: item.observedAt ? new Date(item.observedAt).toLocaleString() : t('monitoring.account_inspection_observation_not_recorded'),
+      mono: false,
     },
     {
       label: t('monitoring.account_inspection_observation_origin'),
       value: item.parentResultRef
         ? t('monitoring.account_inspection_observation_recheck')
         : item.runId ? t('monitoring.account_inspection_observation_full_run') : t('monitoring.account_inspection_observation_not_recorded'),
+      mono: false,
     },
-    { label: t('monitoring.account_inspection_run_id'), value: item.runId || t('monitoring.account_inspection_observation_not_recorded') },
-    { label: t('monitoring.account_inspection_registration_epoch'), value: item.registrationEpoch || '' },
-    { label: t('monitoring.account_inspection_parent_result_ref'), value: item.parentResultRef || '' },
-    { label: t('monitoring.account_inspection_result_ref'), value: item.resultRef || '' },
     { label: t('monitoring.account_inspection_http_status'), value: httpStatusCode !== null ? String(httpStatusCode) : '' },
     { label: t('monitoring.account_inspection_error_code'), value: item.errorCode?.trim() || '' },
-    { label: t('monitoring.account_inspection_used_percent'), value: item.usedPercent !== null ? `${item.usedPercent}%` : '' },
-    { label: t('monitoring.account_inspection_token_status'), value: formatTokenRefreshLabel(item, t) },
-    { label: t('monitoring.account_inspection_next_action'), value: formatActionLabel(item.action, t) },
-    { label: t('monitoring.account_inspection_reason'), value: item.actionReason?.trim() || '' },
+    { label: t('monitoring.account_inspection_used_percent'), value: item.usedPercent !== null ? `${item.usedPercent}%` : '', mono: false },
+    { label: t('monitoring.account_inspection_token_status'), value: formatTokenRefreshLabel(item, t), mono: false },
+    { label: t('monitoring.account_inspection_next_action'), value: formatActionLabel(item.action, t), mono: false },
+    { label: t('monitoring.account_inspection_reason'), value: item.actionReason?.trim() || '', mono: false },
     ...(item.isQuota && item.action === 'disable'
-      ? [{ label: t('monitoring.account_inspection_quota_protection'), value: t('monitoring.account_inspection_quota_protection_detail') }]
+      ? [{ label: t('monitoring.account_inspection_quota_protection'), value: t('monitoring.account_inspection_quota_protection_detail'), mono: false }]
       : []),
     ...(item.executed
-      ? [{ label: t('monitoring.account_inspection_suggestion_processed'), value: t('monitoring.account_inspection_suggestion_processed_detail') }]
+      ? [{ label: t('monitoring.account_inspection_suggestion_processed'), value: t('monitoring.account_inspection_suggestion_processed_detail'), mono: false }]
       : []),
     ...(item.executedEffect
       ? [{
           label: t('monitoring.account_inspection_last_execution'),
           value: `${t(`monitoring.account_inspection_effect_${item.executedEffect}`)}${item.executedAt ? ` · ${new Date(item.executedAt).toLocaleString()}` : ''}`,
+          mono: false,
         }]
       : item.executedAction
       ? [{
           label: t('monitoring.account_inspection_last_manual_override'),
           value: `${formatActionLabel(item.executedAction, t)}${item.executedAt ? ` · ${new Date(item.executedAt).toLocaleString()}` : ''}`,
+          mono: false,
         }]
       : item.executeError
-        ? [{ label: t('monitoring.account_inspection_execution_error'), value: item.executeError }]
+        ? [{ label: t('monitoring.account_inspection_execution_error'), value: item.executeError, mono: false }]
         : []),
+  ].filter((detail) => detail.value);
+  const technicalItems = [
+    { label: t('monitoring.account_inspection_run_id'), value: item.runId || '' },
+    { label: t('monitoring.account_inspection_registration_epoch'), value: item.registrationEpoch || '' },
+    { label: t('monitoring.account_inspection_parent_result_ref'), value: item.parentResultRef || '' },
+    { label: t('monitoring.account_inspection_result_ref'), value: item.resultRef || '' },
   ].filter((detail) => detail.value);
   const toneByHealth: Record<ResultHealthStatus, ProInformationDetailsTone> = {
     healthy: 'good',
@@ -455,23 +462,49 @@ export function InspectionErrorDetailsPanel({
   };
 
   return (
-    <ProInformationDetails
-      className={styles.informationDetailsTheme}
-      tone={toneByHealth[healthStatus]}
-      status={(
-        <span className={`${styles.healthBadge} ${healthToneClass[healthStatus]}`}>
-          {buildHealthStatusLabel(item, healthStatus, t)}
-        </span>
-      )}
-      context={resolveProviderDisplayLabel(item.provider)}
-      summary={errorPresentation.summary || formatInspectionVerdictPrimary(item, healthStatus, t)}
-      groups={[
-        { title: t('monitoring.account_inspection_account_summary_title'), items: accountItems },
-        { title: t('monitoring.account_inspection_inspection_summary_title'), items: inspectionItems },
-      ]}
-      detailLabel={errorPresentation.detail ? t('monitoring.account_inspection_raw_error_response') : undefined}
-      detail={errorPresentation.detail ? <pre>{errorPresentation.detail}</pre> : undefined}
-    />
+    <div className={styles.inspectionDetailStack}>
+      <ProInformationDetails
+        className={styles.informationDetailsTheme}
+        tone={toneByHealth[healthStatus]}
+        status={(
+          <span className={`${styles.healthBadge} ${healthToneClass[healthStatus]}`}>
+            {buildHealthStatusLabel(item, healthStatus, t)}
+          </span>
+        )}
+        context={resolveProviderDisplayLabel(item.provider)}
+        summary={errorPresentation.summary || formatInspectionVerdictPrimary(item, healthStatus, t)}
+        groups={[
+          { title: t('monitoring.account_inspection_account_details_title'), items: accountItems },
+          { title: t('monitoring.account_inspection_observation_details_title'), items: observationItems },
+        ]}
+      />
+      {technicalItems.length > 0 || errorPresentation.detail ? (
+        <details className={styles.inspectionDiagnostics}>
+          <summary>{t('monitoring.account_inspection_diagnostics_title')}</summary>
+          <div className={styles.inspectionDiagnosticsContent}>
+            {technicalItems.length > 0 ? (
+              <section>
+                <h3>{t('monitoring.account_inspection_technical_details_title')}</h3>
+                <dl>
+                  {technicalItems.map((detail) => (
+                    <div key={String(detail.label)}>
+                      <dt>{detail.label}</dt>
+                      <dd>{detail.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            ) : null}
+            {errorPresentation.detail ? (
+              <section>
+                <h3>{t('monitoring.account_inspection_raw_error_response')}</h3>
+                <pre>{errorPresentation.detail}</pre>
+              </section>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
+    </div>
   );
 }
 

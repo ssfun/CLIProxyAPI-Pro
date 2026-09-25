@@ -829,93 +829,97 @@
 .emptyBlockSmall {
   min-height: 70px;
 }
-.inspectionRecords {
+.inspectionDetailStack {
   display: grid;
-  gap: 18px;
-  margin-top: 18px;
-}
-
-.recordSection {
-  display: grid;
-  gap: 10px;
+  gap: 14px;
   min-width: 0;
-  padding: 14px;
-  border: 1px solid var(--inspect-line);
-  border-radius: 8px;
-  background: var(--inspect-surface);
 }
 
-.recordSectionHeader,
-.recordFilters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+.inspectionDiagnostics {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-primary);
 }
 
-.recordSectionHeader {
-  justify-content: space-between;
-}
-
-.recordSectionHeader h3 {
-  margin: 0;
-  font-size: 15px;
-}
-
-.recordRetention {
-  margin: 0;
-  color: var(--inspect-muted);
+.inspectionDiagnostics > summary {
+  padding: 12px 14px;
+  color: var(--text-secondary);
   font-size: 12px;
-  line-height: 1.5;
+  font-weight: 700;
+  cursor: pointer;
 }
 
-.recordList {
+.inspectionDiagnostics[open] > summary {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.inspectionDiagnosticsContent {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.inspectionDiagnosticsContent section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inspectionDiagnosticsContent h3 {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.inspectionDiagnosticsContent dl {
   display: grid;
   gap: 7px;
-  min-width: 0;
-}
-
-.recordItem {
-  min-width: 0;
-  padding: 9px 11px;
-  border: 1px solid var(--inspect-line);
-  border-radius: 7px;
-}
-
-.recordItem > summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-}
-
-.recordItem > summary > span,
-.recordItem > summary > time {
-  color: var(--inspect-muted);
-  font-size: 12px;
-}
-
-.recordEvidence,
-.recordOperationDetail {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-  margin-top: 10px;
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.recordOperationDetail p {
   margin: 0;
 }
 
-.recordError {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  color: var(--inspect-red);
+.inspectionDiagnosticsContent dl > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr);
+  gap: 12px;
+}
+
+.inspectionDiagnosticsContent dt,
+.inspectionDiagnosticsContent dd {
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.inspectionDiagnosticsContent dt {
+  color: var(--text-secondary);
+}
+
+.inspectionDiagnosticsContent dd,
+.inspectionDiagnosticsContent pre {
+  color: var(--text-primary);
+  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.inspectionDiagnosticsContent dd {
+  text-align: right;
+}
+
+.inspectionDiagnosticsContent pre {
+  max-height: min(300px, 36vh);
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

@@ -8,11 +8,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	proinspection "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/inspection"
 )
 
@@ -264,78 +261,6 @@ func (s *accountInspectionScheduler) executeRecordedInspectionAction(ctx context
 	}
 	return err
 }
-func (h *Handler) RegisterAccountInspectionHistoryRoutes(group *gin.RouterGroup) {
-	group.GET("/account-inspection/history", h.GetAccountInspectionHistory)
-	group.GET("/account-inspection/operations", h.GetAccountInspectionOperations)
-	group.GET("/account-inspection/batches", h.ListAccountInspectionBatches)
-}
-func inspectionEvidencePage(c *gin.Context, total int) (int, int, accountInspectionPageInfo) {
-	page := parseAccountInspectionQueryInt(c, "page", 1)
-	if page < 1 {
-		page = 1
-	}
-	size := parseAccountInspectionQueryInt(c, "page_size", 20)
-	if size < 1 {
-		size = 20
-	}
-	if size > 100 {
-		size = 100
-	}
-	start := (page - 1) * size
-	if start > total {
-		start = total
-	}
-	end := start + size
-	if end > total {
-		end = total
-	}
-	return start, end, proinspection.ResultPageInfo(total, page, size)
-}
-func (h *Handler) GetAccountInspectionHistory(c *gin.Context) {
-	s := schedulerForHandler(h)
-	if s == nil {
-		c.JSON(503, gin.H{"error": "scheduler unavailable"})
-		return
-	}
-	key, ref, run := c.Query("key"), c.Query("result_ref"), c.Query("run_id")
-	s.mu.Lock()
-	items := make([]accountInspectionResult, 0)
-	seen := make(map[string]bool)
-	all := append(append([]accountInspectionResult(nil), s.history...), s.status.Results...)
-	for _, result := range all {
-		if key != "" && result.Key != key || ref != "" && result.ResultRef != ref || run != "" && result.RunID != run {
-			continue
-		}
-		if result.ResultRef != "" && seen[result.ResultRef] {
-			continue
-		}
-		seen[result.ResultRef] = true
-		items = append(items, inspectionEvidenceResult(result))
-	}
-	s.mu.Unlock()
-	sort.SliceStable(items, func(i, j int) bool { return items[i].ObservedAt > items[j].ObservedAt })
-	start, end, page := inspectionEvidencePage(c, len(items))
-	c.JSON(200, gin.H{"items": items[start:end], "pageInfo": page, "retention": gin.H{"maxResults": inspectionHistoryLimit}})
-}
-func (h *Handler) GetAccountInspectionOperations(c *gin.Context) {
-	s := schedulerForHandler(h)
-	if s == nil {
-		c.JSON(503, gin.H{"error": "scheduler unavailable"})
-		return
-	}
-	s.mu.Lock()
-	items := make([]proinspection.OperationRecord, 0)
-	for i := len(s.operations) - 1; i >= 0; i-- {
-		record := s.operations[i]
-		if key := strings.TrimSpace(c.Query("key")); key == "" || record.Before.Key == key {
-			items = append(items, record)
-		}
-	}
-	s.mu.Unlock()
-	start, end, page := inspectionEvidencePage(c, len(items))
-	c.JSON(200, gin.H{"items": items[start:end], "pageInfo": page, "retention": gin.H{"maxOperations": inspectionOperationLimit}})
-}
-
 func (s *accountInspectionScheduler) inspectOne(ctx context.Context, item accountInspectionActionItem) (accountInspectionResult, error) {
 	return s.recordInspectionObservation(ctx, item, "inspect", func() (accountInspectionResult, error) { return s.inspectOneUnrecorded(ctx, item) })
 }

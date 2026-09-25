@@ -4,7 +4,6 @@ import type {
   AccountInspectionBackendLog as BackendLog,
   AccountInspectionBackendResponse,
   AccountInspectionBackendResultItem,
-  AccountInspectionPageInfo,
   AccountInspectionBackendSchedule,
   AccountInspectionBackendStatus,
   AccountInspectionAction,
@@ -116,34 +115,6 @@ export type AccountInspectionBatchOperation = {
     unsupported: number;
     interrupted?: number;
   };
-};
-
-export type AccountInspectionHistoryResponse = {
-  items: AccountInspectionBackendResultItem[];
-  pageInfo: AccountInspectionPageInfo;
-  retention: { maxResults: number };
-};
-
-export type AccountInspectionOperationRecord = {
-  restrictionBefore?: { source: string; model?: string; revision?: string; active: boolean };
-  restrictionAfter?: { source: string; model?: string; revision?: string; active: boolean };
-  batchOperationId?: string;
-  operationId: string;
-  source: 'manual' | 'automatic' | 'batch' | 'recovery';
-  action: string;
-  effect?: string;
-  status: 'running' | 'succeeded' | 'failed' | 'interrupted';
-  startedAt: number;
-  finishedAt?: number;
-  before?: Partial<AccountInspectionBackendResultItem>;
-  after?: Partial<AccountInspectionBackendResultItem>;
-  error?: string;
-};
-
-export type AccountInspectionOperationsResponse = {
-  items: AccountInspectionOperationRecord[];
-  pageInfo: AccountInspectionPageInfo;
-  retention: { maxOperations: number };
 };
 
 export type AccountInspectionInspectOneResponse = AccountInspectionBackendResponse & {
@@ -276,20 +247,4 @@ export const accountInspectionApi = {
     apiClient.get<AccountInspectionBatchOperation>(`/account-inspection/batches/${encodeURIComponent(operationId)}`),
   retryBatch: (operationId: string) =>
     apiClient.post<AccountInspectionBatchOperation>(`/account-inspection/batches/${encodeURIComponent(operationId)}/retry`, {}),
-  getHistory: (params: { key: string; page: number; pageSize: number; resultRef?: string; runId?: string }, signal?: AbortSignal) =>
-    apiClient.get<AccountInspectionHistoryResponse>('/account-inspection/history', {
-      params: {
-        key: params.key,
-        page: params.page,
-        page_size: params.pageSize,
-        ...(params.resultRef ? { result_ref: params.resultRef } : {}),
-        ...(params.runId ? { run_id: params.runId } : {}),
-      },
-      signal,
-    }),
-  getOperations: (params: { key: string; page: number; pageSize: number }, signal?: AbortSignal) =>
-    apiClient.get<AccountInspectionOperationsResponse>('/account-inspection/operations', {
-      params: { key: params.key, page: params.page, page_size: params.pageSize },
-      signal,
-    }),
 };
