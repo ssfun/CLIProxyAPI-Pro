@@ -382,5 +382,5 @@ fi
 
 run_timed "CGO and non-CGO builds" build_candidate
 if [[ "${VALIDATION_INSPECTION_E2E:-0}" == "1" ]]; then
-  run_timed "inspection batch and history HTTP E2E" run_inspection_e2e
+  run_timed "inspection batch and internal audit HTTP E2E" run_inspection_e2e
 fi

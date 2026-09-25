@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Black-box HTTP checks for inspection batch receipts and retained evidence."""
+"""Black-box HTTP checks for inspection batch receipts and internal audit evidence."""
 
 import argparse
 import json
@@ -47,6 +47,14 @@ held_release = threading.Event()
 held_two_started = threading.Event()
 held_active = 0
 held_peak = 0
+
+
+def decode_response(stream):
+    raw = stream.read()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw.decode(errors="replace")
 
 
 class Provider(BaseHTTPRequestHandler):
@@ -105,9 +113,9 @@ def call(method, path, payload=None):
         request.add_header("Content-Type", "application/json")
     try:
         with opener.open(request, timeout=35) as response:
-            return response.status, json.load(response)
+            return response.status, decode_response(response)
     except urllib.error.HTTPError as exc:
-        return exc.code, json.load(exc)
+        return exc.code, decode_response(exc)
 
 
 def ok(method, path, payload=None, expected=200):
@@ -119,6 +127,10 @@ def ok(method, path, payload=None, expected=200):
 def note(step, **data):
     receipts.append({"step": step, **data})
     (root / "result.json").write_text(json.dumps({"passed": False, "receipts": receipts}, ensure_ascii=False, indent=2) + "\n")
+
+
+def evidence():
+    return json.loads((root / "usage" / "account-inspection-snapshot.json.evidence.json").read_text())
 
 
 def binary_sha256():
@@ -342,8 +354,7 @@ try:
 
     manual = ok("POST", "/actions", {"items": [item(b, "disable")]})
     assert manual["summary"]["success"] == 1, manual
-    b_operations = ok("GET", "/operations?key=" + urllib.parse.quote(b["key"]))["items"]
-    direct = next(entry for entry in b_operations if entry["source"] == "manual" and entry["effect"] == "admin_disable")
+    direct = next(entry for entry in evidence()["operations"] if entry["source"] == "manual" and entry["effect"] == "admin_disable" and entry["before"]["key"] == b["key"])
     assert direct["status"] == "succeeded" and direct["before"]["statusCode"] == 401, direct
     for field in ("statusCode", "errorCode", "action", "resultRef", "observedAt"):
         assert direct["after"].get(field) == direct["before"].get(field), (field, direct)
@@ -355,11 +366,13 @@ try:
     ok("POST", f'/batches/{delete["operationId"]}/execute', {}, 202)
     assert wait_batch(delete["operationId"])["summary"]["succeeded"] == 1
     assert not (root / "auth" / "xai-c.json").exists()
-    history = ok("GET", "/history?key=" + urllib.parse.quote(c["key"]))
-    operations = ok("GET", "/operations?key=" + urllib.parse.quote(c["key"]))
-    assert any(entry["resultRef"] == newest_c["resultRef"] for entry in history["items"]), history
-    assert any(entry["effect"] == "delete" and entry["before"]["resultRef"] == newest_c["resultRef"] for entry in operations["items"]), operations
-    note("delete_retains_diagnostic_evidence", operationId=delete["operationId"], historyCount=history["pageInfo"]["total"])
+    retained = evidence()
+    assert any(entry["resultRef"] == newest_c["resultRef"] for entry in retained["history"]), retained
+    assert any(entry["effect"] == "delete" and entry["before"]["resultRef"] == newest_c["resultRef"] for entry in retained["operations"]), retained
+    for removed_path in ("/history?key=" + urllib.parse.quote(c["key"]), "/operations?key=" + urllib.parse.quote(c["key"])):
+        status, _ = call("GET", removed_path)
+        assert status == 404, (removed_path, status)
+    note("delete_retains_internal_audit_only", operationId=delete["operationId"], historyCount=len(retained["history"]))
 
     # Three held probes for one provider must overlap, while respecting its cap of two.
     rechecks = preflight([item(row(f"xai-{letter}.json")) for letter in "dgh"], "inspect")
@@ -411,7 +424,7 @@ try:
         # durable before deletion, so this fault must leave the auth file intact.
         evidence_path = root / "usage" / "account-inspection-snapshot.json.evidence.json"
         evidence_backup = root / "usage" / "account-inspection-evidence.backup"
-        before_count = ok("GET", "/operations?key=" + urllib.parse.quote(d["key"]))["pageInfo"]["total"]
+        before_count = len(evidence()["operations"])
         evidence_path.rename(evidence_backup)
         evidence_path.mkdir()
         try:
@@ -420,10 +433,10 @@ try:
         finally:
             evidence_path.rmdir()
             evidence_backup.rename(evidence_path)
-        assert ok("GET", "/operations?key=" + urllib.parse.quote(d["key"]))["pageInfo"]["total"] == before_count
+        assert len(evidence()["operations"]) == before_count
         allowed = ok("POST", "/actions", {"items": [item(row("xai-d.json"), "delete")]})
         assert allowed["summary"]["success"] == 1 and not (root / "auth" / "xai-d.json").exists(), allowed
-        assert ok("GET", "/operations?key=" + urllib.parse.quote(d["key"]))["pageInfo"]["total"] == before_count + 1
+        assert len(evidence()["operations"]) == before_count + 1
         note("audit_intent_write_failure_prevents_delete", firstOutcome=denied["summary"], secondOutcome=allowed["summary"])
 
     evidence_files = list(root.rglob("*.evidence.json"))
