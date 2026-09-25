@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import {
   buildAuthFileAccountStats,
   buildActionPreview,
+  buildHealthStatusLabel,
   buildInspectionResultsViewState,
   createInspectionBackendState,
   formatAccountInspectionDuration,
@@ -164,6 +165,24 @@ describe('account inspection page model', () => {
     expect(view.filterRowCounts.quotaChanges).toBe(1);
     expect(view.filterRowCounts.pending).toBe(2);
     expect(view.actionableActionCounts).toMatchObject({ delete: 1, disable: 1 });
+  });
+
+  test('distinguishes 401 authorization expiry from 403 authentication failure in result labels', () => {
+    // Failure matrix: both statuses remain aggregated as account-invalid, while the
+    // result field must explain the distinct remediation signal to operators.
+    const labels: Record<string, string> = {
+      'monitoring.account_inspection_account_invalid': '账号失效',
+      'monitoring.account_inspection_result_authorization_expired': '授权过期',
+      'monitoring.account_inspection_result_authentication_invalid': '认证失效',
+    };
+    const t = ((key: string) => labels[key] ?? key) as TFunction;
+    const unauthorized = result({ statusCode: 401, errorCode: 'inspection_http_error' });
+    const forbidden = result({ statusCode: 403, errorCode: 'inspection_http_error' });
+
+    expect(resolveResultHealthStatus(unauthorized)).toBe('authInvalid');
+    expect(resolveResultHealthStatus(forbidden)).toBe('authInvalid');
+    expect(buildHealthStatusLabel(unauthorized, 'authInvalid', t)).toBe('授权过期 · 401');
+    expect(buildHealthStatusLabel(forbidden, 'authInvalid', t)).toBe('认证失效 · 403');
   });
 
   test('merges incomplete results into inspection errors', () => {

@@ -88,6 +88,9 @@ class Provider(BaseHTTPRequestHandler):
             "service_unavailable": (503, {"error": {"code": "service_unavailable", "message": "Temporary upstream failure"}}),
             "healthy": (200, {"choices": [{"message": {"content": "pong"}}]}),
             "unauthorized": (401, {"error": {"message": "authentication required"}}),
+            "forbidden": (403, {"error": {"message": "authentication rejected"}}),
+            "bad_request": (400, {"error": {"message": "invalid request"}}),
+            "not_found": (404, {"error": {"message": "endpoint not found"}}),
         }[mode]
         body = json.dumps(payload).encode()
         if mode == "healthy" and self.path.endswith("/responses"):
@@ -213,8 +216,8 @@ def disconnect_execute(operation_id):
 shutil.rmtree(root / "usage", ignore_errors=True)
 shutil.rmtree(root / "auth", ignore_errors=True)
 (root / "auth").mkdir()
-(root / "modes.json").write_text(json.dumps({"a": "quota", "b": "unauthorized", "c": "healthy", "d": "healthy", "e": "quota", "f": "unauthorized", "g": "healthy", "h": "healthy", "i": "rate_limited", "j": "service_unavailable"}))
-for letter in "abcdefghij":
+(root / "modes.json").write_text(json.dumps({"a": "quota", "b": "unauthorized", "c": "healthy", "d": "healthy", "e": "quota", "f": "unauthorized", "g": "healthy", "h": "healthy", "i": "rate_limited", "j": "service_unavailable", "k": "healthy", "l": "healthy", "m": "healthy", "n": "healthy"}))
+for letter in "abcdefghijklmn":
     (root / "auth" / f"xai-{letter}.json").write_text(json.dumps({
         "api_key": f"secret-e2e-{letter}",
         "base_url": f"http://127.0.0.1:{provider_port}/{letter}/v1",
@@ -259,8 +262,8 @@ try:
     assert not limited["executed"] and not unavailable["executed"], (limited, unavailable)
     stats = initial["status"]["runStats"]
     xai_stats = stats["providers"]["xai"]
-    assert xai_stats["accounts"] == 10 and xai_stats["httpRequests"] == 10, stats
-    assert xai_stats["realProbeRequests"] == 10 and stats["wallTimeMs"] >= 0, stats
+    assert xai_stats["accounts"] == 14 and xai_stats["httpRequests"] == 14, stats
+    assert xai_stats["realProbeRequests"] == 14 and stats["wallTimeMs"] >= 0, stats
     note("provider_metrics_and_rate_limit", wallTimeMs=stats["wallTimeMs"], provider=xai_stats, rateLimited=limited["errorCode"], autoRequestErrorAction="none", retained=["xai-i.json", "xai-j.json"])
 
     # A manual confirmation uses one Responses request for official xAI.
@@ -438,6 +441,36 @@ try:
         assert allowed["summary"]["success"] == 1 and not (root / "auth" / "xai-d.json").exists(), allowed
         assert len(evidence()["operations"]) == before_count + 1
         note("audit_intent_write_failure_prevents_delete", firstOutcome=denied["summary"], secondOutcome=allowed["summary"])
+
+    # Account-invalid automatic actions require confirmed HTTP evidence. Both
+    # authorization expiry (401) and authentication failure (403) are eligible;
+    # request-shape/routing failures (400/404) must remain inspection errors.
+    automatic_schedule = ok("GET", "/status?details=1")["schedule"]
+    automatic_schedule["settings"]["autoExecuteAccountInvalidAction"] = "disable"
+    automatic_schedule["settings"]["autoExecuteConfirmations"] = 1
+    ok("PUT", "/schedule", automatic_schedule)
+    modes = json.loads((root / "modes.json").read_text())
+    modes.update({"k": "unauthorized", "l": "forbidden", "m": "bad_request", "n": "not_found"})
+    (root / "modes.json").write_text(json.dumps(modes))
+    ok("POST", "/run", {}, 202)
+    wait_until("automatic account-invalid actions", lambda: ok("GET", "/status?details=1"), lambda body: body["status"]["state"] == "completed")
+    automatic = {letter: row(f"xai-{letter}.json") for letter in "klmn"}
+    for letter, status in (("k", 401), ("l", 403)):
+        result = automatic[letter]
+        assert result["statusCode"] == status and result["errorCode"] == "inspection_http_error", result
+        assert result["executed"] and result["executedAction"] == "disable", result
+        assert result["executedEffect"] == "admin_disable" and result["disabled"], result
+        assert json.loads((root / "auth" / f"xai-{letter}.json").read_text())["disabled"], result
+    for letter, status in (("m", 400), ("n", 404)):
+        result = automatic[letter]
+        assert result["statusCode"] == status and result["errorCode"], result
+        assert not result["executed"] and not result["disabled"], result
+        assert not json.loads((root / "auth" / f"xai-{letter}.json").read_text()).get("disabled", False), result
+    note(
+        "account_invalid_auto_action_http_boundary",
+        executed={str(automatic[letter]["statusCode"]): automatic[letter]["executedEffect"] for letter in "kl"},
+        retained={str(automatic[letter]["statusCode"]): automatic[letter]["errorCode"] for letter in "mn"},
+    )
 
     evidence_files = list(root.rglob("*.evidence.json"))
     assert evidence_files and all("secret-e2e-" not in file.read_text() and file.stat().st_mode & 0o777 == 0o600 for file in evidence_files)

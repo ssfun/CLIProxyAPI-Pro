@@ -67,8 +67,8 @@ func TestHealthSummaryAndAutomaticActions(t *testing.T) {
 	settings := DefaultSettings()
 	settings.AutoExecuteAccountInvalidAction = ActionDelete
 	settings.AutoExecuteQuotaLimitDisable = true
-	if got := AutoActionForResult(results[0], settings); got != ActionNone {
-		t.Fatalf("401 auto action = %q, want none", got)
+	if got := AutoActionForResult(results[0], settings); got != ActionDelete {
+		t.Fatalf("401 auto action = %q, want %q", got, ActionDelete)
 	}
 	if got := AutoActionForResult(results[1], settings); got != ActionDisable {
 		t.Fatalf("quota action = %q", got)
@@ -85,9 +85,10 @@ func TestResultMatchesSearchIncludesAuthID(t *testing.T) {
 	}
 }
 
-// Failure matrix: transient/provider/parser errors must not inherit destructive
-// request-error settings; stale suggestions must not bypass this boundary;
-// explicit 403 account evidence and confirmed quota must retain their policies.
+// Failure matrix: only inspection-confirmed HTTP 401/403 may inherit the
+// account-invalid policy. HTTP 400/404 and every other transient/provider/
+// parser failure must remain non-destructive; stale suggestions must not bypass
+// this boundary, while confirmed quota retains its independent policy.
 func TestAutomaticMutationRequiresAccountEvidence(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -102,6 +103,11 @@ func TestAutomaticMutationRequiresAccountEvidence(t *testing.T) {
 		{"transport", Result{ErrorCode: "inspection_transport_error"}},
 		{"provider", Result{ErrorCode: "inspection_provider_error", StatusCode: intPointer(503)}},
 		{"legacy provider", Result{ErrorCode: "inspection_probe_error", StatusCode: intPointer(502)}},
+		{"unauthorized without confirmed HTTP evidence", Result{ErrorCode: "inspection_probe_error", StatusCode: intPointer(401)}},
+		{"forbidden transient deep probe", Result{StatusCode: intPointer(403), DeepProbeStatus: string(DeepProbeTransientError)}},
+		{"bad request", Result{ErrorCode: "inspection_http_error", StatusCode: intPointer(400)}},
+		{"not found", Result{ErrorCode: "inspection_http_error", StatusCode: intPointer(404)}},
+		{"server error", Result{ErrorCode: "inspection_http_error", StatusCode: intPointer(500)}},
 		{"deep transient", Result{DeepProbeStatus: string(DeepProbeTransientError)}},
 		{"refresh", Result{ErrorCode: "token_refresh_error", TokenRefreshStatus: "failed"}},
 	}
@@ -117,8 +123,10 @@ func TestAutomaticMutationRequiresAccountEvidence(t *testing.T) {
 				}
 			})
 		}
-		if got := AutoActionForResult(Result{ErrorCode: "inspection_http_error", StatusCode: intPointer(403)}, settings); got != action {
-			t.Fatalf("403 auto action = %q, want %q", got, action)
+		for _, status := range []int{401, 403} {
+			if got := AutoActionForResult(Result{ErrorCode: "inspection_http_error", StatusCode: intPointer(status)}, settings); got != action {
+				t.Fatalf("%d auto action = %q, want %q", status, got, action)
+			}
 		}
 	}
 }

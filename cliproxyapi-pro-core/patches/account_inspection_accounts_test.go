@@ -118,8 +118,8 @@ func TestAutoErrorActionsUseSemanticErrorCategory(t *testing.T) {
 	settings.AutoExecuteRequestErrorAction = accountInspectionActionDisable
 
 	authInvalid := testInspectionAuthInvalidResult("auth-invalid", "claude", accountInspectionActionKeep)
-	if got := proinspection.AutoActionForResult(authInvalid, settings); got != accountInspectionActionNone {
-		t.Fatalf("401 auto action = %q, want none", got)
+	if got := proinspection.AutoActionForResult(authInvalid, settings); got != accountInspectionActionDelete {
+		t.Fatalf("401 auto action = %q, want %q", got, accountInspectionActionDelete)
 	}
 
 	requestError := testInspectionProviderResult("request-error", "xai", accountInspectionActionKeep, false, testStatusCode(http.StatusBadRequest), false, "temporary deep-probe failure")

@@ -1,3 +1,4 @@
+import json
 import unittest
 from pathlib import Path
 
@@ -10,9 +11,33 @@ SURFACE_STYLE = PRO_ROOT / 'shared/ProSurface.module.scss'
 SURFACE_STATE = PRO_ROOT / 'shared/useProSurfaceState.ts'
 INFORMATION_DETAILS = PRO_ROOT / 'shared/ProInformationDetails.tsx'
 INFORMATION_DETAILS_STYLE = PRO_ROOT / 'shared/ProInformationDetails.module.scss'
+LOCALES = ROOT / 'monitoring-locales.json'
 
 
 class ProSurfaceCustomizationTest(unittest.TestCase):
+    def test_inspection_account_invalid_copy_covers_401_and_403_only(self) -> None:
+        locales = json.loads(LOCALES.read_text())
+        expected_labels = {
+            'en.json': ('Authorization expired', 'Authentication invalid'),
+            'ru.json': ('Срок авторизации истёк', 'Аутентификация недействительна'),
+            'zh-CN.json': ('授权过期', '认证失效'),
+            'zh-TW.json': ('授權過期', '認證失效'),
+        }
+        for locale_name, (authorization_expired, authentication_invalid) in expected_labels.items():
+            monitoring = locales[locale_name]['monitoring']
+            hint = monitoring['account_inspection_settings_auto_execute_account_invalid_action_hint']
+            self.assertIn('401', hint)
+            self.assertIn('403', hint)
+            self.assertIn('400/404', hint)
+            self.assertEqual(
+                authorization_expired,
+                monitoring['account_inspection_result_authorization_expired'],
+            )
+            self.assertEqual(
+                authentication_invalid,
+                monitoring['account_inspection_result_authentication_invalid'],
+            )
+
     def test_business_surfaces_use_semantic_pro_components(self) -> None:
         direct_modal_users = []
         direct_sheet_users = []

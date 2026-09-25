@@ -362,9 +362,6 @@ func AutoActionForResult(result Result, settings Settings) Action {
 	if result.ErrorCode == "inspection_rate_limited" {
 		return ActionNone
 	}
-	if result.StatusCode != nil && *result.StatusCode == 401 {
-		return ActionNone
-	}
 	if result.ErrorCode == "inspection_incomplete" {
 		return ActionNone
 	}

@@ -302,12 +302,21 @@ const buildHealthStatusCodeText = (item: AccountInspectionResultItem) => {
   return httpStatusCode !== null ? String(httpStatusCode) : '';
 };
 
+const resolveAuthInvalidResultLabelKey = (item: AccountInspectionResultItem) => {
+  const httpStatusCode = extractHealthHttpStatusCode(item);
+  if (httpStatusCode === 401) return 'monitoring.account_inspection_result_authorization_expired';
+  if (httpStatusCode === 403) return 'monitoring.account_inspection_result_authentication_invalid';
+  return healthLabelKey.authInvalid;
+};
+
 export const buildHealthStatusLabel = (
   item: AccountInspectionResultItem,
   healthStatus: ResultHealthStatus,
   t: TFunction
 ) => {
-  const label = t(healthLabelKey[healthStatus]);
+  const label = t(healthStatus === 'authInvalid'
+    ? resolveAuthInvalidResultLabelKey(item)
+    : healthLabelKey[healthStatus]);
   const code = buildHealthStatusCodeText(item);
   const observed = code ? `${label} · ${code}` : label;
   return item.executedEffect === 'delete'
@@ -1154,7 +1163,7 @@ const formatInspectionVerdictPrimary = (
     case 'inspectionError':
       return t('monitoring.account_inspection_verdict_probe_error');
     case 'authInvalid':
-      return t('monitoring.account_inspection_verdict_auth_invalid');
+      return t(resolveAuthInvalidResultLabelKey(item));
     case 'quotaExhausted':
       return item.disabled
         ? t('monitoring.account_inspection_verdict_quota_limited_disabled')
