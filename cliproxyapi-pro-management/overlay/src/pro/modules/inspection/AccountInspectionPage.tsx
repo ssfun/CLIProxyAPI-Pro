@@ -985,11 +985,22 @@ export function AccountInspectionPage() {
       : scope === 'filtered'
         ? { dedupeKey: `account-inspection:execute:filtered:${operationIds}` }
         : { dedupeKey: `account-inspection:execute:batch:${operationIds}` };
+    const hasDangerousReadyItem = operations.some((operation) =>
+      operation.items.some(({ item, status }) => item.action === 'delete' && status === 'ready')
+    );
     showConfirmation({
       ...confirmationIdentity,
       title: t('monitoring.account_inspection_batch_preflight_title'),
       message: (
-        <div className={styles.batchPreflight}>
+        <div
+          className={[
+            styles.batchPreflight,
+            styles.confirmationBody,
+            styles.confirmationDecisionBody,
+            styles.confirmationBatchBody,
+            hasDangerousReadyItem ? styles.confirmationDecisionDanger : '',
+          ].filter(Boolean).join(' ')}
+        >
           <strong>{scopeLabel} · {t('monitoring.account_inspection_batch_ready_count', { count: summary.ready })}</strong>
           {scope === 'filtered' && operations.some((operation) => operation.items.some(({ item }) => item.suggested))
             ? <span>{t('monitoring.account_inspection_batch_filtered_suggestions')}</span> : null}
@@ -1027,7 +1038,7 @@ export function AccountInspectionPage() {
       ),
       confirmText: t('monitoring.account_inspection_batch_confirm', { count: summary.ready }),
       cancelText: t('common.cancel'),
-      variant: operations.some((operation) => operation.items.some(({ item, status }) => item.action === 'delete' && status === 'ready')) ? 'danger' : 'primary',
+      variant: hasDangerousReadyItem ? 'danger' : 'primary',
       onConfirm: () => {
         setSelectedResultKeys(new Set());
         setBatchError('');

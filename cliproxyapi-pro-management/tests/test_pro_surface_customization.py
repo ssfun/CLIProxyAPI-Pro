@@ -109,6 +109,19 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
         self.assertNotIn('.slice(0, 5)', inspection_model)
         self.assertNotIn('-webkit-line-clamp', inspection_styles)
 
+    def test_account_inspection_batch_preflight_uses_decision_dialog_theme(self) -> None:
+        inspection = (PRO_ROOT / 'modules/inspection/AccountInspectionPage.tsx').read_text()
+        preflight = inspection[
+            inspection.index('const confirmBatch = useCallback'):inspection.index(
+                'const handleExecuteSelectedResults',
+            )
+        ]
+        self.assertIn('const hasDangerousReadyItem =', preflight)
+        self.assertIn('styles.confirmationDecisionBody', preflight)
+        self.assertIn('styles.confirmationBatchBody', preflight)
+        self.assertIn('hasDangerousReadyItem ? styles.confirmationDecisionDanger', preflight)
+        self.assertIn("variant: hasDangerousReadyItem ? 'danger' : 'primary'", preflight)
+
     def test_inspection_detail_omits_history_and_operation_modules(self) -> None:
         inspection = (PRO_ROOT / 'modules/inspection/AccountInspectionPage.tsx').read_text()
         api = (PRO_ROOT / 'modules/inspection/api.ts').read_text()
@@ -354,10 +367,10 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
         self.assertIn("disabled={resultStatusFilter === 'healthy'}", inspection)
         self.assertNotIn("!hasAutoExecutionPolicy ? (", inspection)
         expected_recovered_labels = {
-            'en.json': 'Quota Recovered',
-            'ru.json': 'Квота восстановлена',
-            'zh-CN.json': '配额已恢复',
-            'zh-TW.json': '配額已恢復',
+            'en.json': 'Quota Recovery',
+            'ru.json': 'Восстановление квоты',
+            'zh-CN.json': '配额恢复',
+            'zh-TW.json': '配額恢復',
         }
         for locale_name, label in expected_recovered_labels.items():
             self.assertEqual(
