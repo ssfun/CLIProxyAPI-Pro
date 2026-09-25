@@ -168,6 +168,30 @@ describe('account inspection page model', () => {
     expect(view.actionableActionCounts).toMatchObject({ delete: 1, disable: 1 });
   });
 
+  test('binds row actions to the effective account state instead of the inspection verdict', () => {
+    // Failure matrix:
+    // - disabled wins over cooling and offers administrative enable only;
+    // - enabled cooling offers recovery (represented by enable + quotaCooling);
+    // - every enabled non-cooling account offers disable, even when healthy or unhealthy;
+    // - deleted accounts offer no further actions.
+    const view = buildInspectionResultsViewState([
+      result({ key: 'healthy-enabled' }),
+      result({ key: 'invalid-enabled', statusCode: 403, errorCode: 'inspection_http_error' }),
+      result({ key: 'disabled', disabled: true }),
+      result({ key: 'disabled-cooling', disabled: true, quotaCooling: true, action: 'enable' }),
+      result({ key: 'cooling', quotaCooling: true, action: 'enable' }),
+      result({ key: 'deleted', executedEffect: 'delete' }),
+    ]);
+    const actions = Object.fromEntries(view.rows.map((row) => [row.item.key, row.manualActions]));
+
+    expect(actions['healthy-enabled']).toEqual(['disable', 'delete']);
+    expect(actions['invalid-enabled']).toEqual(['disable', 'delete']);
+    expect(actions.disabled).toEqual(['enable', 'delete']);
+    expect(actions['disabled-cooling']).toEqual(['enable', 'delete']);
+    expect(actions.cooling).toEqual(['enable', 'delete']);
+    expect(actions.deleted).toEqual([]);
+  });
+
   test('distinguishes 401 authorization expiry from 403 authentication failure in result labels', () => {
     // Failure matrix: both statuses remain aggregated as account-invalid, while the
     // result field must explain the distinct remediation signal to operators.

@@ -1970,9 +1970,9 @@ export function AccountInspectionPage() {
                         t
                       );
                       const suggestedAction = isSuggestedAction(item) && !item.executed
+                        && manualActions.includes(item.action as ManualAccountInspectionAction)
                         ? item.action as ManualAccountInspectionAction
                         : null;
-                      const additionalActions = manualActions.filter((action) => action !== suggestedAction);
                       return (
                         <tr key={item.key}>
                           <td className={styles.accountTableCell} data-label={t('monitoring.account_label')}>
@@ -2023,16 +2023,6 @@ export function AccountInspectionPage() {
                           </td>
                           <td className={styles.operationCell} data-label={t('common.action')}>
                             <div className={styles.operationActions}>
-                              {item.executedEffect !== 'delete' && item.authId && item.authIndex && !item.quotaCooling ? (
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={() => openRecoveryForItem(item)}
-                                  disabled={singleMutationBlocked || restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
-                                >
-                                  {t('routing_policy.recovery.open')}
-                                </Button>
-                              ) : null}
                               {item.executedEffect !== 'delete' ? <button
                                 type="button"
                                 className={styles.iconActionButton}
@@ -2043,43 +2033,37 @@ export function AccountInspectionPage() {
                               >
                                 <IconRefreshCw size={15} className={recheckingKey === item.key ? styles.spinningIcon : undefined} />
                               </button> : null}
-                              {item.executedEffect !== 'delete' && suggestedAction ? (
-                                <Button
-                                  size="sm"
-                                  variant={suggestedAction === 'delete' ? 'danger' : 'primary'}
-                                  onClick={() => {
-                                    if (isSchedulingRecoveryAction(buildManualActionItem(item, suggestedAction))) {
-                                      openRecoveryForItem(item);
-                                    } else {
-                                      handleExecuteSingle(item, suggestedAction, true);
-                                    }
-                                  }}
-                                  disabled={singleMutationBlocked || restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
-                                >
-                                  {isSchedulingRecoveryAction(buildManualActionItem(item, suggestedAction))
-                                    ? t('monitoring.account_inspection_release_quota')
-                                    : formatInspectionExecutionLabel({ ...item, action: suggestedAction, suggested: true }, t)}
-                                </Button>
-                              ) : null}
-                              {item.executedEffect !== 'delete' && additionalActions.map((action) => (
-                                <Button
-                                  key={action}
-                                  size="sm"
-                                  variant={action === 'delete' ? 'danger' : 'secondary'}
-                                  onClick={() => {
-                                    if (isSchedulingRecoveryAction(buildManualActionItem(item, action))) {
-                                      openRecoveryForItem(item);
-                                    } else {
-                                      handleExecuteSingle(item, action);
-                                    }
-                                  }}
-                                  disabled={singleMutationBlocked || restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
-                                >
-                                  {isSchedulingRecoveryAction(buildManualActionItem(item, action))
-                                    ? t('monitoring.account_inspection_release_quota')
-                                    : formatActionLabel(action, t)}
-                                </Button>
-                              ))}
+                              {item.executedEffect !== 'delete' && manualActions.map((action) => {
+                                const actionItem = buildManualActionItem(item, action);
+                                const schedulingRecovery = isSchedulingRecoveryAction(actionItem);
+                                const suggested = action === suggestedAction;
+                                return (
+                                  <Button
+                                    key={action}
+                                    size="sm"
+                                    variant={action === 'delete' ? 'danger' : suggested ? 'primary' : 'secondary'}
+                                    onClick={() => {
+                                      if (schedulingRecovery) {
+                                        openRecoveryForItem(item);
+                                      } else {
+                                        handleExecuteSingle(item, action, suggested);
+                                      }
+                                    }}
+                                    disabled={singleMutationBlocked || restoredSnapshot || runStatus === 'running' || executing || bulkActionLoading || recheckingKey !== null}
+                                    title={item.quotaCooling && action === 'enable'
+                                      ? t(schedulingRecovery
+                                        ? 'monitoring.account_inspection_action_recover_hint'
+                                        : 'monitoring.account_inspection_action_enable_keeps_cooling')
+                                      : undefined}
+                                  >
+                                    {schedulingRecovery
+                                      ? t('monitoring.account_inspection_action_recover')
+                                      : suggested
+                                        ? formatInspectionExecutionLabel({ ...item, action, suggested: true }, t)
+                                        : formatActionLabel(action, t)}
+                                  </Button>
+                                );
+                              })}
                             </div>
                           </td>
                         </tr>

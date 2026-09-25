@@ -159,6 +159,26 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
         self.assertIn('<details className={styles.batchReceiptDetails}>', inspection)
         self.assertNotIn('batchOperation.items.map(', inspection)
 
+    def test_account_inspection_row_actions_follow_effective_account_state(self) -> None:
+        inspection = (PRO_ROOT / 'modules/inspection/AccountInspectionPage.tsx').read_text()
+        model = (PRO_ROOT / 'modules/inspection/features/accountInspectionPageModel.tsx').read_text()
+        locales = json.loads(LOCALES.read_text())
+        self.assertIn("if (item.disabled) return ['enable', 'delete'];", model)
+        self.assertIn("if (item.quotaCooling) return ['enable', 'delete'];", model)
+        self.assertIn("return ['disable', 'delete'];", model)
+        action_model = model[model.index('const getManualActionsByAccountState'):model.index('export const buildInspectionResultsViewState')]
+        self.assertIn("if (item.executedEffect === 'delete') return [];", action_model)
+        self.assertNotIn("healthStatus === 'healthy'", action_model)
+        self.assertIn('manualActions.includes(item.action as ManualAccountInspectionAction)', inspection)
+        self.assertNotIn("&& !item.quotaCooling ? (", inspection)
+        self.assertIn("'monitoring.account_inspection_action_recover_hint'", inspection)
+        self.assertIn("title={item.quotaCooling", inspection)
+        for locale_name in ('en.json', 'ru.json', 'zh-CN.json', 'zh-TW.json'):
+            monitoring = locales[locale_name]['monitoring']
+            self.assertTrue(monitoring['account_inspection_action_recover'])
+            self.assertTrue(monitoring['account_inspection_action_recover_hint'])
+            self.assertTrue(monitoring['account_inspection_action_enable_keeps_cooling'])
+
     def test_inspection_detail_omits_history_and_operation_modules(self) -> None:
         inspection = (PRO_ROOT / 'modules/inspection/AccountInspectionPage.tsx').read_text()
         api = (PRO_ROOT / 'modules/inspection/api.ts').read_text()

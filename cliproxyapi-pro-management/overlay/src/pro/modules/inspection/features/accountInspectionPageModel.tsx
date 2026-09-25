@@ -871,13 +871,13 @@ const emptyHealthCounts = (): HealthCounts => ({
   unknown: 0,
 });
 
-const getManualActionsByHealthStatus = (
-  item: AccountInspectionResultItem,
-  healthStatus: ResultHealthStatus
+const getManualActionsByAccountState = (
+  item: AccountInspectionResultItem
 ): ManualAccountInspectionAction[] => {
-  if (item.quotaCooling && !item.disabled) return ['enable', 'disable', 'delete'];
-  if (healthStatus === 'healthy') return [];
-  return [item.disabled ? 'enable' : 'disable', 'delete'];
+  if (item.executedEffect === 'delete') return [];
+  if (item.disabled) return ['enable', 'delete'];
+  if (item.quotaCooling) return ['enable', 'delete'];
+  return ['disable', 'delete'];
 };
 
 export const buildInspectionResultsViewState = (items: AccountInspectionResultItem[]): InspectionResultsViewState => {
@@ -908,7 +908,7 @@ export const buildInspectionResultsViewState = (items: AccountInspectionResultIt
     const row = {
       item,
       healthStatus,
-      manualActions: getManualActionsByHealthStatus(item, healthStatus),
+      manualActions: getManualActionsByAccountState(item),
     };
     target.push(row);
     return row;
