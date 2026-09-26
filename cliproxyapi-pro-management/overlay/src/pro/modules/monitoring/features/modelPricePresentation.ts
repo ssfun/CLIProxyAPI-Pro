@@ -135,7 +135,7 @@ export const createPriceDraft = (rule?: ModelPriceRule): PriceDraft => ({
     .map(([name, rate]) => ({ name, ...createPriceRateDraft(rate) })),
 });
 
-export const createServiceTierDraft = (_base?: PriceRateDraft): ServiceTierDraft => ({
+export const createServiceTierDraft = (): ServiceTierDraft => ({
   name: '',
   input: '',
   output: '',
@@ -144,7 +144,7 @@ export const createServiceTierDraft = (_base?: PriceRateDraft): ServiceTierDraft
   reasoning: '',
 });
 
-export const createSpeedDraft = (_base?: PriceRateDraft): SpeedDraft => createServiceTierDraft();
+export const createSpeedDraft = (): SpeedDraft => createServiceTierDraft();
 
 export const validatePriceDraft = (draft: PriceDraft): PriceDraftValidationError | null => {
   if (!isValidPriceRateDraft(draft)) return 'rate_required';
@@ -152,7 +152,7 @@ export const validatePriceDraft = (draft: PriceDraft): PriceDraftValidationError
   const contextSizes = new Set<number>();
   for (const tier of draft.tiers) {
     const contextSize = Number(tier.contextSize);
-    if (!Number.isInteger(contextSize) || contextSize <= 0) return 'context_size_invalid';
+    if (!Number.isSafeInteger(contextSize) || contextSize <= 0) return 'context_size_invalid';
     if (contextSizes.has(contextSize)) return 'context_size_duplicate';
     contextSizes.add(contextSize);
     if (!isValidPriceRateDraft(tier)) return 'rate_required';
@@ -243,13 +243,13 @@ export const resolvePricingMode = (
 };
 
 export const parsePriceValue = (value: string) => {
-  const parsed = Number.parseFloat(value);
+  const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 };
 
 export const parsePriceContextSize = (value: string) => {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
 };
 
 export const formatModelPriceRate = (value: number | undefined) => {

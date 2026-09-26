@@ -418,7 +418,7 @@ func priceRuleComparable(rule ModelPriceRule) ModelPriceRule {
 func observedModelsHash(models []ObservedModel) string {
 	keys := make([]string, 0, len(models))
 	for _, item := range models {
-		keys = append(keys, priceRuleLookupKey(item.Provider, item.Model))
+		keys = append(keys, strings.TrimSpace(item.Model))
 	}
 	sort.Strings(keys)
 	sum := sha256.Sum256([]byte(strings.Join(keys, "\n")))
@@ -499,7 +499,7 @@ func (s *Store) SyncModelsDevPrices(ctx context.Context, dryRun, recalculateUnpr
 	result.Changes = make([]ModelPriceSyncChange, 0)
 	overrideLocked := make(map[string]struct{}, len(overrideLockedModels))
 	for _, model := range overrideLockedModels {
-		if key := priceRuleLookupKey("", model); key != "" {
+		if key := strings.TrimSpace(model); key != "" {
 			overrideLocked[key] = struct{}{}
 		}
 	}
@@ -568,7 +568,7 @@ func (s *Store) SyncModelsDevPrices(ctx context.Context, dryRun, recalculateUnpr
 	}
 	active := make(map[string]ModelPriceRule, len(activeRules))
 	for _, rule := range activeRules {
-		active[priceRuleLookupKey(rule.Provider, rule.Model)] = rule
+		active[strings.TrimSpace(rule.Model)] = rule
 	}
 	for _, item := range observed {
 		providerID, modelID, model, ok := matchModelsDevModel(catalog, item)
@@ -579,7 +579,7 @@ func (s *Store) SyncModelsDevPrices(ctx context.Context, dryRun, recalculateUnpr
 		}
 		result.Matched++
 		rule := modelPriceRuleFromModelsDev(item, providerID, modelID, model, now)
-		key := priceRuleLookupKey(rule.Provider, rule.Model)
+		key := strings.TrimSpace(rule.Model)
 		current, exists := active[key]
 		_, shouldOverrideLocked := overrideLocked[key]
 		if exists && current.Locked && !shouldOverrideLocked {

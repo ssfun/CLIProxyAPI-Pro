@@ -50,10 +50,10 @@ describe('model price presentation model', () => {
       base: { input: 1, output: 2, cacheRead: 0.5, cacheWrite: 0.75, reasoning: 3 },
       serviceTiers: { priority: { input: 4, output: 5, cacheRead: 0.4, cacheWrite: 0.5 } },
     });
-    expect(createServiceTierDraft(draft)).toEqual({
+    expect(createServiceTierDraft()).toEqual({
       name: '', input: '', output: '', cacheRead: '', cacheWrite: '', reasoning: '',
     });
-    expect(createSpeedDraft(draft)).toEqual({
+    expect(createSpeedDraft()).toEqual({
       name: '', input: '', output: '', cacheRead: '', cacheWrite: '', reasoning: '',
     });
     draft.serviceTiers = [];
@@ -63,7 +63,7 @@ describe('model price presentation model', () => {
   });
 
   test('keeps missing base rates empty when creating a service tier', () => {
-    expect(createServiceTierDraft(createPriceDraft())).toEqual({
+    expect(createServiceTierDraft()).toEqual({
       name: '',
       input: '',
       output: '',
@@ -151,5 +151,25 @@ describe('model price presentation model', () => {
     expect(parsePriceValue('not-a-number')).toBe(0);
     expect(formatDeltaPercent(1.5, 1)).toBe('+50.0%');
     expect(formatDeltaPercent(0, 0)).toBe('0.0%');
+  });
+});
+
+
+describe('price validation and serialization agree', () => {
+  test('preserves accepted numeric notation when building the saved rule', () => {
+    const draft = createPriceDraft({ model: 'test', base: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } });
+    draft.input = '0x10';
+    draft.tiers = [{ ...draft, contextSize: '2e5' }];
+    expect(validatePriceDraft(draft)).toBeNull();
+    const rule = buildModelPriceRule('test', draft);
+    expect(rule.base.input).toBe(16);
+    expect(rule.tiers?.[0].contextSize).toBe(200000);
+  });
+
+  test('rejects unsafe context integers and partial price strings', () => {
+    const draft = createPriceDraft({ model: 'test', base: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } });
+    draft.tiers = [{ ...draft, contextSize: '9007199254740992' }];
+    expect(validatePriceDraft(draft)).toBe('context_size_invalid');
+    expect(parsePriceValue('12invalid')).toBe(0);
   });
 });

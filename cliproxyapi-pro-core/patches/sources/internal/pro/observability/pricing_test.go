@@ -642,3 +642,22 @@ func TestExportJSONLIncludesPriceRulesAndCostSnapshots(t *testing.T) {
 		t.Fatalf("export missing rules/cost: rules=%v cost=%v", foundRules, foundCost)
 	}
 }
+
+func TestEstimateUsageCostMicrosRejectsInt64Overflow(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	rule := ModelPriceRule{Model: "overflow", Base: ModelPriceRate{Input: float64(math.MaxInt64) / 1_000_000}}
+	if _, _, err := store.UpsertModelPriceRule(ctx, rule, true); err != nil {
+		t.Fatal(err)
+	}
+	if micros, err := store.EstimateUsageCostMicros(ctx, UsageCostInput{Model: rule.Model, InputTokens: 1_000_000}); err == nil {
+		t.Fatalf("overflow accepted: micros=%d", micros)
+	}
+	rule.Base.Input = 1.2345678
+	if _, _, err := store.UpsertModelPriceRule(ctx, rule, true); err != nil {
+		t.Fatal(err)
+	}
+	if micros, err := store.EstimateUsageCostMicros(ctx, UsageCostInput{Model: rule.Model, InputTokens: 1_000_000}); err != nil || micros != 1234568 {
+		t.Fatalf("ordinary rounding: micros=%d err=%v", micros, err)
+	}
+}

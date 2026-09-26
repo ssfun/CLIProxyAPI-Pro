@@ -962,7 +962,7 @@ func (s *Store) insertEvents(ctx context.Context, events []internalusage.Event) 
 			return InsertResult{}, err
 		}
 		if event.EstimatedCost == nil {
-			if rule, ok := findModelPriceRule(rules, event.Provider, event.Model); ok {
+			if rule, ok := rules[strings.TrimSpace(event.Model)]; ok {
 				cost, breakdown := evaluateEventCost(event, rule)
 				event.EstimatedCost = &cost
 				event.PriceRuleID = rule.ID

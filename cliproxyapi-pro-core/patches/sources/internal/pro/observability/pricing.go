@@ -143,7 +143,7 @@ func (s *Store) EstimateUsageCostMicros(ctx context.Context, input UsageCostInpu
 	if err != nil {
 		return 0, err
 	}
-	rule, ok := findModelPriceRule(rules, input.Provider, input.Model)
+	rule, ok := rules[strings.TrimSpace(input.Model)]
 	if !ok {
 		return 0, fmt.Errorf("%w for %q", ErrModelPriceUnavailable, strings.TrimSpace(input.Model))
 	}
@@ -157,10 +157,11 @@ func (s *Store) EstimateUsageCostMicros(ctx context.Context, input UsageCostInpu
 		EffectiveServiceTier: input.EffectiveServiceTier, Speed: input.Speed,
 		EffectiveSpeed: input.EffectiveSpeed,
 	}, rule)
-	if math.IsNaN(cost) || math.IsInf(cost, 0) || cost < 0 || cost > float64(math.MaxInt64)/1_000_000 {
+	micros := math.Round(cost * 1_000_000)
+	if math.IsNaN(micros) || math.IsInf(micros, 0) || cost < 0 || micros >= float64(math.MaxInt64) {
 		return 0, fmt.Errorf("estimated model cost is outside the supported range")
 	}
-	return int64(math.Round(cost * 1_000_000)), nil
+	return int64(micros), nil
 }
 
 func normalizePriceProvider(value string) string {
@@ -298,10 +299,6 @@ func validateModelPriceRule(rule ModelPriceRule) error {
 		}
 	}
 	return nil
-}
-
-func priceRuleLookupKey(_ string, model string) string {
-	return strings.TrimSpace(model)
 }
 
 type modelPriceSelection struct {
@@ -544,7 +541,7 @@ func (s *Store) migrateProviderBoundModelPriceRules(ctx context.Context) error {
 	selected := make(map[string]ModelPriceRule, len(rules))
 	requiresMigration := map[string]bool{}
 	for _, rule := range rules {
-		key := priceRuleLookupKey("", rule.Model)
+		key := strings.TrimSpace(rule.Model)
 		if rule.Provider != "" {
 			requiresMigration[key] = true
 		}
@@ -572,14 +569,9 @@ func (s *Store) activeModelPriceRuleMap(ctx context.Context) (map[string]ModelPr
 	}
 	out := make(map[string]ModelPriceRule, len(rules))
 	for _, rule := range rules {
-		out[priceRuleLookupKey(rule.Provider, rule.Model)] = rule
+		out[strings.TrimSpace(rule.Model)] = rule
 	}
 	return out, nil
-}
-
-func findModelPriceRule(rules map[string]ModelPriceRule, provider, model string) (ModelPriceRule, bool) {
-	rule, ok := rules[priceRuleLookupKey(provider, model)]
-	return rule, ok
 }
 
 func (s *Store) UpsertModelPriceRule(ctx context.Context, rule ModelPriceRule, allowLockedOverride bool) (ModelPriceRule, bool, error) {
@@ -601,11 +593,7 @@ func (s *Store) UpsertModelPriceRule(ctx context.Context, rule ModelPriceRule, a
 	defer func() { _ = tx.Rollback() }()
 
 	var currentLocked int
-	var currentRaw string
-	err = tx.QueryRowContext(ctx, `select a.locked, v.rule_json
-		from model_price_rules a join model_price_rule_versions v
-		on v.provider = a.provider and v.model = a.model and v.version = a.active_version
-		where a.provider = ? and a.model = ?`, rule.Provider, rule.Model).Scan(&currentLocked, &currentRaw)
+	err = tx.QueryRowContext(ctx, `select locked from model_price_rules where provider = ? and model = ?`, rule.Provider, rule.Model).Scan(&currentLocked)
 	if err != nil && err != sql.ErrNoRows {
 		return ModelPriceRule{}, false, err
 	}
@@ -623,9 +611,6 @@ func (s *Store) UpsertModelPriceRule(ctx context.Context, rule ModelPriceRule, a
 	raw, err := json.Marshal(rule)
 	if err != nil {
 		return ModelPriceRule{}, false, err
-	}
-	if string(raw) == currentRaw {
-		return rule, false, nil
 	}
 	result, err := tx.ExecContext(ctx, `insert into model_price_rule_versions(provider, model, version, rule_json, effective_from_ms, created_at_ms)
 		values(?, ?, ?, ?, ?, ?)`, rule.Provider, rule.Model, rule.Version, string(raw), rule.EffectiveFrom, rule.UpdatedAt)
@@ -729,7 +714,7 @@ func (s *Store) RecalculateEventCosts(ctx context.Context, onlyUnpriced bool) (i
 	defer stmt.Close()
 	var updated int64
 	for _, item := range items {
-		rule, ok := findModelPriceRule(rules, item.event.Provider, item.event.Model)
+		rule, ok := rules[strings.TrimSpace(item.event.Model)]
 		if !ok {
 			continue
 		}
