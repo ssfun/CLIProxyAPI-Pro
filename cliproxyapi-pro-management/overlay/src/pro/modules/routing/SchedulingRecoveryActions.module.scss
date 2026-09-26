@@ -62,3 +62,15 @@
   display: grid;
   gap: 0.2rem;
 }
+
+.quickActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.quickActions > button {
+  white-space: nowrap;
+}

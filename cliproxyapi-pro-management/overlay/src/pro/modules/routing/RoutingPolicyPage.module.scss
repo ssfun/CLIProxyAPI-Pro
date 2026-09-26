@@ -132,15 +132,17 @@
 }
 
 .boardCard {
-  padding: 0;
+  display: grid;
+  gap: 14px;
+  padding: 18px;
   min-width: 0;
   overflow: hidden;
 }
 .filterSection {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 20px 24px;
+  gap: 14px;
+  min-width: 0;
 }
 .filterGrid {
   display: grid;
@@ -165,12 +167,17 @@
 
 .desktopTable {
   min-width: 0;
-  padding: 0 24px;
 }
 .desktopTable > div {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  border-radius: 8px;
+}
+.desktopTable > div > div {
+  max-height: min(560px, 64vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
 }
 .routingTable {
   width: 100%;
@@ -184,6 +191,10 @@
     vertical-align: top;
   }
   th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--muted-bg);
     padding-top: 12px;
     padding-bottom: 12px;
   }
@@ -206,7 +217,7 @@
   width: 28%;
 }
 .colActions {
-  width: 140px;
+  width: 220px;
 }
 
 .accountCell {
@@ -424,14 +435,14 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 2px;
-  flex-wrap: nowrap;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 .rowActions > button {
   white-space: nowrap;
 }
 .pagination {
-  padding: 0 24px 20px;
+  min-width: 0;
 }
 .staleNotice {
   display: flex;
@@ -455,6 +466,15 @@
 
 .mobileCards {
   display: none;
+  max-height: min(560px, 64vh);
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
 }
 .mobileCard {
   padding: 20px 0;
@@ -514,8 +534,8 @@
   .mobileCards {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    column-gap: 24px;
-    padding: 0 24px;
+    column-gap: 18px;
+    padding: 0 18px;
   }
   .filterGrid {
     grid-template-columns: minmax(160px, 1fr) 160px 140px auto;
@@ -561,7 +581,6 @@
     font-size: 10px;
   }
   .filterSection {
-    padding: 16px 20px;
     gap: 14px;
   }
   .filterGrid {
@@ -575,10 +594,7 @@
   }
   .mobileCards {
     grid-template-columns: minmax(0, 1fr);
-    padding: 0 20px;
-  }
-  .pagination {
-    padding: 0 20px 16px;
+    padding: 0 16px;
   }
 }
 @container scheduling-board (max-width: 420px) {

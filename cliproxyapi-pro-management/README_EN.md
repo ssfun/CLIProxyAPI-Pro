@@ -137,7 +137,7 @@ Adds a top-level scheduling-board route:
 /routing
 ```
 
-The page shows accounts currently withheld by the selector without reading or editing global routing values in `config.yaml`. Buckets cover quota, auth/transient failures, pending recheck, and overlap. Account details can check and recover through directed quota rechecks or pinned connection tests, and release one source/model restriction. Account Inspection opens the same recovery controls while keeping historical inspection results distinct from live scheduling state.
+The page shows accounts currently withheld by the selector without reading or editing global routing values in `config.yaml`. Buckets cover quota, auth/transient failures, pending recheck, and overlap. Each board row directly exposes Recheck and Restore: recheck runs the appropriate quota or pinned-request verification, while restore explicitly confirms and releases the current source/model restrictions by revision. Account details remain informational. Account Inspection keeps the full targeted recovery panel while historical inspection results stay distinct from live scheduling state.
 
 The page uses:
 
