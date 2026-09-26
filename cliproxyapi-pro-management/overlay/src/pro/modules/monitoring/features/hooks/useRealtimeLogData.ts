@@ -141,7 +141,6 @@ export function useRealtimeLogData({
   }, [buildFilters, captureScroll, connectionStatus, loadEventPage, setUsage]);
 
   const refresh = useCallback(async (scrollMode: RealtimeLogScrollMode = 'preserve') => {
-    setPageCursors(['']);
     return fetchPage(1, '', scrollMode);
   }, [fetchPage]);
 
@@ -156,10 +155,9 @@ export function useRealtimeLogData({
     await fetchPage(page + 1, nextCursor, 'top');
   }, [fetchPage, loading, nextCursor, page]);
 
-  const pendingEventCount = snapshotMaxId > 0 ? Math.max(latestId - snapshotMaxId, 0) : 0;
+  const pendingEventCount = usage !== null ? Math.max(latestId - snapshotMaxId, 0) : 0;
   const autoRefreshPaused = page !== 1 || !followEnabled || !atTop || detailsOpen;
   const canAutoRefresh = connectionStatus === 'connected'
-    && page === 1
     && !loading
     && pendingEventCount > 0
     && !autoRefreshPaused;

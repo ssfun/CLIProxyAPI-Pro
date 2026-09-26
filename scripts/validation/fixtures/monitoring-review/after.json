@@ -1,0 +1,38 @@
+{
+  "results": [
+    {
+      "name": "manual refresh releases spinner and publishes price",
+      "pass": true
+    },
+    {
+      "name": "failed refresh releases spinner and allows retry",
+      "pass": true
+    },
+    {
+      "name": "connection switch rejects stale price",
+      "pass": true
+    },
+    {
+      "name": "first event follows empty snapshot",
+      "pass": true
+    },
+    {
+      "name": "failed refresh preserves previous-page cursor",
+      "pass": true
+    },
+    {
+      "name": "follow pauses for page, details and disabled preference",
+      "pass": true
+    }
+  ],
+  "snapshotCalls": 7,
+  "pageCalls": [
+    "",
+    "",
+    "c2",
+    "c3",
+    "",
+    "c2",
+    ""
+  ]
+}

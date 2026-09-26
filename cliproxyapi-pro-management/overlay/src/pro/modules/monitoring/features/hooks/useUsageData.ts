@@ -462,7 +462,6 @@ const loadUsageSnapshot = async ({
 const loadUsageIncrementalSnapshot = async ({
   latestIdRef,
   datasetGenerationRef,
-  incrementalLoadingRef,
   incrementalPendingRef,
   loadUsage,
   applyUsagePayload,
@@ -470,52 +469,41 @@ const loadUsageIncrementalSnapshot = async ({
 }: {
   latestIdRef: MutableRef<number>;
   datasetGenerationRef: MutableRef<number>;
-  incrementalLoadingRef: MutableRef<boolean>;
   incrementalPendingRef: MutableRef<boolean>;
   loadUsage: () => Promise<boolean>;
   applyUsagePayload: (payload: UsagePayload | null) => boolean;
   setSyncStatus?: (status: UsageSyncStatus) => void;
 }): Promise<boolean> => {
-  if (incrementalLoadingRef.current) {
-    incrementalPendingRef.current = true;
-    return true;
-  }
-
-  incrementalLoadingRef.current = true;
   let success = true;
-  try {
-    do {
-      incrementalPendingRef.current = false;
-      const afterId = latestIdRef.current;
-      if (afterId <= 0) {
+  do {
+    incrementalPendingRef.current = false;
+    const afterId = latestIdRef.current;
+    if (afterId <= 0) {
+      success = await loadUsage();
+      continue;
+    }
+
+    try {
+      setSyncStatus?.('syncing');
+      const payload = await apiClient.get<UsagePayload>('/usage/events', {
+        params: {
+          after_id: afterId,
+          limit: USAGE_INCREMENTAL_LIMIT,
+          generation: datasetGenerationRef.current || undefined,
+        },
+      });
+      const applied = applyUsagePayload(payload ?? null);
+      if (!applied) {
         success = await loadUsage();
         continue;
       }
-
-      try {
-        setSyncStatus?.('syncing');
-        const payload = await apiClient.get<UsagePayload>('/usage/events', {
-          params: {
-            after_id: afterId,
-            limit: USAGE_INCREMENTAL_LIMIT,
-            generation: datasetGenerationRef.current || undefined,
-          },
-        });
-        const applied = applyUsagePayload(payload ?? null);
-        if (!applied) {
-          success = await loadUsage();
-          continue;
-        }
-        if (payload?.details_limited) {
-          incrementalPendingRef.current = true;
-        }
-      } catch {
-        success = await loadUsage();
+      if (payload?.details_limited) {
+        incrementalPendingRef.current = true;
       }
-    } while (incrementalPendingRef.current);
-  } finally {
-    incrementalLoadingRef.current = false;
-  }
+    } catch {
+      success = await loadUsage();
+    }
+  } while (incrementalPendingRef.current);
   return success;
 };
 
@@ -593,10 +581,9 @@ export function useUsageData(): UseUsageDataReturn {
   const requestIdRef = useRef(0);
   const latestIdRef = useRef(0);
   const datasetGenerationRef = useRef(0);
-  const incrementalLoadingRef = useRef(false);
   const incrementalPendingRef = useRef(false);
   const incrementalPromiseRef = useRef<Promise<boolean> | null>(null);
-  const refreshingRef = useRef(false);
+  const refreshingRef = useRef<symbol | null>(null);
   const syncGenerationRef = useRef(0);
   const pendingUsagePayloadRef = useRef<UsagePayload | null>(null);
   const pendingUsageFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -676,7 +663,6 @@ export function useUsageData(): UseUsageDataReturn {
     const promise = loadUsageIncrementalSnapshot({
       latestIdRef,
       datasetGenerationRef,
-      incrementalLoadingRef,
       incrementalPendingRef,
       loadUsage: () => syncGenerationRef.current === syncGeneration ? loadUsage() : Promise.resolve(false),
       applyUsagePayload: (payload) => syncGenerationRef.current === syncGeneration && applyUsagePayload(payload),
@@ -697,30 +683,32 @@ export function useUsageData(): UseUsageDataReturn {
 
   const refreshUsage = useCallback(async () => {
     if (refreshingRef.current || connectionStatus !== 'connected' || !apiBase || !managementKey) return;
-    const syncGeneration = syncGenerationRef.current;
-    refreshingRef.current = true;
+    const refreshId = Symbol();
+    refreshingRef.current = refreshId;
     setRefreshing(true);
+    // Snapshot reloads advance the stream generation; only a connection reset
+    // should invalidate this manual refresh and its model-price response.
     try {
       const [success] = await Promise.all([
         loadUsage(),
         loadModelPricesFromSqlite()
           .then((prices) => {
-            if (syncGenerationRef.current === syncGeneration) setModelPricesState(prices);
+            if (refreshingRef.current === refreshId) setModelPricesState(prices);
           })
           .catch((err) => console.error('Failed to refresh model prices from sqlite:', err)),
       ]);
-      if (success && syncGenerationRef.current === syncGeneration) {
+      if (success && refreshingRef.current === refreshId) {
         setLastRefreshedAt(new Date());
         setError('');
       }
     } catch (err) {
-      if (syncGenerationRef.current === syncGeneration) {
+      if (refreshingRef.current === refreshId) {
         setError(err instanceof Error ? err.message : String(err));
         setSyncStatus('error');
       }
     } finally {
-      if (syncGenerationRef.current === syncGeneration) {
-        refreshingRef.current = false;
+      if (refreshingRef.current === refreshId) {
+        refreshingRef.current = null;
         setRefreshing(false);
       }
     }
@@ -732,10 +720,9 @@ export function useUsageData(): UseUsageDataReturn {
     requestIdRef.current += 1;
     latestIdRef.current = 0;
     datasetGenerationRef.current = 0;
-    incrementalLoadingRef.current = false;
     incrementalPendingRef.current = false;
     incrementalPromiseRef.current = null;
-    refreshingRef.current = false;
+    refreshingRef.current = null;
     clearPendingUsagePayload();
     setUsage(null);
     setLatestId(0);
@@ -791,8 +778,6 @@ export function useUsageData(): UseUsageDataReturn {
       clearPendingUsagePayload();
     };
   }, [apiBase, clearPendingUsagePayload, connectionKey, connectionStatus, loadUsage, managementKey]);
-
-  useEffect(() => clearPendingUsagePayload, [clearPendingUsagePayload]);
 
   useEffect(() => {
     const handleVisibilityChange = () => setPageVisible(document.visibilityState !== 'hidden');

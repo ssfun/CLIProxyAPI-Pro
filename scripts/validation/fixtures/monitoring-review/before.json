@@ -1,0 +1,42 @@
+{
+  "results": [
+    {
+      "name": "manual refresh releases spinner and publishes price",
+      "pass": false,
+      "error": "Error: condition timed out"
+    },
+    {
+      "name": "failed refresh releases spinner and allows retry",
+      "pass": false,
+      "error": "Error: stuck refreshing"
+    },
+    {
+      "name": "connection switch rejects stale price",
+      "pass": false,
+      "error": "Error: condition timed out"
+    },
+    {
+      "name": "first event follows empty snapshot",
+      "pass": false,
+      "error": "Error: condition timed out"
+    },
+    {
+      "name": "failed refresh preserves previous-page cursor",
+      "pass": false,
+      "error": "Error: wrong cursor: "
+    },
+    {
+      "name": "follow pauses for page, details and disabled preference",
+      "pass": true
+    }
+  ],
+  "snapshotCalls": 2,
+  "pageCalls": [
+    "",
+    "c2",
+    "c3",
+    "",
+    "",
+    ""
+  ]
+}

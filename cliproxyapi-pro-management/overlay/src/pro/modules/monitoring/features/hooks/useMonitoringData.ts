@@ -89,11 +89,9 @@ const buildSearchText = (...parts: Array<string | number | boolean | null | unde
 type MonitoringChannelMeta = {
   key: string;
   name: string;
-  baseUrl: string;
   host: string;
   disabled: boolean;
   authIndices: string[];
-  modelNames: string[];
   authType?: 'oauth' | 'apikey' | '';
 };
 
@@ -102,12 +100,8 @@ type MonitoringAuthMeta = {
   label: string;
   account: string;
   provider: string;
-  status: string;
-  disabled: boolean;
-  unavailable: boolean;
   runtimeOnly: boolean;
   planType: string;
-  updatedAt: string;
 };
 
 export type MonitoringStatusTone = 'good' | 'warn' | 'bad';
@@ -302,29 +296,14 @@ const normalizeOpenAIChannel = (value: unknown, index: number): MonitoringChanne
     }
   });
 
-  const modelNames = Array.isArray(value.models)
-    ? value.models
-        .map((item) => {
-          if (typeof item === 'string') return readStringValue(item);
-          if (!isRecordValue(item)) return '';
-          return readStringValue(item.name ?? item.alias ?? item.id ?? item.model);
-        })
-        .filter(Boolean)
-    : [];
-
   return {
     key: `${name}:${index}`,
     name,
-    baseUrl,
     host: extractHost(baseUrl),
     disabled: readBooleanValue(value.disabled),
     authIndices: Array.from(authIndices),
-    modelNames: Array.from(new Set(modelNames)),
   };
 };
-
-const readAuthTimestamp = (entry: AuthFileItem) =>
-  readStringValue(entry['updated_at'] ?? entry.updatedAt ?? entry['modtime'] ?? entry.modified);
 
 const readNestedString = (value: unknown, path: string[]) => {
   let current = value;
@@ -391,12 +370,8 @@ const normalizeAuthMeta = (entry: AuthFileItem): MonitoringAuthMeta | null => {
     label,
     account: account || provider || '-',
     provider,
-    status: readStringValue(entry.status) || 'unknown',
-    disabled: readBooleanValue(entry.disabled),
-    unavailable: readBooleanValue(entry.unavailable),
     runtimeOnly: readBooleanValue(entry.runtime_only ?? entry.runtimeOnly),
     planType: planType || '-',
-    updatedAt: readAuthTimestamp(entry),
   };
 };
 
@@ -592,8 +567,8 @@ const buildEventRows = (
         detail.speed,
         detail.effective_speed,
         authMeta?.planType,
-        clientApiKeyIdentity.masked
-        ,detail.api_key_policy_id,
+        clientApiKeyIdentity.masked,
+        detail.api_key_policy_id,
         detail.profile_id,
         detail.profile_name_snapshot,
         detail.policy_mode,
@@ -616,8 +591,6 @@ const buildNativeProviderChannels = (
 ): MonitoringChannelMeta[] => {
   type ChannelBucket = {
     authIndices: Set<string>;
-    modelNames: Set<string>;
-    disabled: boolean;
   };
 
   const bucketMap = new Map<string, ChannelBucket>();
@@ -625,7 +598,7 @@ const buildNativeProviderChannels = (
   const ensureBucket = (key: string) => {
     let bucket = bucketMap.get(key);
     if (!bucket) {
-      bucket = { authIndices: new Set(), modelNames: new Set(), disabled: false };
+      bucket = { authIndices: new Set() };
       bucketMap.set(key, bucket);
     }
     return bucket;
@@ -648,12 +621,6 @@ const buildNativeProviderChannels = (
     items.forEach((item) => {
       const authIndex = normalizeAuthIndex(item.authIndex);
       if (authIndex) bucket.authIndices.add(authIndex);
-      if (Array.isArray(item.models)) {
-        item.models.forEach((m) => {
-          const name = typeof m === 'string' ? m.trim() : '';
-          if (name) bucket.modelNames.add(name);
-        });
-      }
     });
   });
 
@@ -675,11 +642,9 @@ const buildNativeProviderChannels = (
     channels.push({
       key: `provider:${bucketKey}`,
       name: `${label}${suffix}`,
-      baseUrl: '',
       host: provider,
-      disabled: bucket.disabled,
+      disabled: false,
       authIndices: Array.from(bucket.authIndices),
-      modelNames: Array.from(bucket.modelNames),
       authType,
     });
   });
