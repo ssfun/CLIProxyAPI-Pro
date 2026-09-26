@@ -158,6 +158,7 @@ export function useRealtimeLogData({
   const pendingEventCount = usage !== null ? Math.max(latestId - snapshotMaxId, 0) : 0;
   const autoRefreshPaused = page !== 1 || !followEnabled || !atTop || detailsOpen;
   const canAutoRefresh = connectionStatus === 'connected'
+    && page === 1
     && !loading
     && pendingEventCount > 0
     && !autoRefreshPaused;
