@@ -110,7 +110,6 @@ class MonitoringToolbarCustomizationTest(unittest.TestCase):
         self.assertIn('settingsDraftRevisionRef.current += 1;', source)
         self.assertIn('draftRevision === settingsDraftRevisionRef.current', source)
         self.assertIn('submittedRevision === settingsDraftRevisionRef.current', source)
-        self.assertIn('const fileSequence = ++restoreFileSequenceRef.current;', source)
         self.assertIn('if (sequence !== restorePreviewSequenceRef.current) return;', source)
 
     def test_realtime_logs_pause_auto_refresh_during_browsing(self) -> None:

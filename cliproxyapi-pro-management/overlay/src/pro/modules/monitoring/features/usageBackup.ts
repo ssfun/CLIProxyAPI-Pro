@@ -1,1 +1,1 @@
-export { hasDataBackupManifest as hasUsageBackupManifest } from '../../dataManagement/backup';
+export { hasDataBackupManifest as hasUsageBackupManifest } from '@/pro/modules/dataManagement';

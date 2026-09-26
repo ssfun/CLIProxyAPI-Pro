@@ -7,3 +7,4 @@ export type {
   DataManagementSettings,
   DataManagementSettingsDraft,
 } from './dataManagementSettings';
+export { hasDataBackupManifest } from './backup';
