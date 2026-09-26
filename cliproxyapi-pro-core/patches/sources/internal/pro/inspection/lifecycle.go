@@ -89,12 +89,3 @@ func (l *Lifecycle) Resume(context.Context) error {
 	l.mu.Unlock()
 	return nil
 }
-
-func (l *Lifecycle) Paused() bool {
-	if l == nil {
-		return false
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.paused
-}

@@ -288,13 +288,6 @@ func TestAntigravityInspectionBindsPreparedTokenToAutomaticAction(t *testing.T) 
 	}
 }
 
-func TestAccountInspectionDeepProbesUnknownXAIQuota(t *testing.T) {
-	decision := accountInspectionDecision{Action: accountInspectionActionKeep}
-	if !proinspection.ShouldDeepProbe(decision) {
-		t.Fatal("unknown xAI quota should allow an explicitly enabled deep probe")
-	}
-}
-
 func TestAntigravityQuotaURLsUseSummaryEndpoint(t *testing.T) {
 	for _, url := range antigravityQuotaURLs() {
 		if !strings.Contains(url, "retrieveUserQuotaSummary") {
@@ -1782,6 +1775,36 @@ func TestXAICLIFreeRefreshPreservesCurrentProbeEvidence(t *testing.T) {
 			cached := firstMap(firstMap(state, "billing"), "freeQuota")
 			if got, ok := intFromAny(cached["observedAt"]); !ok || int64(got) != observedAt {
 				t.Fatalf("historical snapshot changed: %#v", cached)
+			}
+		})
+	}
+}
+
+func TestXAIDeepProbeRetryMetrics(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		first   accountInspectionHTTPResult
+		retries int
+	}{
+		{"transient then success", accountInspectionHTTPResult{StatusCode: 503, Body: "temporary failure"}, 1},
+		{"success", accountInspectionHTTPResult{StatusCode: 200, Body: `data: {"type":"response.completed"}`}, 0},
+		{"rate limited", accountInspectionHTTPResult{StatusCode: 429, Body: "too many requests"}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metrics := &inspectionRunMetrics{startedAt: time.Now(), providers: make(map[string]*inspectionProviderMetricTotals)}
+			ctx, finish := inspectionMetricsStartAccount(inspectionMetricsContext(context.Background(), metrics), "xai", time.Now())
+			attempts := 0
+			_, _, _, err := runXAIDeepProbeWithRetry(ctx, 0, 0, func() (accountInspectionHTTPResult, error) {
+				attempts++
+				if attempts == 1 {
+					return tc.first, nil
+				}
+				return accountInspectionHTTPResult{StatusCode: 200, Body: `data: {"type":"response.completed"}`}, nil
+			})
+			finish(accountInspectionResult{})
+			got := metrics.snapshot(time.Now()).Providers["xai"].Retries
+			if err != nil || got != tc.retries || attempts != tc.retries+1 {
+				t.Fatalf("retries=%d want=%d attempts=%d err=%v", got, tc.retries, attempts, err)
 			}
 		})
 	}

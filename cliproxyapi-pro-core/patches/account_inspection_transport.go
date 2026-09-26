@@ -970,7 +970,12 @@ func runXAIDeepProbeWithRetry(
 	task func() (accountInspectionHTTPResult, error),
 ) (accountInspectionHTTPResult, accountInspectionDeepProbeStatus, string, error) {
 	var last accountInspectionHTTPResult
+	attempts := 0
 	resp, status, message, err := proinspection.RunXAIDeepProbeWithRetry(ctx, retries, retryDelay, func() (proinspection.ProbeResponse, error) {
+		if attempts > 0 {
+			inspectionMetricsRecordRetry(ctx)
+		}
+		attempts++
 		var taskErr error
 		last, taskErr = task()
 		return last.probeResponse(), taskErr

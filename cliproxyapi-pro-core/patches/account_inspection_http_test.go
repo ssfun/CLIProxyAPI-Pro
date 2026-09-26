@@ -19,7 +19,7 @@ func TestPaginateAccountInspectionResultsReturnsRequestedPage(t *testing.T) {
 		testInspectionResult("auth-2", accountInspectionActionKeep, false, testStatusCode(401), false, ""),
 	}
 
-	page, info := paginateAccountInspectionResults(results, 2, 2, "", false, "", "")
+	page, info := proinspection.PaginateResults(results, 2, 2, accountInspectionMaxResultPageSize, "", false, "", "")
 	if info.Page != 2 || info.PageSize != 2 || info.Total != 4 || info.TotalPages != 2 || info.HasMore {
 		t.Fatalf("page info = %+v, want page=2 size=2 total=4 totalPages=2 hasMore=false", info)
 	}
@@ -38,7 +38,7 @@ func TestPaginateAccountInspectionResultsFiltersHealthBuckets(t *testing.T) {
 		testInspectionResult("disabled", accountInspectionActionKeep, true, nil, false, ""),
 	}
 
-	page, info := paginateAccountInspectionResults(results, 1, 10, "quotaExhausted", false, "", "")
+	page, info := proinspection.PaginateResults(results, 1, 10, accountInspectionMaxResultPageSize, "quotaExhausted", false, "", "")
 	if info.Total != 1 || info.HasMore {
 		t.Fatalf("quota page info = %+v, want total=1 hasMore=false", info)
 	}
@@ -46,7 +46,7 @@ func TestPaginateAccountInspectionResultsFiltersHealthBuckets(t *testing.T) {
 		t.Fatalf("quota page = %+v, want quota", page)
 	}
 
-	page, info = paginateAccountInspectionResults(results, 1, 10, "pending", false, "", "")
+	page, info = proinspection.PaginateResults(results, 1, 10, accountInspectionMaxResultPageSize, "pending", false, "", "")
 	if info.Total != 3 {
 		t.Fatalf("pending page info = %+v, want total=3", info)
 	}
@@ -54,22 +54,22 @@ func TestPaginateAccountInspectionResultsFiltersHealthBuckets(t *testing.T) {
 		t.Fatalf("pending page = %+v, want auth/quota/recoverable", page)
 	}
 
-	page, info = paginateAccountInspectionResults(results, 1, 10, "attention", false, "", "")
+	page, info = proinspection.PaginateResults(results, 1, 10, accountInspectionMaxResultPageSize, "attention", false, "", "")
 	if info.Total != 5 || len(page) != 5 {
 		t.Fatalf("attention page info = %+v page=%+v, want all non-healthy results", info, page)
 	}
 
-	page, info = paginateAccountInspectionResults(results, 1, 10, "attention", true, "", "")
+	page, info = proinspection.PaginateResults(results, 1, 10, accountInspectionMaxResultPageSize, "attention", true, "", "")
 	if info.Total != 3 || len(page) != 3 || page[0].Key != "auth" || page[1].Key != "quota" || page[2].Key != "recoverable" {
 		t.Fatalf("pending attention page = %+v info=%+v, want auth/quota/recoverable", page, info)
 	}
 
-	page, info = paginateAccountInspectionResults(results, 1, 10, "accountIssues", false, "", "")
+	page, info = proinspection.PaginateResults(results, 1, 10, accountInspectionMaxResultPageSize, "accountIssues", false, "", "")
 	if info.Total != 2 || len(page) != 2 || page[0].Key != "auth" || page[1].Key != "error" {
 		t.Fatalf("account issues page = %+v info=%+v, want auth/error", page, info)
 	}
 
-	page, info = paginateAccountInspectionResults(results, 1, 10, "quotaChanges", false, "", "")
+	page, info = proinspection.PaginateResults(results, 1, 10, accountInspectionMaxResultPageSize, "quotaChanges", false, "", "")
 	if info.Total != 2 || len(page) != 2 || page[0].Key != "quota" || page[1].Key != "recoverable" {
 		t.Fatalf("quota changes page = %+v info=%+v, want quota/recoverable", page, info)
 	}
@@ -83,7 +83,7 @@ func TestPaginateAccountInspectionResultsFiltersProvider(t *testing.T) {
 		testInspectionAuthInvalidResult("claude-auth", "claude", accountInspectionActionDelete),
 	}
 
-	page, info := paginateAccountInspectionResults(results, 1, 10, "pending", false, "codex", "")
+	page, info := proinspection.PaginateResults(results, 1, 10, accountInspectionMaxResultPageSize, "pending", false, "codex", "")
 	if info.Total != 1 || info.TotalPages != 1 || info.HasMore {
 		t.Fatalf("codex pending page info = %+v, want total=1 totalPages=1 hasMore=false", info)
 	}
@@ -91,7 +91,7 @@ func TestPaginateAccountInspectionResultsFiltersProvider(t *testing.T) {
 		t.Fatalf("codex pending page = %+v, want codex-auth", page)
 	}
 
-	page, info = paginateAccountInspectionResults(results, 1, 10, "healthy", false, "claude", "")
+	page, info = proinspection.PaginateResults(results, 1, 10, accountInspectionMaxResultPageSize, "healthy", false, "claude", "")
 	if info.Total != 1 || len(page) != 1 || page[0].Key != "claude-healthy" {
 		t.Fatalf("claude healthy page = %+v info=%+v, want claude-healthy", page, info)
 	}
@@ -109,12 +109,12 @@ func TestPaginateAccountInspectionResultsSearchesAccountIdentity(t *testing.T) {
 	second.Email = "bob@example.com"
 	results := []accountInspectionResult{first, second}
 
-	page, info := paginateAccountInspectionResults(results, 1, 10, "healthy", false, "codex", "ALICE@EXAMPLE")
+	page, info := proinspection.PaginateResults(results, 1, 10, accountInspectionMaxResultPageSize, "healthy", false, "codex", "ALICE@EXAMPLE")
 	if info.Total != 1 || len(page) != 1 || page[0].Key != "first" {
 		t.Fatalf("account search page = %+v info=%+v, want first result only", page, info)
 	}
 
-	page, info = paginateAccountInspectionResults(results, 1, 10, "healthy", false, "", "claude-bob")
+	page, info = proinspection.PaginateResults(results, 1, 10, accountInspectionMaxResultPageSize, "healthy", false, "", "claude-bob")
 	if info.Total != 1 || len(page) != 1 || page[0].Key != "second" {
 		t.Fatalf("file-name search page = %+v info=%+v, want second result only", page, info)
 	}
@@ -341,7 +341,7 @@ func TestPaginateAccountInspectionPageSizeCapsAtServerMax(t *testing.T) {
 	for index := range results {
 		results[index] = testInspectionResult("result", accountInspectionActionKeep, false, nil, false, "")
 	}
-	page, info := paginateAccountInspectionResults(results, 1, accountInspectionMaxResultPageSize+100, "", false, "", "")
+	page, info := proinspection.PaginateResults(results, 1, accountInspectionMaxResultPageSize+100, accountInspectionMaxResultPageSize, "", false, "", "")
 	if info.PageSize != accountInspectionMaxResultPageSize {
 		t.Fatalf("result page size = %d, want capped %d", info.PageSize, accountInspectionMaxResultPageSize)
 	}
@@ -353,7 +353,7 @@ func TestPaginateAccountInspectionPageSizeCapsAtServerMax(t *testing.T) {
 	for index := range logs {
 		logs[index] = accountInspectionLogEntry{Time: int64(index + 1), Level: "info", Message: "log"}
 	}
-	logPage, logInfo := paginateAccountInspectionLogs(logs, 1, accountInspectionMaxLogPageSize+100, "")
+	logPage, logInfo := proinspection.PaginateLogs(logs, 1, accountInspectionMaxLogPageSize+100, accountInspectionMaxLogPageSize, "")
 	if logInfo.PageSize != accountInspectionMaxLogPageSize {
 		t.Fatalf("log page size = %d, want capped %d", logInfo.PageSize, accountInspectionMaxLogPageSize)
 	}

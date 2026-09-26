@@ -305,7 +305,7 @@ func TestBuildAntigravityGroupsSupportsSummaryBuckets(t *testing.T) {
 	if buckets[0]["id"] != "weekly" || buckets[1]["id"] != "five-hour" {
 		t.Fatalf("bucket order = %q/%q, want weekly/five-hour", buckets[0]["id"], buckets[1]["id"])
 	}
-	used := proinspection.AntigravityGroupUsedPercent(map[string]any{"buckets": buckets})
+	used := proinspection.AntigravityUsedPercent([]map[string]any{{"buckets": buckets}}, proinspection.AntigravityQuotaModeMaxUsed)
 	if used == nil || *used != 75 {
 		t.Fatalf("used percent = %v, want 75", used)
 	}

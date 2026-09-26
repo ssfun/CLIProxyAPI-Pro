@@ -113,14 +113,6 @@ func (s *accountInspectionScheduler) healthCountsLocked() accountInspectionHealt
 	return s.healthCounts
 }
 
-func paginateAccountInspectionLogs(logs []accountInspectionLogEntry, page int, pageSize int, level string) ([]accountInspectionLogEntry, accountInspectionPageInfo) {
-	return proinspection.PaginateLogs(logs, page, pageSize, accountInspectionMaxLogPageSize, level)
-}
-
-func paginateAccountInspectionResults(results []accountInspectionResult, page int, pageSize int, filter string, pendingOnly bool, provider string, search string) ([]accountInspectionResult, accountInspectionPageInfo) {
-	return proinspection.PaginateResults(results, page, pageSize, accountInspectionMaxResultPageSize, filter, pendingOnly, provider, search)
-}
-
 func (s *accountInspectionScheduler) streamStatusLocked(options accountInspectionSnapshotOptions) accountInspectionStatus {
 	healthCounts := s.healthCounts
 	if options.IncludeDetails {

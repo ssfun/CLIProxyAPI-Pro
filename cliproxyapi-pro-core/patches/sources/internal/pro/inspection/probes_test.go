@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDeepProbeRequestBodies(t *testing.T) {
@@ -164,5 +165,38 @@ func TestHTTPErrorDetailRedactsAndTruncates(t *testing.T) {
 	large := HTTPErrorDetail(strings.Repeat("x", 20*1024))
 	if len(large) > 17*1024 || !strings.HasSuffix(large, "[truncated]") {
 		t.Fatalf("large detail length/suffix = %d, %q", len(large), large[len(large)-20:])
+	}
+}
+
+func TestXAIDeepProbeCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		before bool
+		delay  time.Duration
+	}{
+		{"before first attempt", true, 0},
+		{"between immediate attempts", false, 0},
+		{"during retry wait", false, time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.before {
+				cancel()
+			}
+			attempts := 0
+			_, _, _, err := RunXAIDeepProbeWithRetry(ctx, 2, tc.delay, func() (ProbeResponse, error) {
+				attempts++
+				cancel()
+				return ProbeResponse{}, errors.New("transport interrupted")
+			})
+			want := 1
+			if tc.before {
+				want = 0
+			}
+			if !errors.Is(err, context.Canceled) || attempts != want {
+				t.Fatalf("attempts=%d want=%d err=%v", attempts, want, err)
+			}
+		})
 	}
 }

@@ -20,17 +20,6 @@ type ProbeResponse struct {
 	Body       string
 }
 
-func ShouldDeepProbe(decision Decision) bool {
-	if decision.IsQuota {
-		return false
-	}
-	return decision.Action == ActionKeep || decision.Action == ActionEnable
-}
-
-func ShouldAntigravityDeepProbe(decision Decision) bool {
-	return decision.UsedPercent != nil && ShouldDeepProbe(decision)
-}
-
 func SelectAntigravityDeepProbeModel(preferredModel string) string {
 	if model := strings.TrimSpace(preferredModel); model != "" {
 		return model
@@ -228,6 +217,9 @@ func RunXAIDeepProbeWithRetry(
 	var lastMessage string
 	var lastErr error
 	for attempt := 0; attempt < attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return last, lastStatus, lastMessage, err
+		}
 		last, lastErr = task()
 		if lastErr == nil {
 			lastStatus, lastMessage = ClassifyXAIDeepProbeResponse(last)
@@ -347,13 +339,6 @@ func redactSensitiveText(value string) string {
 func WithHTTPErrorDetail(decision Decision, body string) Decision {
 	decision.ErrorDetail = HTTPErrorDetail(body)
 	return decision
-}
-
-func StatusValue(status *int) int {
-	if status == nil {
-		return 0
-	}
-	return *status
 }
 
 func FirstStatus(statuses ...*int) *int {

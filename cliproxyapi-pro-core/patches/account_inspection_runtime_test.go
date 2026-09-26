@@ -824,12 +824,6 @@ func TestHealthCountsCacheTracksResultUpdates(t *testing.T) {
 		t.Fatalf("after replace healthCounts = %+v, want total=1 healthy=0 authInvalid=1", scheduler.healthCounts)
 	}
 
-	if !scheduler.removeInspectionResultLocked(authInvalid) {
-		t.Fatal("removeInspectionResultLocked() = false, want true")
-	}
-	if scheduler.healthCounts.Total != 0 || scheduler.healthCounts.AuthInvalid != 0 {
-		t.Fatalf("after remove healthCounts = %+v, want empty", scheduler.healthCounts)
-	}
 }
 
 func TestMergeTokenRefreshResultUpdatesErrorCodeAndHealthCounts(t *testing.T) {

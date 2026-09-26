@@ -686,20 +686,6 @@ func (s *accountInspectionScheduler) bindActionItemToSnapshot(item accountInspec
 	return accountInspectionActionItem{}, errAccountInspectionResultStale
 }
 
-func (s *accountInspectionScheduler) removeInspectionResultLocked(result accountInspectionResult) bool {
-	for index, current := range s.status.Results {
-		if !proinspection.SameResult(current, result) {
-			continue
-		}
-		s.archiveInspectionResultLocked(current)
-		s.status.Summary = proinspection.AdjustSummaryForResult(s.status.Summary, current, -1)
-		s.healthCounts = proinspection.AdjustHealthCountsForResult(s.healthCounts, current, -1)
-		s.status.Results = append(s.status.Results[:index], s.status.Results[index+1:]...)
-		return true
-	}
-	return false
-}
-
 func (s *accountInspectionScheduler) applyManualActionResultLocked(result accountInspectionResult) {
 	if result.Key == "" {
 		result.Key = proinspection.AccountKey(result.FileName, result.AuthIndex)

@@ -32,7 +32,7 @@ func emptyStringAsNil(value string) any {
 func quotaResetAtMS(candidates ...any) (int64, bool) {
 	for _, candidate := range candidates {
 		if text := stringFromProviderValue(candidate); text != "" {
-			normalized := regexpMustCompile(`(\.\d{6})\d+`).ReplaceAllString(text, "$1")
+			normalized := regexp.MustCompile(`(\.\d{6})\d+`).ReplaceAllString(text, "$1")
 			if parsed, err := time.Parse(time.RFC3339Nano, normalized); err == nil {
 				return parsed.UnixMilli(), true
 			}
@@ -389,10 +389,6 @@ func antigravityGroupUsedPercent(group map[string]any) *float64 {
 	}
 	used := math.Max(0, math.Min(100, (1-normalizeFraction(remaining))*100))
 	return &used
-}
-
-func AntigravityGroupUsedPercent(group map[string]any) *float64 {
-	return antigravityGroupUsedPercent(group)
 }
 
 func antigravityGroupRemainingFraction(group map[string]any) (float64, bool) {
@@ -868,7 +864,7 @@ func kimiResetHint(data map[string]any) string {
 		if raw == "" {
 			continue
 		}
-		truncated := regexpMustCompile(`(\.\d{6})\d+`).ReplaceAllString(raw, "$1")
+		truncated := regexp.MustCompile(`(\.\d{6})\d+`).ReplaceAllString(raw, "$1")
 		date, err := time.Parse(time.RFC3339Nano, truncated)
 		if err != nil {
 			continue
@@ -901,10 +897,6 @@ func kimiDurationHint(delta time.Duration) string {
 		return fmt.Sprintf("%dm", minutes)
 	}
 	return "<1m"
-}
-
-func regexpMustCompile(expr string) *regexp.Regexp {
-	return regexp.MustCompile(expr)
 }
 
 func MaxUsedPercentFromWindows(windows []map[string]any) *float64 {

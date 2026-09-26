@@ -213,7 +213,6 @@ class CoreModuleBoundaryTests(unittest.TestCase):
         self.assertNotIn('http.Header', probes_module)
         for declaration in (
             'type ProbeResponse struct',
-            'func ShouldDeepProbe(',
             'func BuildAntigravityDeepProbeBody(',
             'func ClassifyAntigravityDeepProbeResponse(',
             'func BuildXAIDeepProbeBody(',
@@ -328,7 +327,6 @@ class CoreModuleBoundaryTests(unittest.TestCase):
         ):
             self.assertIn(declaration, status_module)
         for delegation in (
-            'return proinspection.PaginateLogs(',
             'return proinspection.ProjectStatus(',
             'return proinspection.MergeTokenRefreshResult(',
             'return proinspection.MergeReinspectionResult(',

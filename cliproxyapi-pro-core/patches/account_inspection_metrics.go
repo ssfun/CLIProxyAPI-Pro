@@ -32,8 +32,6 @@ type inspectionProviderMetricTotals struct {
 
 type inspectionAccountMetrics struct {
 	mu                sync.Mutex
-	provider          string
-	startedAt         time.Time
 	queueWait         time.Duration
 	httpRequests      int
 	retries           int
@@ -62,7 +60,7 @@ func inspectionMetricsStartAccount(ctx context.Context, provider string, queuedA
 	if wait < 0 {
 		wait = 0
 	}
-	account := &inspectionAccountMetrics{provider: provider, startedAt: startedAt, queueWait: wait}
+	account := &inspectionAccountMetrics{queueWait: wait}
 	ctx = context.WithValue(ctx, inspectionAccountMetricsKey{}, account)
 	return ctx, func(result accountInspectionResult) {
 		account.mu.Lock()
