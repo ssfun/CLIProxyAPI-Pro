@@ -35,7 +35,6 @@ function harness(options: { refreshedLimit?: number; refreshFails?: boolean } = 
   const dependencies = {
     refreshAPIKeyBinding: async (binding: { keyRef: string }) => ({ ...binding, keyRef: 'fresh' }),
     apiKeyPolicyApi: {
-      setKeyConcurrency: async (_keyRef: string, limit: number) => { writes++; await request.promise; serverLimit = limit; },
       setKeyDisabled: async () => { writes++; await request.promise; serverDisabled = true; },
       readKey: async () => { await request.promise; return { key: 'demo-secret' }; },
     },

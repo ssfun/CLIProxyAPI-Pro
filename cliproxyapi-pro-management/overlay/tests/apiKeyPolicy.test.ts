@@ -405,7 +405,6 @@ describe('API Key Policy profile drafts', () => {
 	test('negotiates provider-model write validation without breaking older Core or Management clients', () => {
 		const client = readFileSync(resolve(import.meta.dir, '../src/pro/modules/apiKeyPolicy/apiKeyPolicy.ts'), 'utf8');
 		expect(client).toContain("const API_KEY_POLICY_WRITE_FEATURES = ['provider_model_linkage', 'key_quota_cost_period'] as const;");
-		expect(client).toContain('clientFeatures: [...API_KEY_POLICY_WRITE_FEATURES]');
 	});
 
 	test('validates the live catalog only when the saved profile changes', () => {

@@ -62,14 +62,13 @@ export function useQuotaSummaries(
     }, 15_000);
   }, [enabled, polling, loadQuotaSummaries]);
 
-  // Manual refresh also supersedes a response captured before a successful mutation.
-  const refreshQuotaAfterMutation = useCallback(() => loadQuotaSummaries(), [loadQuotaSummaries]);
   return {
     quotaSummaries,
     quotaSnapshotAt,
     quotaLoading,
     quotaError,
     loadQuotaSummaries,
-    refreshQuotaAfterMutation,
+    // Manual refresh also supersedes responses captured before a mutation.
+    refreshQuotaAfterMutation: loadQuotaSummaries,
   };
 }

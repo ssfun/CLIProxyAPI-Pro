@@ -6,9 +6,6 @@
 	padding: 2px 2px 24px;
 }
 
-.header,
-.heading,
-.headerActions,
 .cardTop,
 .cardIdentity,
 .cardActions,
@@ -23,16 +20,6 @@
   align-items: center;
 }
 
-.header {
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 22px;
-}
-
-.heading { gap: 14px; }
-.heading h1 { margin: 0; font-size: 25px; letter-spacing: -0.025em; }
-.heading p { margin: 5px 0 0; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
-.headingIcon,
 .cardIdentity > span {
   display: grid;
   place-items: center;
@@ -44,8 +31,6 @@
   background: color-mix(in srgb, var(--primary-color) 12%, var(--bg-secondary));
   border: 1px solid color-mix(in srgb, var(--primary-color) 24%, var(--border-color));
 }
-
-.headerActions { gap: 8px; }
 
 .capabilityNotice,
 .conflict {
@@ -468,11 +453,6 @@
 .quotaToolbar { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(180px, 240px) auto; gap: 10px; align-items: center; }
 .quotaStale { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 1px solid var(--warning-border); border-radius: 7px; color: var(--warning-text); background: var(--warning-bg); font-size: 11px; }
 .quotaSnapshot { margin: 0; color: var(--text-secondary); text-align: right; font-size: 10px; }
-.badge_quota_available { color: var(--success-color); }
-.badge_quota_warning { color: var(--warning-text); border-color: var(--warning-border); background: var(--warning-bg); }
-.badge_quota_exhausted,
-.badge_quota_blocked { color: var(--danger-color); border-color: color-mix(in srgb, var(--danger-color) 32%, var(--border-color)); background: color-mix(in srgb, var(--danger-color) 8%, var(--bg-primary)); }
-.badge_quota_unknown { color: var(--warning-text); border-color: var(--warning-border); background: var(--warning-bg); }
 
 .orphanedSection { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--border-color); }
 .sectionHeading { justify-content: space-between; gap: 18px; margin-bottom: 12px; }
@@ -583,9 +563,6 @@
 
 @media (max-width: 760px) {
 	.page { padding: 2px 2px 18px; }
-  .header { align-items: flex-start; flex-direction: column; }
-  .headerActions { width: 100%; }
-  .headerActions :global(.btn) { flex: 1; }
   .toolbar,
   .quotaToolbar,
   .policyGrid,

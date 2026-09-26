@@ -382,9 +382,6 @@ export const apiKeyPolicyApi = {
     return apiClient.post('/api-key-policy-key', { keyRef });
   },
 
-  setKeyConcurrency(keyRef: string, limit: number, expectedLimit: number): Promise<{ concurrencyLimit: number }> {
-    return apiClient.put('/api-key-policy-key-concurrency', { keyRef, limit, expectedLimit });
-  },
   setKeyDisabled(keyRef: string, disabled: boolean, expectedDisabled: boolean): Promise<{ disabled: boolean }> {
     return apiClient.put('/api-key-policy-key-state', { keyRef, disabled, expectedDisabled });
   },
@@ -489,10 +486,6 @@ export const apiKeyPolicyApi = {
     }));
   },
 
-  async rename(policyId: string, displayName: string, version: number): Promise<APIKeyPolicy> {
-    return normalizePolicy(await apiClient.patch<APIKeyPolicy>(policyPath(policyId), { displayName, version }));
-  },
-
   updateWorkspace(
     policyId: string,
     displayName: string,
@@ -516,27 +509,6 @@ export const apiKeyPolicyApi = {
       activeProfileId,
       concurrency,
     )).then(normalizePolicy);
-  },
-
-  createProfile(policyId: string, profile: APIKeyProfileInput, version: number): Promise<APIKeyPolicy> {
-    return apiClient.post<APIKeyPolicy>(`${policyPath(policyId)}/profiles`, {
-      ...profile,
-      version,
-      clientFeatures: [...API_KEY_POLICY_WRITE_FEATURES],
-    }).then(normalizePolicy);
-  },
-
-  replaceProfile(
-    policyId: string,
-    profileId: string,
-    profile: APIKeyProfileInput,
-    version: number,
-  ): Promise<APIKeyPolicy> {
-    return apiClient.put<APIKeyPolicy>(profilePath(policyId, profileId), {
-      ...profile,
-      version,
-      clientFeatures: [...API_KEY_POLICY_WRITE_FEATURES],
-    }).then(normalizePolicy);
   },
 
   async deleteProfile(policyId: string, profileId: string, version: number, confirmNoProfile = false): Promise<void> {

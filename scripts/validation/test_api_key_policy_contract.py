@@ -33,7 +33,6 @@ class APIKeyPolicyContractTest(unittest.TestCase):
         )
         self.assertIn("ModelProviders map[string][]string `json:\"modelProviders\"`", GO_TYPES)
         self.assertIn('"provider_model_linkage"', GO_HANDLER)
-        self.assertIn("clientFeatures: [...API_KEY_POLICY_WRITE_FEATURES]", TS_CLIENT)
 
     def test_runtime_smoke_helpers_are_syntax_valid(self) -> None:
         for relative in (

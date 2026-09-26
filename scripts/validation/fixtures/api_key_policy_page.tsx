@@ -1,0 +1,30 @@
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
+import { APIKeyPolicyPage } from '/src/pro/modules/apiKeyPolicy/APIKeyPolicyPage';
+import { apiKeyPolicyApi } from '/src/pro/modules/apiKeyPolicy/apiKeyPolicy';
+import { useAuthStore, useNotificationStore } from '/src/stores';
+import i18n from '/src/i18n';
+import '/src/styles/global.scss';
+const features = ['policy_crud','profile_crud','optimistic_concurrency','atomic_workspace_save','policy_backup_restore','policy_delete_preview','orphaned_purge_guard','takeover_control','optional_profile','key_lifecycle_controls'];
+const binding = { bindingId: 'review-key', keyRef: 'review-ref', maskedKey: 'review-***', weakKey: false, state: 'unconfigured' as const };
+const bindings = { items: [binding], orphaned: [], nextCursor: '', configGeneration: 1 };
+const state = { mode: 'read-failed', notifications: [] as string[], release: null as null | (() => void) };
+Object.assign(window, { review: state });
+apiKeyPolicyApi.status = async () => ({ takeoverEnabled: false, healthy: true, policyGeneration: 1, configuredGeneration: 1 });
+apiKeyPolicyApi.bindings = async () => bindings;
+apiKeyPolicyApi.snapshot = async () => ({ bindings, catalog: {providers: [], models: []}, capabilities: {apiVersion: 3, features} });
+apiKeyPolicyApi.readKey = async () => {
+  if (state.mode === 'read-failed') throw new Error('review read failed');
+  return {key: 'review-fixture-secret'};
+};
+Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => {
+  if (state.mode === 'clipboard-failed') throw new Error('review clipboard failed');
+  if (state.mode === 'pending') await new Promise<void>(resolve => { state.release = resolve; });
+} } });
+document.execCommand = () => false;
+useNotificationStore.setState({ showNotification: (message: string) => { state.notifications.push(message); } });
+useAuthStore.setState({connectionStatus: 'connected', apiBase: 'http://review.invalid', managementKey: 'fixture-only'});
+Object.assign(state, {disconnect: () => useAuthStore.setState({connectionStatus:'disconnected'})});
+await i18n.changeLanguage('en');
+createRoot(document.getElementById('root')!).render(<MemoryRouter><APIKeyPolicyPage /></MemoryRouter>);

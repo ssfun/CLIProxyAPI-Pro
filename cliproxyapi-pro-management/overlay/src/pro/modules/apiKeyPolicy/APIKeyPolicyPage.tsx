@@ -421,6 +421,8 @@ export function APIKeyPolicyPage() {
 
   const load = useCallback(async () => {
     setRevealedKeys({});
+    setCopiedKeyRef(null);
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
     if (connectionStatus !== 'connected') {
       setLoading(false);
       setCapability('checking');
@@ -475,21 +477,13 @@ export function APIKeyPolicyPage() {
     };
   }, [load]);
 
-  const onCopyKey = async (binding: APIKeyPolicyBinding) => {
-    await keyAction(binding, 'copy');
-    setCopiedKeyRef(binding.keyRef);
-    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
-    copiedTimerRef.current = setTimeout(() => {
-      setCopiedKeyRef((current) => (current === binding.keyRef ? null : current));
-    }, 1500);
-  };
-
   const keyAction = async (binding: APIKeyPolicyBinding, action: 'reveal' | 'copy' | 'toggle') => {
     if (keyActionBusyRef.current || savingRef.current || dangerBusyRef.current || loading || connectionStatus !== 'connected') return;
     if (action === 'reveal' && revealedKeys[binding.keyRef]) {
       setRevealedKeys((current) => { const next = { ...current }; delete next[binding.keyRef]; return next; });
       return;
     }
+    if (action === 'copy') setCopiedKeyRef(null);
     keyActionBusyRef.current = true;
     setKeyActionBusy(true);
     const revision = requestRevisionRef.current;
@@ -508,6 +502,14 @@ export function APIKeyPolicyPage() {
         if (action === 'reveal') setRevealedKeys((current) => ({ ...current, [binding.keyRef]: key }));
         else {
           const copied = await copyToClipboard(key);
+          if (session !== keyActionSessionRef.current || revision !== requestRevisionRef.current) return;
+          if (copied) {
+            setCopiedKeyRef(binding.keyRef);
+            if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+            copiedTimerRef.current = setTimeout(() => {
+              setCopiedKeyRef((current) => (current === binding.keyRef ? null : current));
+            }, 1500);
+          }
           showNotification(t(copied ? 'api_key_policy.key_copied' : 'api_key_policy.key_copy_failed'), copied ? 'success' : 'error');
         }
       }
@@ -1230,7 +1232,7 @@ export function APIKeyPolicyPage() {
                                 type="button"
                                 className={`${styles.keyPillButton} ${copiedKeyRef === binding.keyRef ? styles.copiedSuccess : ''}`}
                                 disabled={keyActionBusy || loading}
-                                onClick={() => void onCopyKey(binding)}
+                                onClick={() => void keyAction(binding, 'copy')}
                                 title={t('api_key_policy.copy_key')}
                                 aria-label={t('api_key_policy.copy_key')}
                               >
@@ -1297,7 +1299,7 @@ export function APIKeyPolicyPage() {
                             <div className={styles.metricQuotaRow} title={`${t(`api_key_policy.quota_state.${visualState}`)}: ${percent}%`}>
                               <span className={`${styles.quotaDot} ${styles[`quotaDot_${visualState}`] ?? ''}`} />
                               <span className={styles.quotaPercent}>{percent}%</span>
-                              <span className={`${styles.quotaStateBadge} ${styles[`quotaState_${visualState}`] ?? ''}`}>
+                              <span className={styles.quotaStateBadge}>
                                 {t(`api_key_policy.quota_state.${visualState}`)}
                               </span>
                             </div>
