@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Account inspection receipt fixture</title>
+    <style>
+      body { margin: 0; }
+      .inspection-receipt-fixture-toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 18px;
+        color: #18212f;
+        background: rgba(248, 250, 252, 0.97);
+        border-bottom: 1px solid #cbd5e1;
+        box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08);
+        font: 14px/1.4 system-ui, sans-serif;
+      }
+      .inspection-receipt-fixture-toolbar strong { white-space: nowrap; }
+      .inspection-receipt-fixture-toolbar select {
+        min-width: 260px;
+        max-width: 100%;
+        padding: 7px 10px;
+        border: 1px solid #94a3b8;
+        border-radius: 6px;
+        background: white;
+      }
+      @media (max-width: 520px) {
+        .inspection-receipt-fixture-toolbar { align-items: stretch; flex-direction: column; }
+        .inspection-receipt-fixture-toolbar select { min-width: 0; width: 100%; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/review.tsx"></script>
+  </body>
+</html>

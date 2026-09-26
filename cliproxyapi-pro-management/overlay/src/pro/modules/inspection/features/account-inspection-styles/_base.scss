@@ -686,6 +686,19 @@
   font-size: 12px;
 }
 
+.batchReceiptStates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 14px;
+}
+
+.batchReceiptExecution {
+  color: var(--inspect-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .batchReceiptDetails {
   display: grid;
   gap: 8px;

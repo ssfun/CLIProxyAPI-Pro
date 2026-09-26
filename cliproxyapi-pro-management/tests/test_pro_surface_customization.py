@@ -155,7 +155,7 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
         self.assertNotIn('const [batchOperations, setBatchOperations]', inspection)
         self.assertNotIn('batchOperations.map(', inspection)
         self.assertNotIn("operation.state === 'prepared'", inspection)
-        self.assertIn('const batchProblemItems =', inspection)
+        self.assertIn('const batchReceiptItems =', inspection)
         self.assertIn('<details className={styles.batchReceiptDetails}>', inspection)
         self.assertNotIn('batchOperation.items.map(', inspection)
 

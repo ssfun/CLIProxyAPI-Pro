@@ -29,6 +29,7 @@ import {
   type AccountInspectionLogLevel,
   type AccountInspectionResultItem,
 } from '@/pro/modules/inspection/features/accountInspection';
+import { getBatchReceiptItems } from './features/accountInspectionBatchReceipt';
 import { readInspectionFocusLocationState } from '@/pro/shared/inspectionNavigation';
 import { SchedulingRecoveryDialog } from './SchedulingRecoveryDialog';
 import { ProDetailDialog, ProSettingsSheet } from '@/pro/shared/ProSurface';
@@ -208,9 +209,12 @@ export function AccountInspectionPage() {
   const [batchError, setBatchError] = useState('');
   const [batchHydrated, setBatchHydrated] = useState(false);
   const batchRunning = batchOperation?.state === 'running';
-  const batchProblemItems = batchOperation?.items.filter(({ status }) =>
-    status === 'failed' || status === 'stale' || status === 'unsupported' || status === 'interrupted'
-  ) ?? [];
+  const batchReceiptItems = useMemo(() => batchOperation ? getBatchReceiptItems(batchOperation) : [], [batchOperation]);
+  const batchReceiptCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    batchReceiptItems.forEach(({ state }) => counts.set(state, (counts.get(state) ?? 0) + 1));
+    return Array.from(counts);
+  }, [batchReceiptItems]);
   const singleMutationBlocked = !batchHydrated || batchRunning;
   const openRecoveryForItem = useCallback((item: AccountInspectionResultItem) => {
     if (singleMutationBlocked) return;
@@ -1792,36 +1796,43 @@ export function AccountInspectionPage() {
 
         {batchError ? <div className={styles.inspectionInlineError} role="alert">{batchError}</div> : null}
         {batchOperation ? (
-          <section key={batchOperation.operationId} className={styles.batchReceiptPanel} aria-label={t('monitoring.account_inspection_batch_receipt_title')}>
+          <section key={batchOperation.operationId} data-testid="inspection-batch-receipt" className={styles.batchReceiptPanel} aria-label={t('monitoring.account_inspection_batch_receipt_title')}>
             <div className={styles.batchReceiptHeader}>
               <div>
                 <strong>{t('monitoring.account_inspection_batch_receipt_title')}</strong>
                 <span>{t(`monitoring.account_inspection_batch_kind_${batchOperation.kind}`)} · {t(`monitoring.account_inspection_batch_state_${batchOperation.state}`)}</span>
               </div>
-              <span>{t('monitoring.account_inspection_batch_receipt_counts', {
-                total: batchOperation.summary.total,
-                succeeded: batchOperation.summary.succeeded,
-                failed: batchOperation.summary.failed,
-                pending: batchOperation.summary.ready + batchOperation.summary.running,
-                skipped: batchOperation.summary.stale + batchOperation.summary.unsupported,
-                interrupted: batchOperation.summary.interrupted ?? 0,
-              })}</span>
+              <strong>{t('monitoring.account_inspection_batch_accounts_total', { count: batchOperation.summary.total })}</strong>
             </div>
-            {batchProblemItems.length > 0 ? (
+            <div className={styles.batchReceiptStates} role="status" aria-live="polite">
+              {batchReceiptCounts.map(([state, count]) => (
+                <span key={state}>{t(`monitoring.account_inspection_batch_account_${state}`)} <strong>{count}</strong></span>
+              ))}
+            </div>
+            <small className={styles.batchReceiptExecution}>{t('monitoring.account_inspection_batch_receipt_counts', {
+              total: batchOperation.summary.total,
+              succeeded: batchOperation.summary.succeeded,
+              failed: batchOperation.summary.failed,
+              pending: batchOperation.summary.ready + batchOperation.summary.running,
+              skipped: batchOperation.summary.stale + batchOperation.summary.unsupported,
+              interrupted: batchOperation.summary.interrupted ?? 0,
+            })}</small>
+            <small className={styles.batchReceiptExecution}>{t('monitoring.account_inspection_batch_snapshot_notice')}</small>
+            {batchReceiptItems.length > 0 ? (
               <details className={styles.batchReceiptDetails}>
-                <summary>{t('monitoring.account_inspection_batch_problem_details', { count: batchProblemItems.length })}</summary>
+                <summary>{t('monitoring.account_inspection_batch_account_details', { count: batchReceiptItems.length })}</summary>
                 <div className={styles.batchReceiptList} role="list">
-                  {batchProblemItems.map(({ key, item, status, effect, error, outcome }) => {
-                    const detail = outcome?.outcome ?? outcome;
-                    return (
-                      <div key={key} className={styles.batchReceiptItem} role="listitem">
-                        <strong>{item.displayName || item.fileName}</strong>
-                        <small>{t(`monitoring.account_inspection_batch_group_${effect}`)}</small>
-                        <span>{t(`monitoring.account_inspection_batch_status_${status}`)}</span>
-                        {(error || detail?.error || detail?.warning) ? <small className={styles.inspectionStatusError}>{error || detail?.error || detail?.warning}</small> : null}
-                      </div>
-                    );
-                  })}
+                  {batchReceiptItems.map(({ entry: { key, item, status, effect }, state, error, details }) => (
+                    <div key={key} className={styles.batchReceiptItem} role="listitem" data-receipt-state={state}>
+                      <strong>{item.displayName || item.fileName}</strong>
+                      <strong>{t(`monitoring.account_inspection_batch_account_${state}`)}</strong>
+                      <small>{t(`monitoring.account_inspection_batch_group_${effect}`)} · {t(`monitoring.account_inspection_batch_status_${status}`)}</small>
+                      {details.result?.actionReason ? <small>{details.result.actionReason}</small> : null}
+                      {error ? <small className={styles.inspectionStatusError}>{error}</small> : null}
+                      {details.reason && details.reason !== error ? <small>{details.reason}</small> : null}
+                      {details.warning && details.warning !== error ? <small className={styles.inspectionStatusError}>{details.warning}</small> : null}
+                    </div>
+                  ))}
                 </div>
               </details>
             ) : null}
