@@ -89,3 +89,30 @@ nodes:
 		t.Fatalf("Parse() error = %v, want duplicate id rejection", err)
 	}
 }
+
+func TestRejectsRecursiveEffectivePorts(t *testing.T) {
+	for _, tc := range []struct{ proxy, listen string }{
+		{"http://localhost", "127.0.0.1:80"},
+		{"https://127.0.0.1", "127.0.0.1:443"},
+		{"socks5://localhost", "127.0.0.1:1080"},
+		{"socks5h://[::1]", "[::1]:1080"},
+		{"socks5://127.0.0.1:08318", "127.0.0.1:8318"},
+	} {
+		t.Run(tc.proxy, func(t *testing.T) {
+			cfg := Default()
+			cfg.Listen = tc.listen
+			cfg.Nodes = []NodeConfig{{ID: "loop", URL: tc.proxy, Enabled: true}}
+			if err := cfg.NormalizeAndValidate(); err == nil {
+				t.Error("configuration accepted recursive endpoint")
+			}
+			recursive, err := ResolvesToLocalListener(context.Background(), tc.proxy, tc.listen)
+			if err != nil || !recursive {
+				t.Errorf("runtime recursion = %v, %v", recursive, err)
+			}
+			recursive, err = ResolvesToLocalListener(context.Background(), tc.proxy, "127.0.0.1:19999")
+			if err != nil || recursive {
+				t.Errorf("different port recursion = %v, %v", recursive, err)
+			}
+		})
+	}
+}

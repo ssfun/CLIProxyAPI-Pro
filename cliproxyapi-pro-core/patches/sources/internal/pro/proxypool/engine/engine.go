@@ -314,7 +314,7 @@ func probeProxyURL(ctx context.Context, result ProbeResult, rawProxyURL, rawTest
 	result.LatencyMS = time.Since(started).Milliseconds()
 	if errDo != nil {
 		result.Error = errDo.Error()
-		if node != nil {
+		if node != nil && ctx.Err() == nil {
 			node.MarkProbe(time.Duration(result.LatencyMS)*time.Millisecond, errDo, cfg.HealthCheck.IsolationThreshold, cfg.HealthCheck.IsolationDuration.Duration)
 		}
 		return result
@@ -323,7 +323,7 @@ func probeProxyURL(ctx context.Context, result ProbeResult, rawProxyURL, rawTest
 	body, errRead := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if errRead != nil {
 		result.Error = errRead.Error()
-		if node != nil {
+		if node != nil && ctx.Err() == nil {
 			node.MarkProbe(time.Duration(result.LatencyMS)*time.Millisecond, errRead, cfg.HealthCheck.IsolationThreshold, cfg.HealthCheck.IsolationDuration.Duration)
 		}
 		return result
@@ -331,7 +331,7 @@ func probeProxyURL(ctx context.Context, result ProbeResult, rawProxyURL, rawTest
 	if response.StatusCode < 200 || response.StatusCode >= 400 {
 		errStatus := fmt.Errorf("probe returned HTTP %d", response.StatusCode)
 		result.Error = errStatus.Error()
-		if node != nil {
+		if node != nil && ctx.Err() == nil {
 			node.MarkProbe(time.Duration(result.LatencyMS)*time.Millisecond, errStatus, cfg.HealthCheck.IsolationThreshold, cfg.HealthCheck.IsolationDuration.Duration)
 		}
 		return result
@@ -404,9 +404,6 @@ func (e *Engine) dial(ctx context.Context, target string) (socks5.DialResult, er
 	}
 	excluded := make(map[string]struct{})
 	attemptLimit := cfg.MaxFailoverAttempts
-	if attemptLimit <= 0 || attemptLimit > len(poolRef.Snapshots()) {
-		attemptLimit = len(poolRef.Snapshots())
-	}
 	var errorsSeen []error
 	for attempt := 0; attempt < attemptLimit; attempt++ {
 		node := poolRef.Select(excluded)
@@ -428,15 +425,7 @@ func (e *Engine) dial(ctx context.Context, target string) (socks5.DialResult, er
 		node.Acquire()
 		return socks5.DialResult{Conn: conn, Release: node.Release}, nil
 	}
-	if len(errorsSeen) == 0 {
-		if cfg.FailOpen {
-			directCtx, cancel := context.WithTimeout(ctx, cfg.DialTimeout.Duration)
-			defer cancel()
-			conn, errDial := (&net.Dialer{}).DialContext(directCtx, "tcp", target)
-			return socks5.DialResult{Conn: conn}, errDial
-		}
-		return socks5.DialResult{}, fmt.Errorf("no eligible proxy node")
-	}
+
 	if cfg.FailOpen {
 		directCtx, cancel := context.WithTimeout(ctx, cfg.DialTimeout.Duration)
 		defer cancel()
@@ -445,6 +434,9 @@ func (e *Engine) dial(ctx context.Context, target string) (socks5.DialResult, er
 			return socks5.DialResult{Conn: conn}, nil
 		}
 		errorsSeen = append(errorsSeen, fmt.Errorf("direct fallback: %w", errDial))
+	}
+	if len(errorsSeen) == 0 {
+		return socks5.DialResult{}, fmt.Errorf("no eligible proxy node")
 	}
 	return socks5.DialResult{}, fmt.Errorf("all selected proxy nodes failed: %w", errors.Join(errorsSeen...))
 }
@@ -539,24 +531,11 @@ func dialNode(ctx context.Context, rawProxyURL, target, listen string) (net.Conn
 	if mode != proxyutil.ModeProxy || dialer == nil {
 		return nil, fmt.Errorf("proxy node does not resolve to a concrete proxy")
 	}
-	if contextDialer, ok := dialer.(proxy.ContextDialer); ok {
-		return contextDialer.DialContext(ctx, "tcp", target)
+	contextDialer, ok := dialer.(proxy.ContextDialer)
+	if !ok {
+		return nil, fmt.Errorf("proxy node dialer does not support context cancellation")
 	}
-	type result struct {
-		conn net.Conn
-		err  error
-	}
-	done := make(chan result, 1)
-	go func() {
-		conn, errDial := dialer.Dial("tcp", target)
-		done <- result{conn: conn, err: errDial}
-	}()
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case outcome := <-done:
-		return outcome.conn, outcome.err
-	}
+	return contextDialer.DialContext(ctx, "tcp", target)
 }
 
 func decodeProbeBody(body []byte, result *ProbeResult) {

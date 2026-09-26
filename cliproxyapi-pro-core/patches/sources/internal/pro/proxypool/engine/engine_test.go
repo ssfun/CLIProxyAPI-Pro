@@ -359,3 +359,74 @@ func TestDialNodeRejectsResolvedLoopbackAlias(t *testing.T) {
 		t.Fatalf("dialNode() error = %v", err)
 	}
 }
+
+func TestProbeCancellationDoesNotPenalizeNode(t *testing.T) {
+	for _, body := range []bool{false, true} {
+		t.Run(fmt.Sprintf("body=%v", body), func(t *testing.T) {
+			working := startConnectProxy(t)
+			reached := make(chan struct{})
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if body {
+					w.WriteHeader(http.StatusOK)
+					w.(http.Flusher).Flush()
+				}
+				close(reached)
+				<-r.Context().Done()
+			}))
+			t.Cleanup(target.Close)
+			cfg := proxyconfig.Default()
+			cfg.Listen = freeAddress(t)
+			cfg.HealthCheck.Enabled = false
+			cfg.HealthCheck.IsolationThreshold = 1
+			cfg.Nodes = []proxyconfig.NodeConfig{{ID: "probe", URL: "http://" + working.listener.Addr().String(), Enabled: true, Weight: 1}}
+			engine := New()
+			if err := engine.ApplyConfig(cfg); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(engine.Close)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan ProbeResult, 1)
+			go func() { done <- engine.Probe(ctx, "probe", target.URL) }()
+			select {
+			case <-reached:
+			case <-time.After(3 * time.Second):
+				t.Fatal("probe did not reach target")
+			}
+			cancel()
+			select {
+			case result := <-done:
+				if result.Success || result.Error == "" {
+					t.Fatalf("canceled probe = %+v", result)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("probe did not stop")
+			}
+			snapshot := engine.Status().Nodes[0]
+			if snapshot.State != "unknown" || snapshot.ConsecutiveFailures != 0 || !snapshot.LastCheck.IsZero() {
+				t.Fatalf("caller cancellation penalized node: %+v", snapshot)
+			}
+		})
+	}
+}
+
+func TestProbeOwnTimeoutStillPenalizesNode(t *testing.T) {
+	working := startConnectProxy(t)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	t.Cleanup(target.Close)
+	cfg := proxyconfig.Default()
+	cfg.Listen = freeAddress(t)
+	cfg.HealthCheck.Enabled = false
+	cfg.HealthCheck.Timeout.Duration = 100 * time.Millisecond
+	cfg.HealthCheck.IsolationThreshold = 1
+	cfg.Nodes = []proxyconfig.NodeConfig{{ID: "probe", URL: "http://" + working.listener.Addr().String(), Enabled: true, Weight: 1}}
+	engine := New()
+	if err := engine.ApplyConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(engine.Close)
+	result := engine.Probe(context.Background(), "probe", target.URL)
+	if result.Success || engine.Status().Nodes[0].State != "isolated" {
+		t.Fatalf("timeout did not isolate: %+v", result)
+	}
+}

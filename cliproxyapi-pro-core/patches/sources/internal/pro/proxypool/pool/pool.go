@@ -115,16 +115,6 @@ func (n *Node) eligible(now time.Time) bool {
 	return n.config.Enabled && n.state != HealthIsolated
 }
 
-func (n *Node) checkable(now time.Time) bool {
-	if n == nil {
-		return false
-	}
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.refreshExpiredIsolationLocked(now)
-	return n.config.Enabled && n.state != HealthIsolated
-}
-
 func (n *Node) refreshExpiredIsolationLocked(now time.Time) {
 	if n.state == HealthIsolated && !now.Before(n.isolationUntil) {
 		n.state = HealthUnknown
@@ -357,7 +347,7 @@ func (p *Pool) NodesForCheck(now time.Time) []*Node {
 	p.mu.RLock()
 	nodes := make([]*Node, 0, len(p.nodes))
 	for _, node := range p.nodes {
-		if node.checkable(now) {
+		if node.eligible(now) {
 			nodes = append(nodes, node)
 		}
 	}

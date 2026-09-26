@@ -182,7 +182,7 @@ func (cfg *Config) NormalizeAndValidate() error {
 		return fmt.Errorf("invalid health-check test-url %q", cfg.HealthCheck.TestURL)
 	}
 
-	listenHost, listenPort, _ := net.SplitHostPort(cfg.Listen)
+	listenHost, listenPort, _ := net.SplitHostPort(canonicalHostPort(cfg.Listen))
 	listenHostPort := canonicalHostPort(cfg.Listen)
 	seenIDs := make(map[string]struct{}, len(cfg.Nodes))
 	seenURLs := make(map[string]struct{}, len(cfg.Nodes))
@@ -231,7 +231,7 @@ func (cfg *Config) NormalizeAndValidate() error {
 }
 
 func proxyURLTargetsObviousLoopback(parsed *url.URL, listenHost, listenPort string) bool {
-	if parsed == nil || parsed.Port() != listenPort {
+	if parsed == nil || effectiveProxyPort(parsed) != listenPort {
 		return false
 	}
 	listenerHost := strings.TrimSpace(listenHost)
@@ -257,8 +257,8 @@ func ResolvesToLocalListener(ctx context.Context, rawProxyURL, listen string) (b
 	if errParse != nil || parsed.Host == "" {
 		return false, errParse
 	}
-	listenHost, listenPort, errListen := net.SplitHostPort(strings.TrimSpace(listen))
-	if errListen != nil || parsed.Port() != listenPort {
+	listenHost, listenPort, errListen := net.SplitHostPort(canonicalHostPort(listen))
+	if errListen != nil || effectiveProxyPort(parsed) != listenPort {
 		return false, errListen
 	}
 	if canonicalHostPort(parsed.Host) == canonicalHostPort(listen) ||
@@ -292,5 +292,27 @@ func canonicalHostPort(raw string) string {
 	if err != nil {
 		return strings.ToLower(strings.TrimSpace(raw))
 	}
+	if number, err := strconv.Atoi(port); err == nil {
+		port = strconv.Itoa(number)
+	}
 	return net.JoinHostPort(strings.ToLower(strings.TrimSpace(host)), port)
+}
+
+// Match the actual dialers' default ports when checking for recursive hops.
+func effectiveProxyPort(parsed *url.URL) string {
+	port := parsed.Port()
+	if port == "" {
+		switch strings.ToLower(parsed.Scheme) {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		case "socks5", "socks5h":
+			port = "1080"
+		}
+	}
+	if number, err := strconv.Atoi(port); err == nil {
+		return strconv.Itoa(number)
+	}
+	return port
 }

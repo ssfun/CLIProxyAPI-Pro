@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,7 +25,6 @@ const (
 	replySucceeded    = 0x00
 	replyGeneral      = 0x01
 	replyNotAllowed   = 0x02
-	replyNetwork      = 0x03
 	replyHost         = 0x04
 	replyRefused      = 0x05
 	replyCommand      = 0x07
@@ -283,44 +283,14 @@ func replyForDialError(err error) byte {
 	if errors.As(err, &dnsErr) {
 		return replyHost
 	}
-	if stringsContainsFold(err.Error(), "refused") {
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "refused") {
 		return replyRefused
 	}
-	if stringsContainsFold(err.Error(), "not allowed") {
+	if strings.Contains(message, "not allowed") {
 		return replyNotAllowed
 	}
 	return replyGeneral
-}
-
-func stringsContainsFold(value, fragment string) bool {
-	if len(fragment) == 0 || len(value) < len(fragment) {
-		return false
-	}
-	for index := 0; index+len(fragment) <= len(value); index++ {
-		if equalFoldASCII(value[index:index+len(fragment)], fragment) {
-			return true
-		}
-	}
-	return false
-}
-
-func equalFoldASCII(left, right string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for index := range left {
-		a, b := left[index], right[index]
-		if a >= 'A' && a <= 'Z' {
-			a += 'a' - 'A'
-		}
-		if b >= 'A' && b <= 'Z' {
-			b += 'a' - 'A'
-		}
-		if a != b {
-			return false
-		}
-	}
-	return true
 }
 
 func relay(client net.Conn, clientReader io.Reader, upstream net.Conn) {
