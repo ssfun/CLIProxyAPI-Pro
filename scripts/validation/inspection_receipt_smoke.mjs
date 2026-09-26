@@ -167,7 +167,7 @@ record('recovery: nested warning remains visible',
 );
 const stillRestricted = recovery.rows.find((row) => row.account === 'still-restricted');
 record('recovery: failure and final restriction reason remain visible',
-  stillRestricted?.text.includes('fixture recovery check failed') === true
+  stillRestricted?.text.includes('检查已完成，账号仍有限制') === true
     && stillRestricted.text.includes('fixture quota restriction'),
   stillRestricted,
 );

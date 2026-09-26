@@ -32,3 +32,22 @@ available as supporting detail, but it must not be the primary conclusion.
   component with fixture markup.
 - The JSON artifact includes the URL, viewport, observed category order, item
   order, and per-assertion evidence so another run can be compared directly.
+
+## Batch error localization regression matrix
+
+Before implementation, freeze these failure cases for browser verification:
+
+- Starting recovery with all targets lacking an active restriction returns HTTP
+  409 with `items`; show a localized informational conclusion and every reason.
+- All stale, all disabled, and mixed rejected targets must have distinct or
+  generic warning conclusions, never be described as successfully recovered.
+- Disabled detection uses only the server-returned target snapshot; unknown or
+  malformed payloads must retain a generic conclusion, not invent a reason.
+- Starting and retrying use the same formatter; polling and receipt internal
+  errors must also be translated. Unknown upstream diagnostic text is preserved.
+- Switching between en, ru, zh-CN and zh-TW re-translates an already visible
+  rejection without resending the operation.
+- A later successful operation clears the rejection; old receipt state must not
+  be mistaken for the rejected operation's result.
+- API errors without structured details still show a translated generic error;
+  malformed `items` must not crash the page.

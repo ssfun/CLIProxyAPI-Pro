@@ -29,6 +29,7 @@ import {
   type AccountInspectionLogLevel,
   type AccountInspectionResultItem,
 } from '@/pro/modules/inspection/features/accountInspection';
+import { buildInspectionBatchError, formatInspectionBatchMessage } from './features/accountInspectionBatchErrors';
 import { getBatchReceiptItems } from './features/accountInspectionBatchReceipt';
 import { readInspectionFocusLocationState } from '@/pro/shared/inspectionNavigation';
 import { SchedulingRecoveryDialog } from './SchedulingRecoveryDialog';
@@ -206,7 +207,8 @@ export function AccountInspectionPage() {
   const [resultBulkScope, setResultBulkScope] = useState<ResultBulkScope>('selected');
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [batchOperation, setBatchOperation] = useState<AccountInspectionBatchOperation | null>(null);
-  const [batchError, setBatchError] = useState('');
+  const [batchErrorSource, setBatchError] = useState<unknown>(null);
+  const batchError = buildInspectionBatchError(batchErrorSource, t);
   const [batchHydrated, setBatchHydrated] = useState(false);
   const batchRunning = batchOperation?.state === 'running';
   const batchReceiptItems = useMemo(() => batchOperation ? getBatchReceiptItems(batchOperation) : [], [batchOperation]);
@@ -394,6 +396,7 @@ export function AccountInspectionPage() {
     let cancelled = false;
     setBatchHydrated(false);
     setBatchOperation(null);
+    setBatchError(null);
     let operationId = '';
     try {
       const stored = JSON.parse(window.sessionStorage.getItem(batchStorageKey) || '[]');
@@ -448,7 +451,7 @@ export function AccountInspectionPage() {
           }
         }
       } catch (error) {
-        if (!cancelled) setBatchError(error instanceof Error ? error.message : String(error));
+        if (!cancelled) setBatchError(error);
       } finally {
         polling = false;
       }
@@ -1035,10 +1038,10 @@ export function AccountInspectionPage() {
               const { currentInspectionDetailOptions: options, applyBackendResponse: apply, loadAuthFiles: load } = batchRefreshRef.current;
               void accountInspectionApi.getStatus(options)
                 .then((response) => { apply(response); void load(); })
-                .catch((error) => setBatchError(error instanceof Error ? error.message : String(error)));
+                .catch((error) => setBatchError(error));
             }
           })
-          .catch((error) => setBatchError(error instanceof Error ? error.message : String(error)))
+          .catch((error) => { setBatchOperation(null); setBatchError(error); })
           .finally(() => setBulkActionLoading(false));
       },
     });
@@ -1051,7 +1054,7 @@ export function AccountInspectionPage() {
       const started = await accountInspectionApi.retryExecuteBatch(operationId);
       setBatchOperation(started);
     } catch (error) {
-      setBatchError(error instanceof Error ? error.message : String(error));
+      setBatchError(error);
     } finally {
       setBulkActionLoading(false);
     }
@@ -1794,7 +1797,27 @@ export function AccountInspectionPage() {
           </div>
         ) : null}
 
-        {batchError ? <div className={styles.inspectionInlineError} role="alert">{batchError}</div> : null}
+        {batchError ? (
+          <section data-testid="inspection-batch-error" className={styles.batchReceiptPanel}>
+            <div className={batchError.tone === 'error' ? styles.inspectionInlineError : undefined}
+              role={batchError.tone === 'info' ? 'status' : 'alert'}>
+              {batchError.message}
+            </div>
+            {batchError.items.length > 0 ? (
+              <details className={styles.batchReceiptDetails}>
+                <summary>{t('monitoring.account_inspection_batch_rejected_details', { count: batchError.items.length })}</summary>
+                <div className={styles.batchReceiptList} role="list">
+                  {batchError.items.map((item, index) => (
+                    <div key={index} className={styles.batchReceiptItem} role="listitem">
+                      <strong>{item.name}</strong>
+                      <span>{item.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            ) : null}
+          </section>
+        ) : null}
         {batchOperation ? (
           <section key={batchOperation.operationId} data-testid="inspection-batch-receipt" className={styles.batchReceiptPanel} aria-label={t('monitoring.account_inspection_batch_receipt_title')}>
             <div className={styles.batchReceiptHeader}>
@@ -1828,9 +1851,9 @@ export function AccountInspectionPage() {
                       <strong>{t(`monitoring.account_inspection_batch_account_${state}`)}</strong>
                       <small>{t(`monitoring.account_inspection_batch_group_${effect}`)} · {t(`monitoring.account_inspection_batch_status_${status}`)}</small>
                       {details.result?.actionReason ? <small>{details.result.actionReason}</small> : null}
-                      {error ? <small className={styles.inspectionStatusError}>{error}</small> : null}
-                      {details.reason && details.reason !== error ? <small>{details.reason}</small> : null}
-                      {details.warning && details.warning !== error ? <small className={styles.inspectionStatusError}>{details.warning}</small> : null}
+                      {error ? <small className={styles.inspectionStatusError}>{formatInspectionBatchMessage(error, t)}</small> : null}
+                      {details.reason && details.reason !== error ? <small>{formatInspectionBatchMessage(details.reason, t)}</small> : null}
+                      {details.warning && details.warning !== error ? <small className={styles.inspectionStatusError}>{formatInspectionBatchMessage(details.warning, t)}</small> : null}
                     </div>
                   ))}
                 </div>

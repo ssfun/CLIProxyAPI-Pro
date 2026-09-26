@@ -42,3 +42,24 @@ timeouts are otherwise recorded as `failed` without discarding DOM evidence.
 The runner writes the JSON artifact and adjacent `.desktop.png` and
 `.mobile.png` screenshots. It deliberately leaves the TaskSpace open so the
 main validation task can inspect the final page and screenshots.
+
+## Batch error localization
+
+The same fixture also provides a batch-error selector and language selector.
+`inspection_batch_errors_smoke.mjs` clicks the real recovery/retry buttons,
+checks rejected-account details and live language switching, and writes a JSON
+report. The APIs are local stubs; this does not send recovery requests to Core.
+
+Prepend a configuration to the runner's stdin (Ego does not inherit shell
+variables into its Node process):
+
+```js
+globalThis.inspectionBatchErrorConfig = {
+  spaceId: 4, // Use the TaskSpace created for your validation task.
+  url: 'http://127.0.0.1:5189/review.html',
+  artifact: '/tmp/inspection-batch-i18n-browser.json',
+};
+```
+
+Run that prelude followed by `scripts/validation/inspection_batch_errors_smoke.mjs`
+through `ego-browser nodejs`. Finish the TaskSpace after inspecting the report.

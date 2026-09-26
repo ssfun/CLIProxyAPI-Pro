@@ -155,7 +155,7 @@ const operations: Record<ScenarioName, AccountInspectionBatchOperation> = {
     },
     {
       key: 'still-restricted', status: 'failed', effect: 'recovery_check', item: target('still-restricted', 'enable', true),
-      error: 'fixture recovery check failed',
+      error: 'check completed; account remains restricted',
       outcome: { success: false, receipts: [{ before: { authId: 'restriction-old' }, after: { authId: 'restriction-current', reason: 'fixture quota restriction' }, steps: ['probe'] }] },
     },
     {
@@ -224,6 +224,8 @@ const backendResponse: AccountInspectionBackendResponse = {
 const fixtureState = {
   scenario: 'recheck-mixed' as ScenarioName,
   storageKey: batchStorageKey(),
+  errorMode: 'none',
+  requestCount: 0,
   get operation() { return operations[this.scenario]; },
 };
 
@@ -265,14 +267,44 @@ accountInspectionApi.getBatch = async (operationId: string) => {
   if (!found) throw new Error(`Unknown inspection receipt fixture operation: ${operationId}`);
   return structuredClone(found);
 };
-accountInspectionApi.retryExecuteBatch = async (operationId: string) => accountInspectionApi.getBatch(operationId);
+const rejectBatch = () => {
+  fixtureState.requestCount += 1;
+  const mode = fixtureState.errorMode;
+  if (mode === 'none') return;
+  const entry = (name: string, reason: string, disabled = false, status = 'unsupported') => ({
+    key: name, status, effect: 'unknown', item: target(name, 'enable', disabled), error: reason,
+  });
+  const missing = entry('no-restriction', 'account has no active recoverable restriction');
+  const disabled = entry('disabled-account', 'account has no active recoverable restriction', true);
+  const stale = entry('stale-account', 'account inspection result is stale or no longer available', false, 'stale');
+  const items = mode === 'no-restriction' ? [missing]
+    : mode === 'disabled' ? [disabled]
+      : mode === 'stale' ? [stale] : [missing, disabled, stale];
+  const message = mode === 'unknown' ? 'fixture upstream diagnostic 503'
+    : mode === 'expired' ? 'retry preflight expired; prepare a new retry'
+      : 'batch has no executable targets';
+  const error = Object.assign(new Error(message), {
+    status: 409,
+    details: mode === 'malformed' ? { error: message, items: [null, {}] }
+      : mode === 'unstructured' ? undefined : { error: message, items },
+  });
+  throw error;
+};
+accountInspectionApi.startBatch = async () => {
+  rejectBatch();
+  return structuredClone(operations['action-effects']);
+};
+accountInspectionApi.retryExecuteBatch = async (operationId: string) => {
+  rejectBatch();
+  return accountInspectionApi.getBatch(operationId);
+};
 authFilesApi.list = async () => ({ files: [] });
 quotaPersistenceMiddleware.markStale = () => {};
 quotaPersistenceMiddleware.ensureFresh = async () => {};
 
 useNotificationStore.setState({
   showNotification: () => {},
-  showConfirmation: ({ onConfirm }: { onConfirm?: () => void | Promise<void> }) => void onConfirm,
+  showConfirmation: ({ onConfirm }: { onConfirm?: () => void | Promise<void> }) => void onConfirm?.(),
 });
 useAuthStore.setState({ connectionStatus: 'connected', apiBase, managementKey });
 
@@ -300,6 +332,16 @@ function FixtureApp() {
           {(Object.keys(scenarioLabels) as ScenarioName[]).map((name) => (
             <option key={name} value={name}>{scenarioLabels[name]}</option>
           ))}
+        </select>
+        <select aria-label="批量错误场景" id="inspection-batch-error-mode" defaultValue="none"
+          onChange={(event) => { fixtureState.errorMode = event.currentTarget.value; }}>
+          {['none', 'no-restriction', 'disabled', 'stale', 'mixed', 'unknown', 'expired', 'malformed', 'unstructured'].map((mode) => (
+            <option key={mode} value={mode}>{mode}</option>
+          ))}
+        </select>
+        <select aria-label="测试语言" id="inspection-fixture-language" defaultValue="zh-CN"
+          onChange={(event) => void i18n.changeLanguage(event.currentTarget.value)}>
+          {['zh-CN', 'zh-TW', 'en', 'ru'].map((language) => <option key={language}>{language}</option>)}
         </select>
       </label>
       <MemoryRouter key={scenario}>
