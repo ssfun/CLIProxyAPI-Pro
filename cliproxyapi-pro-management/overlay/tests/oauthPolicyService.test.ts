@@ -137,18 +137,21 @@ describe("oauth account policy service", () => {
     expect(isValidOAuthModelPattern("model-\\")).toBe(false);
   });
 
-  it("treats a cleared prefix as inheriting the account value", () => {
+  it("preserves explicit empty wire prefixes while blank editor input inherits", () => {
     expect(normalizeOAuthPolicyPrefix(" /team/ ")).toBe("team");
     expect(normalizeOAuthPolicyPrefix("  ")).toBeUndefined();
 
     const config = normalizeOAuthPolicyConfig({
       providers: { codex: { plans: { pro: { prefix: "" } } } },
     });
-    expect(config.providers.codex.plans.pro.prefix).toBeUndefined();
+    expect(config.providers.codex.plans.pro.prefix).toBe("");
     const serialized = serializeOAuthPolicyConfig(config) as {
       providers: Record<string, { plans: Record<string, Record<string, unknown>> }>;
     };
-    expect(serialized.providers.codex.plans.pro).not.toHaveProperty("prefix");
+    expect(serialized.providers.codex.plans.pro).toHaveProperty("prefix", "");
+    config.providers.codex.plans.pro.prefix = undefined;
+    const inherited = serializeOAuthPolicyConfig(config) as typeof serialized;
+    expect(inherited.providers.codex.plans.pro).not.toHaveProperty("prefix");
   });
 
   it("converts duration values for fixed-unit controls", () => {

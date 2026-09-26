@@ -124,6 +124,51 @@ func TestNewRejectsCorruptPersistedConfig(t *testing.T) {
 	}
 }
 
+// Failure cases: a failed current read must not migrate legacy data; invalid
+// current or legacy settings must not delete the only recoverable legacy copy.
+type failedCurrentReadStore struct{ *memorySettingsStore }
+
+func (s *failedCurrentReadStore) Get(ctx context.Context, namespace string) (settings.Item, bool, error) {
+	if namespace == settings.NamespaceOAuthPolicy {
+		return settings.Item{}, false, fmt.Errorf("current read failed")
+	}
+	return s.memorySettingsStore.Get(ctx, namespace)
+}
+
+func TestNewDoesNotMutateSettingsAfterReadOrValidationFailure(t *testing.T) {
+	for _, scenario := range []string{"read-error", "invalid-current", "invalid-legacy", "unsupported-legacy"} {
+		t.Run(scenario, func(t *testing.T) {
+			legacy := settings.Item{Namespace: settings.LegacyNamespaceOAuthModelPolicy, SchemaVersion: 1, Settings: json.RawMessage(`{"enabled":true}`)}
+			memory := &memorySettingsStore{items: map[string]settings.Item{legacy.Namespace: legacy}}
+			var store settings.Store = memory
+			switch scenario {
+			case "read-error":
+				store = &failedCurrentReadStore{memory}
+			case "invalid-current":
+				memory.items[settings.NamespaceOAuthPolicy] = settings.Item{Namespace: settings.NamespaceOAuthPolicy, SchemaVersion: 1, Settings: json.RawMessage(`{"cache-ttl":"invalid"}`)}
+			case "invalid-legacy":
+				legacy.Settings = json.RawMessage(`{"cache-ttl":"invalid"}`)
+				memory.items[legacy.Namespace] = legacy
+			case "unsupported-legacy":
+				legacy.SchemaVersion = 99
+				memory.items[legacy.Namespace] = legacy
+			}
+			before, _ := json.Marshal(memory.items)
+			service, err := New(context.Background(), store)
+			if service != nil {
+				service.Close()
+			}
+			if err == nil {
+				t.Error("expected startup error")
+			}
+			after, _ := json.Marshal(memory.items)
+			if string(before) != string(after) {
+				t.Fatalf("failed startup mutated settings: before=%s after=%s", before, after)
+			}
+		})
+	}
+}
+
 func TestFilterReadsFreshQuotaSnapshotByAuthIdentity(t *testing.T) {
 	store := &planSettingsStore{
 		memorySettingsStore: &memorySettingsStore{items: map[string]settings.Item{

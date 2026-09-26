@@ -50,7 +50,6 @@ type Service struct {
 	planEvidenceRevision uint64
 	authEpochs           map[string]uint64
 	authVersions         map[string]authVersion
-	configErr            string
 	effective            map[string]modelengine.EffectivePolicy
 	decisions            map[string]modelengine.Result
 	onChange             func(context.Context)
@@ -92,41 +91,49 @@ func New(ctx context.Context, store settings.Store) (*Service, error) {
 func loadConfig(ctx context.Context, store settings.Store) (modelconfig.Config, error) {
 	cfg, _ := modelconfig.Parse(nil)
 	item, found, err := store.Get(ctx, settings.NamespaceOAuthPolicy)
-	if err != nil || !found {
-		legacy, legacyFound, legacyErr := store.Get(ctx, settings.LegacyNamespaceOAuthModelPolicy)
-		if legacyErr != nil || !legacyFound {
-			return cfg, firstError(err, legacyErr)
+	if err != nil {
+		return cfg, err
+	}
+	migrate := !found
+	if migrate {
+		item, found, err = store.Get(ctx, settings.LegacyNamespaceOAuthModelPolicy)
+		if err != nil || !found {
+			return cfg, err
 		}
-		legacy.Namespace = settings.NamespaceOAuthPolicy
-		if errPut := store.Put(ctx, legacy); errPut != nil {
-			return cfg, errPut
+	}
+	cfg, err = parseSetting(item)
+	if err != nil {
+		return cfg, err
+	}
+	if migrate {
+		item.Namespace = settings.NamespaceOAuthPolicy
+		if err = store.Put(ctx, item); err != nil {
+			return cfg, err
 		}
 		verified, verifiedFound, errVerify := store.Get(ctx, settings.NamespaceOAuthPolicy)
-		if errVerify != nil || !verifiedFound {
-			return cfg, firstError(errVerify, fmt.Errorf("verify migrated OAuth policy setting"))
+		if errVerify != nil {
+			return cfg, errVerify
 		}
-		if errDelete := store.Delete(ctx, settings.LegacyNamespaceOAuthModelPolicy); errDelete != nil {
-			return cfg, errDelete
+		if !verifiedFound {
+			return cfg, fmt.Errorf("verify migrated OAuth policy setting")
 		}
-		item = verified
-	} else {
-		if errDelete := store.Delete(ctx, settings.LegacyNamespaceOAuthModelPolicy); errDelete != nil {
-			return cfg, errDelete
+		cfg, err = parseSetting(verified)
+		if err != nil {
+			return cfg, err
 		}
 	}
-	if item.SchemaVersion != settings.SchemaVersionOne {
-		return cfg, fmt.Errorf("unsupported OAuth account policy schema version %d", item.SchemaVersion)
+	// Only remove the legacy copy after the selected configuration is usable.
+	if err = store.Delete(ctx, settings.LegacyNamespaceOAuthModelPolicy); err != nil {
+		return cfg, err
 	}
-	return modelconfig.Parse(item.Settings)
+	return cfg, nil
 }
 
-func firstError(values ...error) error {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
+func parseSetting(item settings.Item) (modelconfig.Config, error) {
+	if item.SchemaVersion != settings.SchemaVersionOne {
+		return modelconfig.Config{}, fmt.Errorf("unsupported OAuth account policy schema version %d", item.SchemaVersion)
 	}
-	return nil
+	return modelconfig.Parse(item.Settings)
 }
 
 func (s *Service) Close() {
@@ -195,14 +202,8 @@ func (s *Service) UpdateConfig(ctx context.Context, cfg modelconfig.Config) erro
 		}); err != nil {
 			return err
 		}
-		engine := modelengine.New()
-		engine.ApplyConfig(normalized)
 		s.config = normalized
-		s.engine = engine
-		s.revision++
-		s.configErr = ""
-		s.effective = make(map[string]modelengine.EffectivePolicy)
-		s.decisions = make(map[string]modelengine.Result)
+		s.resetEngineLocked()
 		return nil
 	}
 	if coordinator, ok := s.store.(settings.WriteCoordinator); ok {
@@ -217,10 +218,7 @@ func (s *Service) UpdateConfig(ctx context.Context, cfg modelconfig.Config) erro
 }
 
 func (s *Service) applyImportedSetting(_ context.Context, item settings.Item) error {
-	if item.SchemaVersion != settings.SchemaVersionOne {
-		return fmt.Errorf("unsupported OAuth account policy schema version %d", item.SchemaVersion)
-	}
-	cfg, err := modelconfig.Parse(item.Settings)
+	cfg, err := parseSetting(item)
 	if err != nil {
 		return err
 	}
@@ -229,14 +227,8 @@ func (s *Service) applyImportedSetting(_ context.Context, item settings.Item) er
 		s.mu.Unlock()
 		return fmt.Errorf("account policy service is closed")
 	}
-	engine := modelengine.New()
-	engine.ApplyConfig(cfg)
 	s.config = cfg
-	s.engine = engine
-	s.revision++
-	s.configErr = ""
-	s.effective = make(map[string]modelengine.EffectivePolicy)
-	s.decisions = make(map[string]modelengine.Result)
+	s.resetEngineLocked()
 	s.mu.Unlock()
 	s.queueChange()
 	return nil
@@ -300,7 +292,7 @@ func (s *Service) Status() Status {
 	return Status{
 		Enabled: s.config.Enabled, Refreshing: s.changeRun || s.changeNext, CacheTTL: s.config.CacheTTL.String(),
 		MaxStale: s.config.MaxStale.String(), ResolveTimeout: s.config.ResolveTimeout.String(),
-		Providers: len(s.config.Providers), LastError: s.configErr,
+		Providers: len(s.config.Providers),
 	}
 }
 
@@ -448,24 +440,9 @@ func (s *Service) ForgetAuth(authID string) {
 
 func authVersionOlder(incoming, current authVersion) bool {
 	if incoming.RegistrationEpoch != current.RegistrationEpoch {
-		if incoming.RegistrationEpoch == 0 {
-			return current.RegistrationEpoch > 0
-		}
-		if current.RegistrationEpoch == 0 {
-			return false
-		}
 		return incoming.RegistrationEpoch < current.RegistrationEpoch
 	}
-	if incoming.Generation != current.Generation {
-		if incoming.Generation == 0 {
-			return current.Generation > 0
-		}
-		if current.Generation == 0 {
-			return false
-		}
-		return incoming.Generation < current.Generation
-	}
-	return false
+	return incoming.Generation < current.Generation
 }
 
 func effectivePrefix(input modelengine.Input, result modelengine.Result) string {

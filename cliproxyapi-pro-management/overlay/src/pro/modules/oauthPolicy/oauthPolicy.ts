@@ -1,16 +1,6 @@
 import { apiClient } from "@/services/api/client";
 import { parsePositiveGoDuration, serializeGoDuration } from '@/pro/shared/duration';
 
-const OAUTH_MODEL_PROVIDER_KEYS = [
-  "xai",
-  "codex",
-  "claude",
-  "gemini-cli",
-  "antigravity",
-  "kimi",
-] as const;
-
-export type OAuthModelProviderKey = string;
 export type OAuthModelPlanKey = string;
 export type OAuthPolicyDurationUnit = "s" | "m";
 
@@ -374,14 +364,12 @@ export const normalizeOAuthPolicyConfig = (
     ]),
   );
   const providerKeys = new Set([
-    ...OAUTH_MODEL_PROVIDER_KEYS,
+    ...providerDefinitions.keys(),
     ...Object.keys(providers),
   ]);
   const normalizedProviders = Object.fromEntries(
     [...providerKeys].map((providerKey) => {
-      const provider = providerDefinitions.get(
-        providerKey as OAuthModelProviderKey,
-      );
+      const provider = providerDefinitions.get(providerKey);
       const providerSource = asRecord(providers[providerKey]);
       const plans = asRecord(providerSource.plans);
       const normalizedPlanSources = Object.fromEntries(
@@ -403,8 +391,8 @@ export const normalizeOAuthPolicyConfig = (
             {
               configured,
               excludedModels: normalizeModelPatterns(plan["excluded-models"]),
-              ...(hasOwn(plan, "prefix") && normalizeOAuthPolicyPrefix(plan.prefix) !== undefined
-                ? { prefix: normalizeOAuthPolicyPrefix(plan.prefix) }
+              ...(typeof plan.prefix === "string"
+                ? { prefix: normalizeOAuthPolicyPrefix(plan.prefix) ?? "" }
                 : {}),
               ...(hasOwn(plan, "priority") && Number.isInteger(Number(plan.priority))
                 ? { priority: Number(plan.priority) }
@@ -442,7 +430,9 @@ export const serializeOAuthPolicyConfig = (
       const plans: Record<string, unknown> = {};
       Object.entries(provider.plans).forEach(([key, rule]) => {
         if (!rule.configured) return;
-        const prefix = normalizeOAuthPolicyPrefix(rule.prefix);
+        const prefix = rule.prefix === undefined
+          ? undefined
+          : normalizeOAuthPolicyPrefix(rule.prefix) ?? "";
         plans[key] = {
           "excluded-models": normalizeModelPatterns(rule.excludedModels),
           ...(prefix !== undefined ? { prefix } : {}),
