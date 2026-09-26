@@ -1,0 +1,25 @@
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
+import { DataManagementPage } from '/src/pro/modules/dataManagement/DataManagementPage';
+import { dataManagementApi } from '/src/pro/modules/dataManagement/dataManagement';
+import { useAuthStore, useNotificationStore } from '/src/stores';
+import i18n from '/src/i18n';
+import '/src/styles/global.scss';
+const state = { notifications: [] as string[], pending: {} as Record<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>, previews: [] as string[] };
+const preview = { backupSha256: 'fixture', legacyBackup: false, integrityProtected: true, encrypted: false, restoresAPIKeys: false, domains: [], secretClasses: [] };
+Object.assign(window, { review: state });
+dataManagementApi.overview = async () => ({ service: 'ready', dbPath: '/fixture/usage.db', dbSizeBytes: 0, walSizeBytes: 0, events: 0, deadLetters: 0, latestId: 0, latestTimestampMs: 0, generation: 1, resetAtMs: 0, webdavEnabled: false, webdavConfigured: false, domains: [], secretClasses: [], updatedAtMs: 0 });
+dataManagementApi.settings = async () => ({ settings: { retentionDays: 0, webdav: { enabled: false, intervalMinutes: 1440, retentionDays: 0, url: '', username: '', password: '' }, modelPriceSync: { enabled: false, intervalMinutes: 1440 } } });
+dataManagementApi.operations = async () => ({ operations: [] });
+dataManagementApi.backups = async () => ({ backups: [], operations: [] });
+dataManagementApi.previewRestore = async (buffer) => {
+  const name = new TextDecoder().decode(buffer);
+  state.previews.push(name);
+  if (name === 'A') return await new Promise((resolve, reject) => { state.pending.A = { resolve, reject }; });
+  return preview;
+};
+useNotificationStore.setState({ showNotification: (message: string) => { state.notifications.push(message); } });
+useAuthStore.setState({ connectionStatus: 'connected', apiBase: 'http://review.invalid', managementKey: 'fixture-only' });
+await i18n.changeLanguage('en');
+createRoot(document.getElementById('root')!).render(<RouterProvider router={createMemoryRouter([{ path: "*", element: <DataManagementPage /> }])} />);

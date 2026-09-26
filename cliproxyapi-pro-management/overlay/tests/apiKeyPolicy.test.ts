@@ -87,7 +87,6 @@ describe('usage policy backup preview contract', () => {
     expect(service).toContain("'/data/backups'");
     expect(service).toContain("'/data/backups/preview'");
     expect(service).toContain("'/data/backups/restore'");
-    expect(page).toContain('history.backups.slice(0, 10)');
     expect(page).toContain('restorePreview?.domains.map');
     expect(page).toContain('restoreFileName');
   });

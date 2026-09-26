@@ -318,3 +318,17 @@ func TestDecryptBackupRemainsCompatibleWithVersionOneEnvelope(t *testing.T) {
 		t.Fatalf("legacy decrypt protected=%v secretClasses=%v payload=%q err=%v", protected, secretClasses, decrypted, err)
 	}
 }
+
+func TestDataManagementBackupNamesPreserveSubsecondPrecision(t *testing.T) {
+	first := time.Date(2026, 9, 26, 12, 0, 0, 123456789, time.UTC)
+	second := first.Add(time.Nanosecond)
+	a, b := dataManagementBackupFileName(first), dataManagementBackupFileName(second)
+	if a == b {
+		t.Fatalf("distinct backup times overwrite the same WebDAV object: %s", a)
+	}
+	for _, name := range []string{a, b} {
+		if !isKnownWebDAVBackupFileName(name) {
+			t.Fatalf("backup is invisible to WebDAV listing/retention: %s", name)
+		}
+	}
+}

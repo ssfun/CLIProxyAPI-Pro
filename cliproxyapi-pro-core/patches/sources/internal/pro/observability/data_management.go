@@ -13,7 +13,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -1277,7 +1276,7 @@ func (s *Server) backupToWebDAVWithConfigTrackedClient(ctx context.Context, cfg 
 	if err != nil {
 		return finishFailed(err)
 	}
-	backupURL := dataManagementBackupPath(cfg.URL, now)
+	backupURL := strings.TrimRight(cfg.URL, "/") + "/" + fileName
 	request, err := http.NewRequestWithContext(ctx, http.MethodPut, backupURL, bytes.NewReader(data))
 	if err != nil {
 		return finishFailed(err)
@@ -1423,9 +1422,5 @@ func (s *Server) handleDataManagementCleanupExecute(c *gin.Context) {
 }
 
 func dataManagementBackupFileName(now time.Time) string {
-	return fmt.Sprintf("cliproxy-pro-backup-%s.jsonl", now.UTC().Format("20060102_150405_000"))
-}
-
-func dataManagementBackupPath(baseURL string, now time.Time) string {
-	return strings.TrimRight(baseURL, "/") + "/" + filepath.Base(dataManagementBackupFileName(now))
+	return fmt.Sprintf("cliproxy-pro-backup-%s_%09d.jsonl", now.UTC().Format("20060102_150405"), now.Nanosecond())
 }

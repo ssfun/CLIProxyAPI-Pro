@@ -36,7 +36,6 @@ import { useAuthStore, useNotificationStore } from '@/stores';
 import { apiClient } from '@/services/api/client';
 import {
   dataManagementApi,
-  type DataBackupHistory,
   type DataCleanupPreview,
   type DataDomainInventory,
   type DataManagementOverview,
@@ -50,7 +49,7 @@ import {
   type DataManagementSettingsDraft,
 } from './dataManagementSettings';
 import styles from './DataManagementPage.module.scss';
-import { hasDataBackupManifest } from './backup';
+import { hasDataBackupManifest, isEncryptedDataBackup } from './backup';
 
 type DataManagementView = 'overview' | 'backups' | 'retention' | 'domains' | 'operations';
 
@@ -74,12 +73,6 @@ const formatDateTime = (value?: number) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleString();
-};
-
-const isEncryptedBackup = async (file: File) => {
-  if (/\.encrypted\.json$/i.test(file.name)) return true;
-  const head = await file.slice(0, 512).text();
-  return head.includes('"format":"cliproxy-pro-encrypted-backup"') || head.includes('"format": "cliproxy-pro-encrypted-backup"');
 };
 
 const downloadBlob = (blob: Blob, fileName: string) => {
@@ -108,7 +101,7 @@ export function DataManagementPage() {
   const showConfirmation = useNotificationStore((state) => state.showConfirmation);
   const [activeView, setActiveView] = useState<DataManagementView>('overview');
   const [overview, setOverview] = useState<DataManagementOverview | null>(null);
-  const [history, setHistory] = useState<DataBackupHistory>({ backups: [], operations: [] });
+  const [backups, setBackups] = useState<WebDAVBackup[]>([]);
   const [operations, setOperations] = useState<DataOperation[]>([]);
   const [settingsDraft, setSettingsDraft] = useState<DataManagementSettingsDraft>(() => createDataManagementSettingsDraft());
   const [savedSettingsDraft, setSavedSettingsDraft] = useState<DataManagementSettingsDraft>(() => createDataManagementSettingsDraft());
@@ -139,7 +132,7 @@ export function DataManagementPage() {
   const restoreInputRef = useRef<HTMLInputElement | null>(null);
   const loadSequenceRef = useRef(0);
   const settingsDraftRevisionRef = useRef(0);
-  const restoreFileSequenceRef = useRef(0);
+  const backupHistorySequenceRef = useRef(0);
   const restorePreviewSequenceRef = useRef(0);
 
   const updateSettingsDraft = useCallback((updater: (current: DataManagementSettingsDraft) => DataManagementSettingsDraft) => {
@@ -195,15 +188,18 @@ export function DataManagementPage() {
   }, [connectionStatus, dirty]);
 
   const loadBackupHistory = useCallback(async () => {
+    const sequence = ++backupHistorySequenceRef.current;
     if (connectionStatus !== 'connected') return;
     setBackupHistoryLoading(true);
     try {
       const next = await dataManagementApi.backups();
-      setHistory({ backups: next.backups ?? [], operations: next.operations ?? [] });
+      if (sequence !== backupHistorySequenceRef.current) return;
+      setBackups(next.backups);
     } catch (error) {
+      if (sequence !== backupHistorySequenceRef.current) return;
       showNotification(error instanceof Error ? error.message : String(error), 'error');
     } finally {
-      setBackupHistoryLoading(false);
+      if (sequence === backupHistorySequenceRef.current) setBackupHistoryLoading(false);
     }
   }, [connectionStatus, showNotification]);
 
@@ -332,6 +328,7 @@ export function DataManagementPage() {
       setRestorePreview(preview);
       setRestorePreviewOpen(true);
     } catch (error) {
+      if (sequence !== restorePreviewSequenceRef.current) return;
       showNotification(error instanceof Error ? error.message : String(error), 'error');
     } finally {
       if (sequence === restorePreviewSequenceRef.current) setRestoreBusy(false);
@@ -342,29 +339,43 @@ export function DataManagementPage() {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    const fileSequence = ++restoreFileSequenceRef.current;
-    restorePreviewSequenceRef.current += 1;
-    setRestoreBusy(false);
-    const [buffer, encrypted] = await Promise.all([file.arrayBuffer(), isEncryptedBackup(file)]);
-    if (fileSequence !== restoreFileSequenceRef.current) return;
-    setRestoreFileName(file.name);
-    setRestoreBuffer(buffer);
-    setRestoreWebDAVFileName('');
-    setRestoreEncrypted(encrypted);
-    if (encrypted) {
-      setRestorePassphrase('');
-      setRestorePassphraseDialogOpen(true);
-      return;
-    }
-    const allowLegacy = !hasDataBackupManifest(await file.text());
-    setRestoreAllowLegacy(allowLegacy);
-    await previewRestoreBuffer(buffer, '', allowLegacy);
-  }, [previewRestoreBuffer]);
-
-  const previewWebDAVRestore = useCallback(async (backup: WebDAVBackup) => {
-    restoreFileSequenceRef.current += 1;
     const sequence = ++restorePreviewSequenceRef.current;
     setRestoreBusy(true);
+    setRestorePreview(null);
+    setRestorePreviewOpen(false);
+    setRestorePassphraseDialogOpen(false);
+    setRestoreBuffer(null);
+    setRestoreWebDAVFileName('');
+    setRestorePassphrase('');
+    try {
+      const buffer = await file.arrayBuffer();
+      if (sequence !== restorePreviewSequenceRef.current) return;
+      const content = new TextDecoder().decode(buffer);
+      const encrypted = isEncryptedDataBackup(content);
+      setRestoreFileName(file.name);
+      setRestoreBuffer(buffer);
+      setRestoreEncrypted(encrypted);
+      if (encrypted) {
+        setRestorePassphraseDialogOpen(true);
+        return;
+      }
+      const allowLegacy = !hasDataBackupManifest(content);
+      setRestoreAllowLegacy(allowLegacy);
+      await previewRestoreBuffer(buffer, '', allowLegacy);
+    } catch (error) {
+      if (sequence !== restorePreviewSequenceRef.current) return;
+      showNotification(error instanceof Error ? error.message : String(error), 'error');
+    } finally {
+      if (sequence === restorePreviewSequenceRef.current) setRestoreBusy(false);
+    }
+  }, [previewRestoreBuffer, showNotification]);
+
+  const previewWebDAVRestore = useCallback(async (backup: WebDAVBackup) => {
+    const sequence = ++restorePreviewSequenceRef.current;
+    setRestoreBusy(true);
+    setRestorePreview(null);
+    setRestorePreviewOpen(false);
+    setRestorePassphraseDialogOpen(false);
     setRestoreBuffer(null);
     setRestoreWebDAVFileName(backup.fileName);
     setRestoreFileName(backup.fileName);
@@ -377,6 +388,7 @@ export function DataManagementPage() {
       setRestorePreview(preview);
       setRestorePreviewOpen(true);
     } catch (error) {
+      if (sequence !== restorePreviewSequenceRef.current) return;
       showNotification(error instanceof Error ? error.message : String(error), 'error');
     } finally {
       if (sequence === restorePreviewSequenceRef.current) setRestoreBusy(false);
@@ -391,7 +403,7 @@ export function DataManagementPage() {
   }, [previewRestoreBuffer, restoreBuffer, restorePassphrase]);
 
   const executeRestore = useCallback(async () => {
-    if (!restoreBuffer && !restoreWebDAVFileName) return;
+    if (!restorePreview || (!restoreBuffer && !restoreWebDAVFileName)) return;
     setRestoreBusy(true);
     try {
       if (restoreWebDAVFileName) {
@@ -659,8 +671,8 @@ export function DataManagementPage() {
 
             <article className={styles.panel}>
               <div className={styles.panelHeading}><div><h2>{t('data_management.backup_history', { defaultValue: 'Backup history' })}</h2><p>{t('data_management.backup_history_desc', { defaultValue: 'Backups currently visible on the configured WebDAV target.' })}</p></div><Button variant="ghost" size="sm" onClick={() => void loadBackupHistory()} disabled={backupHistoryLoading}><IconRefreshCw size={15} /></Button></div>
-              {backupHistoryLoading ? <div className={styles.inlineLoading}><LoadingSpinner size={16} />{t('common.loading')}</div> : history.backups.length ? (
-                <div className={styles.backupList}>{history.backups.slice(0, 10).map((backup) => <div key={backup.fileName}><span><strong>{backup.fileName}</strong><small>{formatDateTime(backup.lastModifiedMs)}</small></span><span className={styles.backupListActions}><b>{formatBytes(backup.sizeBytes)}</b><Button variant="secondary" size="sm" onClick={() => void previewWebDAVRestore(backup)} disabled={restoreBusy}><IconRefreshCw size={14} />{t('data_management.restore_from_webdav', { defaultValue: 'Restore' })}</Button></span></div>)}</div>
+              {backupHistoryLoading ? <div className={styles.inlineLoading}><LoadingSpinner size={16} />{t('common.loading')}</div> : backups.length ? (
+                <div className={styles.backupList}>{backups.slice(0, 10).map((backup) => <div key={backup.fileName}><span><strong>{backup.fileName}</strong><small>{formatDateTime(backup.lastModifiedMs)}</small></span><span className={styles.backupListActions}><b>{formatBytes(backup.sizeBytes)}</b><Button variant="secondary" size="sm" onClick={() => void previewWebDAVRestore(backup)} disabled={restoreBusy}><IconRefreshCw size={14} />{t('data_management.restore_from_webdav', { defaultValue: 'Restore' })}</Button></span></div>)}</div>
               ) : <div className={styles.emptyState}><IconInfo size={18} />{t('data_management.no_backups', { defaultValue: 'No remote backups found.' })}</div>}
             </article>
           </section>
