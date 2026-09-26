@@ -24,7 +24,7 @@ import (
 )
 
 // Receipts are persisted for audit and never replayed on restart. A prepared operation
-// owns its exact targets; only retry preflight may bind newer result references.
+// owns exact account registrations and confirmed actions, not result references.
 const inspectionBatchRetention = 24 * time.Hour
 const inspectionBatchPreparationTTL = 10 * time.Minute
 const inspectionBatchCapacity = 256
@@ -132,7 +132,90 @@ func inspectionBatchPage(c *gin.Context, total int) (int, int, accountInspection
 	}
 	return start, end, proinspection.ResultPageInfo(total, page, size)
 }
-func (h *Handler) preflightInspectionBatch(kind string, items []accountInspectionActionItem, refresh bool) (*inspectionBatchOperation, error) {
+
+var errInspectionBatchIdentityChanged = errors.New("batch account identity changed or unavailable")
+var errInspectionBatchSuggestionChanged = errors.New("batch suggestion changed or already processed")
+var errInspectionBatchStateChanged = errors.New("batch account state changed during execution")
+var errInspectionBatchAccountAbsent = errors.New("batch account already absent")
+
+// Batch selection identifies a registration, not an observation or token. Legacy
+// callers can recover that identity from retained evidence, but never from a
+// filename alone. Retry retains the same identity and confirmed action/effect.
+func (s *accountInspectionScheduler) bindCurrentBatchItem(item accountInspectionActionItem) (accountInspectionActionItem, error) {
+	if s == nil || s.h == nil || s.inspectionAuthManager() == nil {
+		return item, errInspectionBatchIdentityChanged
+	}
+	var selected, latest accountInspectionResult
+	s.mu.Lock()
+	for _, result := range s.status.Results {
+		if result.Key == item.Key {
+			latest = result
+		}
+		if item.ResultRef != "" && result.ResultRef == item.ResultRef && result.Key == item.Key {
+			selected = result
+		}
+	}
+	if selected.ResultRef == "" && item.ResultRef != "" {
+		for _, result := range s.history {
+			if result.ResultRef == item.ResultRef && result.Key == item.Key {
+				selected = result
+				break
+			}
+		}
+	}
+	s.mu.Unlock()
+	if item.RegistrationEpoch == "" {
+		item.RegistrationEpoch = selected.RegistrationEpoch
+	}
+	if item.Key == "" || item.AuthIndex == "" || item.RegistrationEpoch == "" {
+		return item, errInspectionBatchIdentityChanged
+	}
+	if item.Suggested && item.ConfirmedEffect == "" && selected.ResultRef != "" {
+		confirmed := proinspection.ActionItemFromResult(selected, item.Action)
+		confirmed.Suggested = true
+		item.ConfirmedEffect = inspectionBatchEffect("action", confirmed)
+	}
+	auth := s.h.authByIndex(item.AuthIndex)
+	if auth == nil {
+		// A replacement with a different index must not look like a missing file.
+		for _, candidate := range s.inspectionAuthManager().List() {
+			if candidate != nil && accountFromAuth(candidate).FileName == item.FileName {
+				return item, errInspectionBatchIdentityChanged
+			}
+		}
+		return item, errInspectionBatchAccountAbsent
+	}
+	identity := accountFromAuth(auth).baseResult()
+	if identity.RegistrationEpoch != item.RegistrationEpoch || identity.Key != item.Key ||
+		identity.FileName != item.FileName || !strings.EqualFold(identity.Provider, item.Provider) {
+		return item, errInspectionBatchIdentityChanged
+	}
+	result := latest
+	if result.Key == "" || result.RegistrationEpoch != identity.RegistrationEpoch {
+		result = identity
+	}
+	// Refresh only identity/current-state fields; keep the current diagnosis for
+	// suggested-action validation and audit continuity.
+	result.AuthID, result.AuthIndex = identity.AuthID, identity.AuthIndex
+	result.RegistrationEpoch, result.AccessTokenSHA256 = identity.RegistrationEpoch, identity.AccessTokenSHA256
+	result.Disabled = auth.Disabled
+	s.fillQuotaProtectionResult(auth, &result)
+	bound := proinspection.ActionItemFromResult(result, item.Action)
+	bound.BatchCurrent, bound.Suggested, bound.ConfirmedEffect = true, item.Suggested, item.ConfirmedEffect
+	if item.Suggested && (latest.ResultRef == "" || latest.RegistrationEpoch != identity.RegistrationEpoch ||
+		latest.Executed || latest.Action != item.Action || item.ConfirmedEffect == "" ||
+		inspectionBatchEffect("action", bound) != item.ConfirmedEffect) {
+		return item, errInspectionBatchSuggestionChanged
+	}
+	return bound, nil
+}
+
+func inspectionBatchConflict(err error) bool {
+	return errors.Is(err, errAccountInspectionResultStale) || errors.Is(err, errInspectionBatchIdentityChanged) ||
+		errors.Is(err, errInspectionBatchSuggestionChanged) || errors.Is(err, errInspectionBatchStateChanged)
+}
+
+func (h *Handler) preflightInspectionBatch(kind string, items []accountInspectionActionItem, _ bool) (*inspectionBatchOperation, error) {
 	if kind != "inspect" && kind != "action" && kind != "recover" {
 		return nil, errors.New("invalid batch kind")
 	}
@@ -152,42 +235,24 @@ func (h *Handler) preflightInspectionBatch(kind string, items []accountInspectio
 	seen := make(map[string]bool)
 	for _, requested := range items {
 		entry := inspectionBatchItem{Key: requested.Key, Item: requested, Status: "ready", Effect: "unknown"}
-		suggested := requested.Suggested
-		if refresh {
-			requested.ResultRef = ""
+		requested.BatchCurrent = true
+		if kind != "action" {
 			requested.Suggested = false
 		}
-		var bindErr error
-		var bound accountInspectionActionItem
-		if !refresh && requested.ResultRef == "" {
-			bindErr = errAccountInspectionResultStale
-		} else {
-			bound, bindErr = scheduler.bindActionItemToSnapshot(requested)
+		bound, bindErr := scheduler.bindCurrentBatchItem(requested)
+		entry.Item = bound
+		if errors.Is(bindErr, errInspectionBatchAccountAbsent) && kind == "action" && !requested.Suggested && requested.Action == accountInspectionActionDelete {
+			entry.Effect = "delete"
+			operation.Items = append(operation.Items, entry)
+			continue
 		}
 		if bindErr != nil {
 			entry.Status, entry.Error = "stale", bindErr.Error()
 			operation.Items = append(operation.Items, entry)
 			continue
 		}
-		bound.Suggested = suggested
-		if refresh && suggested {
-			bound.Action = bound.RecommendedAction
-			rebound, retryErr := scheduler.bindActionItemToSnapshot(bound)
-			if retryErr != nil {
-				entry.Status, entry.Error = "stale", retryErr.Error()
-				operation.Items = append(operation.Items, entry)
-				continue
-			}
-			bound = rebound
-			bound.Suggested = true
-		}
-		entry.Key, entry.Item = bound.Key, bound
-		before := inspectionEvidenceResult(scheduler.currentInspectionEvidence(bound.Key))
-		if before.ResultRef != bound.ResultRef {
-			entry.Status, entry.Error = "stale", errAccountInspectionResultStale.Error()
-			operation.Items = append(operation.Items, entry)
-			continue
-		}
+		entry.Key = bound.Key
+		before := inspectionEvidenceResult(bound.ToResult())
 		entry.Before = &before
 		if seen[bound.Key] {
 			entry.Status, entry.Error = "unsupported", "duplicate target"
@@ -230,8 +295,8 @@ func (h *Handler) preflightInspectionBatch(kind string, items []accountInspectio
 					entry.recovery = append(entry.recovery, routingRecoveryRequest{AuthID: auth.ID, AuthIndex: auth.EnsureIndex(), RegistrationEpoch: strconv.FormatUint(auth.RegistrationEpoch, 10), Source: detail.Source, Model: detail.Model, Revision: detail.Revision})
 				}
 			}
-			if entry.Status == "ready" && (quotaSuggestion || kind == "recover") && (auth.Disabled || len(entry.recovery) == 0) {
-				entry.Status, entry.Error = "unsupported", "account has no active recoverable restriction"
+			if entry.Status == "ready" && (quotaSuggestion || kind == "recover") && auth.Disabled {
+				entry.Status, entry.Error = "unsupported", "account is disabled; scheduling recovery unavailable"
 			}
 		}
 		if entry.Status == "ready" {
@@ -750,7 +815,7 @@ func (h *Handler) runInspectionBatch(store *inspectionBatchStore, operation *ins
 		if err != nil {
 			entry.Status = "failed"
 			entry.Error = err.Error()
-			if errors.Is(err, errAccountInspectionResultStale) {
+			if inspectionBatchConflict(err) {
 				entry.Status = "stale"
 			}
 		}
@@ -792,9 +857,6 @@ func (h *Handler) runInspectionRecheckBatch(ctx context.Context, store *inspecti
 				return errors.New("failed to persist execution intent")
 			}
 			store.Unlock()
-			if err := scheduler.inspectionBatchProcessingStateUnchanged(entry.Before); err != nil {
-				return err
-			}
 			bound, err := scheduler.bindActionItemToSnapshot(entry.Item)
 			if err != nil {
 				return err
@@ -828,7 +890,7 @@ func (h *Handler) runInspectionRecheckBatch(ctx context.Context, store *inspecti
 			entry.Status = "succeeded"
 			if !outcome.Success {
 				entry.Status, entry.Error = "failed", outcome.Error
-				if outcome.Error == errAccountInspectionResultStale.Error() {
+				if outcome.Error == errAccountInspectionResultStale.Error() || outcome.Error == errInspectionBatchIdentityChanged.Error() || outcome.Error == errInspectionBatchSuggestionChanged.Error() {
 					entry.Status = "stale"
 				}
 			}
@@ -881,17 +943,18 @@ func (h *Handler) executeInspectionBatchItem(ctx context.Context, kind string, e
 	if scheduler == nil {
 		return nil, errors.New("scheduler unavailable")
 	}
-	if err := scheduler.inspectionBatchProcessingStateUnchanged(entry.Before); err != nil {
-		return nil, err
+	bound, err := scheduler.bindCurrentBatchItem(entry.Item)
+	if errors.Is(err, errInspectionBatchAccountAbsent) && kind == "action" && !entry.Item.Suggested && entry.Item.Action == accountInspectionActionDelete {
+		return gin.H{"success": true, "noop": true, "accountState": "absent"}, nil
 	}
-	bound, err := scheduler.bindActionItemToSnapshot(entry.Item)
 	if err != nil {
 		return nil, err
 	}
 	auth, err := scheduler.actionAuthForResult(bound.ToResult())
 	if err != nil || auth.RegistrationEpoch != entry.epoch {
-		return nil, errAccountInspectionResultStale
+		return nil, errInspectionBatchIdentityChanged
 	}
+	entry.Item = bound
 	suggestedQuotaRecovery := kind == "action" && entry.Item.Suggested && entry.Item.Action == accountInspectionActionEnable && entry.Item.QuotaCooling
 	if suggestedQuotaRecovery {
 		kind = "recover"
@@ -927,6 +990,16 @@ func (h *Handler) executeInspectionBatchItem(ctx context.Context, kind string, e
 		}
 		return outcomes[0], errors.New(outcomes[0].Error)
 	case "recover":
+		if auth.Disabled {
+			return nil, errors.New("account is disabled; scheduling recovery unavailable")
+		}
+		if len(entry.recovery) == 0 {
+			after := schedulingBoardAccount(auth, time.Now())
+			if after.AuthID != "" {
+				return gin.H{"after": after}, errInspectionBatchStateChanged
+			}
+			return gin.H{"success": true, "noop": true, "accountState": "unrestricted", "after": after}, nil
+		}
 		receipts := make([]json.RawMessage, 0, len(entry.recovery))
 		var failure error
 		for _, request := range entry.recovery {

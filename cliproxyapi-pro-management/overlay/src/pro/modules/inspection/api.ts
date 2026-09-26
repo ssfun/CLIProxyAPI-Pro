@@ -38,7 +38,7 @@ export type AccountInspectionActionOutcome = {
 
 export type AccountInspectionInspectOneItem = Pick<
   AccountInspectionResultItem,
-  'key' | 'provider' | 'fileName' | 'email' | 'name' | 'authIndex' | 'disabled' | 'resultRef'
+  'key' | 'provider' | 'fileName' | 'email' | 'name' | 'authIndex' | 'disabled' | 'resultRef' | 'registrationEpoch'
 > & {
   displayName: string;
 };
@@ -55,6 +55,8 @@ export type AccountInspectionActionItem = Pick<
 
 export type AccountInspectionBatchTarget = Omit<AccountInspectionActionItem, 'action'> & {
   action: AccountInspectionAction;
+  registrationEpoch?: string;
+  effect?: AccountInspectionBatchEffect;
 };
 
 export type AccountInspectionActionsResponse = AccountInspectionBackendResponse & {
@@ -77,6 +79,8 @@ export type AccountInspectionBatchScope =
       suggested?: boolean;
     };
 export type AccountInspectionBatchOutcome = {
+  noop?: boolean;
+  accountState?: 'absent' | 'unrestricted';
   success?: boolean;
   error?: string;
   warning?: string;

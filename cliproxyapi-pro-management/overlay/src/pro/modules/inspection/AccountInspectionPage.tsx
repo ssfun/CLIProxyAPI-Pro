@@ -952,6 +952,10 @@ export function AccountInspectionPage() {
             : action === 'recover' ? 'enable'
               : action === 'suggested' ? item.action : action,
           suggested: action === 'suggested',
+          effect: action !== 'suggested' ? undefined
+            : item.action === 'delete' ? 'delete'
+              : item.action === 'disable' ? (item.isQuota ? 'quota_protection' : 'admin_disable')
+                : item.action === 'enable' ? (item.quotaCooling ? 'quota_recovery' : 'admin_enable') : 'unknown',
         })),
       };
       targetCount = targets.length;
@@ -984,7 +988,7 @@ export function AccountInspectionPage() {
     const scopeFingerprint = scope.type === 'selected'
       ? JSON.stringify({
         type: scope.type,
-        items: scope.items.map(({ key, resultRef, action, suggested }) => ({ key, resultRef, action, suggested }))
+        items: scope.items.map(({ key, resultRef, action, suggested, registrationEpoch, effect }) => ({ key, resultRef, action, suggested, registrationEpoch, effect }))
           .sort((left, right) => `${left.key}:${left.resultRef}:${left.action}`.localeCompare(`${right.key}:${right.resultRef}:${right.action}`)),
       })
       : JSON.stringify({
@@ -1850,6 +1854,7 @@ export function AccountInspectionPage() {
                       <strong>{item.displayName || item.fileName}</strong>
                       <strong>{t(`monitoring.account_inspection_batch_account_${state}`)}</strong>
                       <small>{t(`monitoring.account_inspection_batch_group_${effect}`)} · {t(`monitoring.account_inspection_batch_status_${status}`)}</small>
+                      {details.noop ? <small>{t('monitoring.account_inspection_batch_noop')}</small> : null}
                       {details.result?.actionReason ? <small>{details.result.actionReason}</small> : null}
                       {error ? <small className={styles.inspectionStatusError}>{formatInspectionBatchMessage(error, t)}</small> : null}
                       {details.reason && details.reason !== error ? <small>{formatInspectionBatchMessage(details.reason, t)}</small> : null}

@@ -10,6 +10,8 @@ import type {
 import { isRecordValue, readBooleanValue, readStringValue } from '@/pro/shared/value';
 
 export type AccountInspectionBatchReceiptState =
+  | 'absent'
+  | 'noRecoveryNeeded'
   | 'waiting'
   | 'healthy'
   | 'quotaExhausted'
@@ -26,6 +28,7 @@ export type AccountInspectionBatchReceiptState =
 export type AccountInspectionBatchReceiptEntry = AccountInspectionBatchOperation['items'][number];
 
 export type AccountInspectionBatchReceiptDetails = {
+  noop?: boolean;
   source: 'status' | 'result' | 'after' | 'effect';
   result?: AccountInspectionBackendResultItem;
   after?: Record<string, unknown>;
@@ -41,6 +44,8 @@ export type AccountInspectionBatchReceiptItem = {
 };
 
 const RECEIPT_STATE_SORT_RANK: Record<AccountInspectionBatchReceiptState, number> = {
+  absent: 2,
+  noRecoveryNeeded: 2,
   quotaExhausted: 0,
   reauthorizationRequired: 0,
   accountInvalid: 0,
@@ -241,6 +246,13 @@ const classifyEntry = (
     };
   }
 
+  if (entry.status === 'succeeded' && outcome?.noop === true) {
+    const state = outcome.accountState === 'absent' ? 'absent'
+      : outcome.accountState === 'unrestricted' ? 'noRecoveryNeeded'
+        : entry.effect === 'admin_disable' ? 'disabled'
+          : entry.effect === 'admin_enable' ? 'enabled' : 'unknown';
+    return { entry, state, details: { source: 'effect', noop: true, ...(warning ? { warning } : {}) }, ...(error ? { error } : {}) };
+  }
   const result = readExactResult(outcome);
   if (result) {
     const resultError = [error, readResultError(result)]

@@ -19,7 +19,7 @@ import i18n from '/src/i18n';
 import '/src/pro/registerLocales';
 import '/src/styles/global.scss';
 
-type ScenarioName = 'recheck-mixed' | 'action-effects' | 'recovery-edges' | 'execution-states';
+type ScenarioName = 'recheck-mixed' | 'action-effects' | 'recovery-edges' | 'execution-states' | 'current-state-noops';
 
 const apiBase = 'http://review.invalid/v0/management';
 const managementKey = 'inspection-receipt-fixture';
@@ -107,6 +107,12 @@ const operation = (
 };
 
 const operations: Record<ScenarioName, AccountInspectionBatchOperation> = {
+  'current-state-noops': operation('current-state-noops', 'action', 'completed', [
+    { key: 'already-enabled', status: 'succeeded', effect: 'admin_enable', item: target('already-enabled', 'enable'), outcome: { success: true, noop: true } },
+    { key: 'already-disabled', status: 'succeeded', effect: 'admin_disable', item: target('already-disabled', 'disable', true), outcome: { success: true, noop: true } },
+    { key: 'already-absent', status: 'succeeded', effect: 'delete', item: target('already-absent', 'delete'), outcome: { success: true, noop: true, accountState: 'absent' } },
+    { key: 'unrestricted', status: 'succeeded', effect: 'recovery_check', item: target('unrestricted', 'enable'), outcome: { success: true, noop: true, accountState: 'unrestricted', after: {} } },
+  ]),
   'recheck-mixed': operation('recheck-mixed', 'inspect', 'completed', [
     {
       key: 'healthy', status: 'succeeded', effect: 'inspect', item: target('healthy'),
@@ -179,6 +185,7 @@ const operations: Record<ScenarioName, AccountInspectionBatchOperation> = {
 };
 
 const scenarioLabels: Record<ScenarioName, string> = {
+  'current-state-noops': '当前状态：无需变更',
   'recheck-mixed': '重检：执行成功但账号健康状态混合',
   'action-effects': '动作：启用、禁用、删除、额度保护',
   'recovery-edges': '恢复：空 after、仍受限、缺失结果、嵌套警告',

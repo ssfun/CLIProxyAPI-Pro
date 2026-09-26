@@ -566,6 +566,9 @@ func accountInspectionAccountMatchesAuth(account accountInspectionAccount, auth 
 }
 
 func accountInspectionResultMatchesAuth(result accountInspectionResult, auth *coreauth.Auth) bool {
+	if result.RegistrationEpoch != "" && (auth == nil || result.RegistrationEpoch != strconv.FormatUint(auth.RegistrationEpoch, 10)) {
+		return false
+	}
 	return accountInspectionObservationMatchesAuth(
 		result.AuthID,
 		result.AuthIndex,
@@ -662,6 +665,9 @@ func codexDecision(account accountInspectionAccount, status int, used *float64, 
 }
 
 func (s *accountInspectionScheduler) bindActionItemToSnapshot(item accountInspectionActionItem) (accountInspectionActionItem, error) {
+	if item.BatchCurrent {
+		return s.bindCurrentBatchItem(item)
+	}
 	if s == nil {
 		return accountInspectionActionItem{}, fmt.Errorf("account inspection scheduler unavailable")
 	}
@@ -737,7 +743,7 @@ func (s *accountInspectionScheduler) executeManualActionsWithExpected(ctx contex
 	// This check shares manualActionMu with every direct manual action. A newer
 	// decision cannot slip between the batch's processing-state check and its
 	// destructive mutation.
-	if expected != nil {
+	if expected != nil && (len(items) == 0 || !items[0].BatchCurrent) {
 		if err := s.inspectionBatchProcessingStateUnchanged(expected); err != nil {
 			return nil, err
 		}
@@ -750,6 +756,9 @@ func (s *accountInspectionScheduler) executeManualActionsWithExpected(ctx contex
 		boundItem, err := s.bindActionItemToSnapshot(item)
 		if err != nil {
 			return nil, err
+		}
+		if item.BatchCurrent && expected != nil && boundItem.Disabled != expected.Disabled {
+			return nil, errInspectionBatchStateChanged
 		}
 		boundItems = append(boundItems, boundItem)
 		boundItems[len(boundItems)-1].Suggested = item.Suggested
@@ -771,6 +780,12 @@ func (s *accountInspectionScheduler) executeManualActionsWithExpected(ctx contex
 		result.OperationAction = action
 		quotaAction := item.Suggested && (result.IsQuota && action == accountInspectionActionDisable || result.QuotaCooling && action == accountInspectionActionEnable)
 		outcome := accountInspectionActionOutcome{Action: action, FileName: item.FileName, DisplayName: item.DisplayName, Email: item.Email, Name: item.Name, Provider: item.Provider, AuthIndex: item.AuthIndex}
+		if item.BatchCurrent && !item.Suggested &&
+			(action == accountInspectionActionEnable && !item.Disabled || action == accountInspectionActionDisable && item.Disabled) {
+			outcome.Success, outcome.Noop = true, true
+			outcomes[index] = outcome
+			return true
+		}
 		if err := s.executeRecordedInspectionAction(ctx, &result, actionSettings, action, item.Suggested, workers, "manual"); err != nil {
 			outcome.Error = err.Error()
 			result.ExecuteError = err.Error()

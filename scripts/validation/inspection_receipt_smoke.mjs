@@ -177,6 +177,12 @@ record('recovery: abnormal rows precede cleared state',
   recovery.rows,
 );
 
+const noops = await inspectScenario('current-state-noops');
+record('current state: successful noops show account states', sameCounts(countStates(noops.rows), {
+  enabled: 1, disabled: 1, absent: 1, noRecoveryNeeded: 1,
+}), noops);
+record('current state: each noop explains why nothing changed', noops.rows.every(row => row.text.includes('当前已符合目标状态，无需操作')), noops.rows);
+
 const execution = await inspectScenario('execution-states');
 const executionCounts = countStates(execution.rows);
 record('execution states: running stays waiting and skipped/interrupted stay unknown', sameCounts(executionCounts, {

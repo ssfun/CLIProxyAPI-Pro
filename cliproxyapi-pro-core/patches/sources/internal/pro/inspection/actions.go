@@ -3,6 +3,9 @@ package inspection
 import "strings"
 
 type ActionItem struct {
+	RegistrationEpoch string   `json:"registrationEpoch,omitempty"`
+	ConfirmedEffect   string   `json:"effect,omitempty"`
+	BatchCurrent      bool     `json:"-"`
 	AuthID            string   `json:"-"`
 	AccessTokenSHA256 string   `json:"-"`
 	Key               string   `json:"key"`
@@ -57,6 +60,7 @@ type RefreshTokenRequest struct {
 }
 
 type ActionOutcome struct {
+	Noop        bool   `json:"noop,omitempty"`
 	Action      Action `json:"action"`
 	FileName    string `json:"fileName"`
 	DisplayName string `json:"displayName"`
@@ -84,6 +88,7 @@ func AccountKey(fileName, authIndex string) string {
 
 func (item ActionItem) ToResult() Result {
 	return Result{
+		RegistrationEpoch: item.RegistrationEpoch,
 		AuthID:            item.AuthID,
 		AccessTokenSHA256: item.AccessTokenSHA256,
 		Key:               item.Key,
@@ -109,6 +114,7 @@ func (item ActionItem) ToResult() Result {
 
 func ActionItemFromResult(result Result, action Action) ActionItem {
 	return ActionItem{
+		RegistrationEpoch: result.RegistrationEpoch,
 		AuthID:            result.AuthID,
 		AccessTokenSHA256: result.AccessTokenSHA256,
 		Key:               result.Key,

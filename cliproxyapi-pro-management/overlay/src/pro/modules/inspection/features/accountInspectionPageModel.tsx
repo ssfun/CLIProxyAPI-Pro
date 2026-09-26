@@ -1219,6 +1219,7 @@ export const countActions = (items: AccountInspectionResultItem[]) => {
 export const toAccountInspectionApiItem = (item: AccountInspectionResultItem): AccountInspectionInspectOneItem => ({
   key: item.key,
   resultRef: item.resultRef,
+  registrationEpoch: item.registrationEpoch,
   provider: item.provider,
   fileName: item.fileName,
   displayName: item.displayAccount,

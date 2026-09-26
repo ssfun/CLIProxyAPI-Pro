@@ -2,6 +2,11 @@ import type { TFunction } from 'i18next';
 import { isRecordValue } from '@/pro/shared/value';
 
 const messageKeys: Record<string, string> = {
+  'batch account identity changed or unavailable': 'identity_changed',
+  'batch suggestion changed or already processed': 'suggestion_changed',
+  'batch account state changed during execution': 'state_changed',
+  'batch account already absent': 'absent',
+  'account is disabled; scheduling recovery unavailable': 'disabled',
   'batch has no executable targets': 'no_targets',
   'account has no active recoverable restriction': 'no_restriction',
   'account inspection result is stale or no longer available': 'stale',

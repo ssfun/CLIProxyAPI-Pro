@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1243,6 +1244,9 @@ func (s *accountInspectionScheduler) executeSingleInspection(ctx context.Context
 		}
 		if item.Key == "" && (account.FileName != item.FileName || account.AuthIndex != item.AuthIndex) {
 			continue
+		}
+		if item.BatchCurrent && item.RegistrationEpoch != strconv.FormatUint(auth.RegistrationEpoch, 10) {
+			return accountInspectionResult{}, accountInspectionSummary{}, errInspectionBatchIdentityChanged
 		}
 		if !shouldInspectAccount(account, accountInspectionProviderAll) {
 			return accountInspectionResult{}, accountInspectionSummary{}, fmt.Errorf("unsupported provider")

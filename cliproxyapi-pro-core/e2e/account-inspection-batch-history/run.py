@@ -27,7 +27,9 @@ def free_ports():
 
 arguments = argparse.ArgumentParser(description=__doc__)
 arguments.add_argument("--ci-fast", action="store_true", help="Run the bounded HTTP contract subset used by Core validation")
-ci_fast = arguments.parse_args().ci_fast
+arguments.add_argument("--current-state-only", action="store_true", help="Run current-state batch regression scenarios only")
+options = arguments.parse_args()
+ci_fast = options.ci_fast
 root = Path(os.environ.get("INSPECTION_E2E_OUTPUT", "/private/tmp/inspection-batch-history-e2e"))
 binary = Path(os.environ.get("INSPECTION_SERVER", ""))
 if not binary.is_file():
@@ -110,7 +112,7 @@ class Provider(BaseHTTPRequestHandler):
 
 def call(method, path, payload=None):
     data = None if payload is None else json.dumps(payload).encode()
-    request = urllib.request.Request(base + path, data, method=method)
+    request = urllib.request.Request(urllib.parse.urljoin(base + "/", path[1:]), data, method=method)
     request.add_header("Authorization", "Bearer inspection-e2e-only")
     if data is not None:
         request.add_header("Content-Type", "application/json")
@@ -147,6 +149,7 @@ def binary_sha256():
 def item(row, action=None, suggested=False):
     return {key: row[key] for key in ("key", "provider", "fileName", "authIndex", "resultRef")} | {
         "action": action or row["action"], "suggested": suggested,
+        "registrationEpoch": row.get("registrationEpoch", ""),
     }
 
 
@@ -271,6 +274,70 @@ try:
     initial = wait_until("initial inspection", lambda: ok("GET", "/status?details=1"), lambda body: body["status"]["state"] == "completed")
     a, b, c, d, e, f = (row(f"xai-{letter}.json") for letter in "abcdef")
     assert a["isQuota"] and b["statusCode"] == 401 and e["isQuota"] and f["statusCode"] == 401
+    if options.current_state_only:
+        old_c = item(c, "disable")
+        updated_c = inspect(c)
+        stale_ref = start_batch([old_c], "action", "current-state-old-ref")
+        assert wait_batch(stale_ref["operationId"])["summary"]["succeeded"] == 1
+        assert row("xai-c.json")["disabled"]
+        note("old_observation_accepted", oldRef=c["resultRef"], currentRef=updated_c["resultRef"])
+        legacy_old = dict(old_c)
+        legacy_old.pop("registrationEpoch", None)
+        legacy_old["action"] = "keep"
+        legacy_recheck = start_batch([legacy_old], "inspect", "current-state-legacy-old-ref")
+        assert wait_batch(legacy_recheck["operationId"])["summary"]["succeeded"] == 1
+        note("legacy_old_reference_resolves_registration")
+        missing_ref = item(row("xai-c.json"), "enable")
+        missing_ref.pop("resultRef")
+        enabled = start_batch([missing_ref], "action", "current-state-no-ref")
+        assert wait_batch(enabled["operationId"])["summary"]["succeeded"] == 1
+        assert not row("xai-c.json")["disabled"]
+        noop = start_batch([missing_ref], "action", "current-state-already-enabled")
+        noop = wait_batch(noop["operationId"])
+        assert noop["items"][0]["outcome"]["noop"] is True, noop
+        note("identity_without_result_and_enabled_noop", receipt=noop)
+        with request_lock:
+            before_calls = dict(requests)
+        recovery = start_batch([item(row("xai-c.json"), "enable")], "recover", "current-state-no-restrictions")
+        recovery = wait_batch(recovery["operationId"])
+        assert recovery["summary"]["succeeded"] == 1 and recovery["items"][0]["outcome"]["noop"], recovery
+        with request_lock:
+            assert requests == before_calls, (before_calls, requests)
+        note("no_recovery_targets_is_successful_noop", receipt=recovery)
+        wrong_identity = item(row("xai-d.json"), "delete")
+        wrong_identity["registrationEpoch"] = "999999999"
+        mixed = start_batch([wrong_identity, item(row("xai-c.json"), "enable")], "action", "current-state-mixed")
+        mixed = wait_batch(mixed["operationId"])
+        assert mixed["summary"]["stale"] == 1 and mixed["summary"]["succeeded"] == 1, mixed
+        assert (root / "auth" / "xai-d.json").exists()
+        note("identity_conflict_does_not_block_other_targets", receipt=mixed)
+        old_d = item(row("xai-d.json"), "delete")
+        replacement_path = root / "auth" / "xai-d.json"
+        replacement = json.loads(replacement_path.read_text())
+        replacement["email"] = "replacement@example.invalid"
+        replacement["api_key"] = "secret-e2e-replacement"
+        ok("DELETE", "/../auth-files?name=xai-d.json")
+        ok("POST", "/../auth-files?name=xai-d.json", replacement)
+        replaced = wait_until("replacement identity fence", lambda: preflight([old_d]),
+                              lambda operation: operation["summary"]["stale"] == 1)
+        assert "identity" in replaced["items"][0]["error"] and replacement_path.exists(), replaced
+        note("same_filename_replacement_rejected", receipt=replaced)
+        modes = json.loads((root / "modes.json").read_text())
+        modes["a"] = "healthy"
+        (root / "modes.json").write_text(json.dumps(modes))
+        inspect(a)
+        changed = preflight([item(a, "disable", True)])
+        assert changed["summary"]["stale"] == 1, changed
+        note("suggestion_not_replaced", receipt=changed)
+        deleted = start_batch([item(row("xai-c.json"), "delete")], "action", "current-state-delete")
+        assert wait_batch(deleted["operationId"])["summary"]["succeeded"] == 1
+        absent = start_batch([old_c | {"action": "delete"}], "action", "current-state-already-absent")
+        absent = wait_batch(absent["operationId"])
+        assert absent["summary"]["succeeded"] == 1 and absent["items"][0]["outcome"]["noop"], absent
+        note("deleted_account_noop", receipt=absent)
+        (root / "result.json").write_text(json.dumps({"passed": True, "binarySha256": binary_sha256(), "receipts": receipts}, indent=2) + "\n")
+        print(json.dumps({"passed": True, "artifact": str(root / "result.json")}))
+        sys.exit(0)
     limited = row("xai-i.json")
     assert limited["statusCode"] == 429 and limited["errorCode"] == "inspection_rate_limited", limited
     assert limited["action"] == "keep" and not limited["isQuota"], limited
@@ -333,6 +400,7 @@ try:
     # durable operation or start background work.
     zero_ready_item = item(row("xai-c.json"), "disable")
     zero_ready_item["resultRef"] = "missing-result-ref"
+    zero_ready_item.pop("registrationEpoch", None)
     zero_before = batch_total()
     zero_status, zero_body = call("POST", "/batches", {
         "kind": "action",
@@ -409,29 +477,28 @@ try:
     newer_c = inspect(c)
     assert newer_c["resultRef"] != c["resultRef"]
     old = preflight([item(c, "disable")])
-    assert old["summary"]["stale"] == 1 and old["items"][0]["status"] == "stale", old
-    note("old_result_ref_preflight_stale", oldRef=c["resultRef"], currentRef=newer_c["resultRef"])
+    assert old["summary"]["ready"] == 1, old
+    note("old_result_ref_preflight_current_identity", oldRef=c["resultRef"], currentRef=newer_c["resultRef"])
 
     prepared = preflight([item(newer_c, "disable")])
     assert prepared["items"][0]["status"] == "ready" and prepared["items"][0]["effect"] == "admin_disable", prepared
     newest_c = inspect(newer_c)
     ok("POST", f'/batches/{prepared["operationId"]}/execute', {}, 202)
-    stale = wait_batch(prepared["operationId"])
-    assert stale["summary"]["stale"] == 1 and not row("xai-c.json")["disabled"], stale
-    retry = ok("POST", f'/batches/{prepared["operationId"]}/retry', {})
-    assert retry["operationId"] != prepared["operationId"] and retry["parentOperationId"] == prepared["operationId"]
-    assert retry["items"][0]["status"] == "ready" and retry["items"][0]["item"]["resultRef"] == newest_c["resultRef"], retry
-    retry_started = ok("POST", f'/batches/{prepared["operationId"]}/retry-execute', {}, 202)
-    assert retry_started["operationId"] == retry["operationId"], (retry_started, retry)
-    retry_duplicate = ok("POST", f'/batches/{prepared["operationId"]}/retry-execute', {}, 202)
-    assert retry_duplicate["operationId"] == retry["operationId"], (retry_duplicate, retry)
-    completed_retry = wait_batch(retry["operationId"])
-    assert completed_retry["summary"]["succeeded"] == 1
-    retry_after_completion = ok("POST", f'/batches/{prepared["operationId"]}/retry-execute', {}, 202)
-    assert retry_after_completion["operationId"] == retry["operationId"] and retry_after_completion["state"] == "completed", retry_after_completion
+    executed = wait_batch(prepared["operationId"])
+    assert executed["summary"]["succeeded"] == 1 and row("xai-c.json")["disabled"], executed
+    note("queued_observation_update_allowed", receipt=executed["summary"])
+    retry_parent = preflight([item(row("xai-c.json"), "disable")])
+    ok("POST", "/actions", {"items": [item(row("xai-c.json"), "enable")]})
+    ok("POST", f'/batches/{retry_parent["operationId"]}/execute', {}, 202)
+    conflict = wait_batch(retry_parent["operationId"])
+    assert conflict["summary"]["stale"] == 1, conflict
+    retry = ok("POST", f'/batches/{retry_parent["operationId"]}/retry', {})
+    retry_started = ok("POST", f'/batches/{retry_parent["operationId"]}/retry-execute', {}, 202)
+    retry_duplicate = ok("POST", f'/batches/{retry_parent["operationId"]}/retry-execute', {}, 202)
+    assert retry_started["operationId"] == retry_duplicate["operationId"] == retry["operationId"]
+    assert wait_batch(retry["operationId"])["summary"]["succeeded"] == 1
     assert row("xai-c.json")["disabled"]
-    note("atomic_retry_execute_idempotent", parentOperationId=prepared["operationId"], retryOperationId=retry["operationId"])
-    note("execute_stale_and_retry_rebind", staleOperationId=prepared["operationId"], retryOperationId=retry["operationId"], newRef=newest_c["resultRef"])
+    note("atomic_retry_execute_idempotent", parentOperationId=retry_parent["operationId"], retryOperationId=retry["operationId"])
 
     quota = preflight([item(a, "disable", True)])
     assert quota["items"][0]["effect"] == "quota_protection" and quota["summary"]["ready"] == 1, quota
