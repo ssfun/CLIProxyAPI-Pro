@@ -6946,11 +6946,22 @@ if policy_candidate_append not in auth_conductor_text:
     write(auth_conductor, auth_conductor_text.replace(candidate_append, policy_candidate_append))
 
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_refresh.go'
+# v7.3.18 only reschedules retryable failures. Scheduler state must still be
+# refreshed for terminal failures, after releasing the manager lock.
 replace_once(
     auth_conductor,
-    '''\t\t\tm.auths[id] = current
-\t\t\tshouldReschedule = true
-\t\t\tif m.scheduler != nil {
+    '\t\tshouldReschedule := false\n',
+    '\t\tshouldReschedule := false\n\t\tshouldRefreshScheduler := false\n',
+    '\t\tshouldRefreshScheduler := false\n',
+)
+legacy_refresh_reschedule = (
+    '\t\t\tshouldReschedule = true\n'
+    if '\t\t\tm.auths[id] = current\n\t\t\tshouldReschedule = true\n' in read(auth_conductor)
+    else ''
+)
+replace_once(
+    auth_conductor,
+    '\t\t\tm.auths[id] = current\n' + legacy_refresh_reschedule + '''\t\t\tif m.scheduler != nil {
 \t\t\t\tm.scheduler.upsertAuth(current.Clone())
 \t\t\t}
 \t\t}
@@ -6958,15 +6969,16 @@ replace_once(
 \t\tif shouldReschedule {
 \t\t\tm.queueRefreshReschedule(id)
 ''',
-    '''\t\t\tm.auths[id] = current
-\t\t\tshouldReschedule = true
+    '\t\t\tm.auths[id] = current\n' + legacy_refresh_reschedule + '''\t\t\tshouldRefreshScheduler = true
 \t\t}
 \t\tm.mu.Unlock()
-\t\tif shouldReschedule {
+\t\tif shouldRefreshScheduler {
 \t\t\tm.RefreshSchedulerEntry(id)
+\t\t}
+\t\tif shouldReschedule {
 \t\t\tm.queueRefreshReschedule(id)
 ''',
-    'shouldReschedule {\n\t\t\tm.RefreshSchedulerEntry(id)',
+    'shouldRefreshScheduler {\n\t\t\tm.RefreshSchedulerEntry(id)',
 )
 
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_selection.go'
