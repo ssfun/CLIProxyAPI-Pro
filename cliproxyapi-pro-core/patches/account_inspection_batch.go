@@ -28,7 +28,6 @@ import (
 const inspectionBatchRetention = 24 * time.Hour
 const inspectionBatchPreparationTTL = 10 * time.Minute
 const inspectionBatchCapacity = 256
-const inspectionRecoveryBatchMaxItems = 20
 
 type inspectionBatchItem struct {
 	Key      string                      `json:"key"`
@@ -137,12 +136,8 @@ func (h *Handler) preflightInspectionBatch(kind string, items []accountInspectio
 	if kind != "inspect" && kind != "action" && kind != "recover" {
 		return nil, errors.New("invalid batch kind")
 	}
-	maxItems := 500
-	if kind == "recover" {
-		maxItems = inspectionRecoveryBatchMaxItems
-	}
-	if len(items) == 0 || len(items) > maxItems {
-		return nil, fmt.Errorf("%s batch requires 1 to %d items", kind, maxItems)
+	if len(items) == 0 {
+		return nil, fmt.Errorf("%s batch requires at least 1 item", kind)
 	}
 	scheduler := schedulerForHandler(h)
 	if scheduler == nil {
@@ -155,7 +150,6 @@ func (h *Handler) preflightInspectionBatch(kind string, items []accountInspectio
 	now := time.Now()
 	operation := &inspectionBatchOperation{OperationID: hex.EncodeToString(token[:]), Kind: kind, State: "prepared", CreatedAt: now.UnixMilli(), ExpiresAt: now.Add(inspectionBatchPreparationTTL).UnixMilli(), Items: make([]inspectionBatchItem, 0, len(items))}
 	seen := make(map[string]bool)
-	recoveryCheckCount := 0
 	for _, requested := range items {
 		entry := inspectionBatchItem{Key: requested.Key, Item: requested, Status: "ready", Effect: "unknown"}
 		suggested := requested.Suggested
@@ -242,12 +236,8 @@ func (h *Handler) preflightInspectionBatch(kind string, items []accountInspectio
 		}
 		if entry.Status == "ready" {
 			entry.Effect = inspectionBatchEffect(kind, bound)
-			recoveryCheckCount += len(entry.recovery)
 		}
 		operation.Items = append(operation.Items, entry)
-	}
-	if recoveryCheckCount > inspectionRecoveryBatchMaxItems {
-		return nil, fmt.Errorf("batch supports at most %d recovery checks; narrow the scope", inspectionRecoveryBatchMaxItems)
 	}
 	return operation, nil
 }
@@ -345,7 +335,11 @@ func (h *Handler) resolveInspectionBatchItems(request inspectionBatchRequest) ([
 			return nil, http.StatusServiceUnavailable, errors.New("scheduler unavailable")
 		}
 		scheduler.mu.Lock()
-		results, info := proinspection.PaginateResults(scheduler.status.Results, 1, 501, 501, scope.Filter, scope.PendingOnly || request.Kind == "action" && scope.Suggested, scope.Provider, scope.Search)
+		pageSize := len(scheduler.status.Results)
+		if pageSize < 1 {
+			pageSize = 1
+		}
+		results, _ := proinspection.PaginateResults(scheduler.status.Results, 1, pageSize, pageSize, scope.Filter, scope.PendingOnly || request.Kind == "action" && scope.Suggested, scope.Provider, scope.Search)
 		items := make([]accountInspectionActionItem, 0, len(results))
 		for _, result := range results {
 			action := scope.Action
@@ -357,13 +351,6 @@ func (h *Handler) resolveInspectionBatchItems(request inspectionBatchRequest) ([
 			items = append(items, item)
 		}
 		scheduler.mu.Unlock()
-		maxItems := 500
-		if request.Kind == "recover" {
-			maxItems = inspectionRecoveryBatchMaxItems
-		}
-		if info.Total > maxItems {
-			return nil, http.StatusBadRequest, fmt.Errorf("filtered scope exceeds %d targets; narrow the filters", maxItems)
-		}
 		return items, 0, nil
 	default:
 		return nil, http.StatusBadRequest, errors.New("invalid scope type")

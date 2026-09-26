@@ -343,13 +343,12 @@ try:
     assert batch_total() == zero_before, (zero_before, batch_total())
     note("atomic_batch_zero_ready_rejected", status=zero_status)
 
-    oversized_status, oversized = call("POST", "/batches", {
+    oversized_status, oversized = call("POST", "/batches/preflight", {
         "kind": "action",
         "scope": {"type": "selected", "items": [item(row("xai-d.json"), "disable") for _ in range(501)]},
-        "clientRequestId": "inspection-e2e-oversized",
     })
-    assert oversized_status == 400 and "1 to 500" in oversized.get("error", ""), (oversized_status, oversized)
-    note("atomic_batch_capacity_rejected", maxTargets=500)
+    assert oversized_status == 200 and oversized["summary"]["total"] == 501, (oversized_status, oversized)
+    note("batch_target_count_not_capped", targets=oversized["summary"]["total"])
 
     # Keep the legacy two-step route functional for older Management clients.
     legacy = preflight([item(row("xai-h.json"))], "inspect")
@@ -380,8 +379,8 @@ try:
     capacity_status, capacity = call("POST", "/batches/preflight", {
         "kind": "recover", "scope": {"type": "selected", "items": [item(c) for _ in range(21)]},
     })
-    assert capacity_status == 400 and "1 to 20" in capacity.get("error", ""), (capacity_status, capacity)
-    note("serial_recovery_batch_capacity", maxTargets=20)
+    assert capacity_status == 200 and capacity["summary"]["total"] == 21, (capacity_status, capacity)
+    note("recovery_batch_target_count_not_capped", targets=capacity["summary"]["total"])
 
     pending_before = ok("GET", "/status")["status"]["summary"]["pendingActionCount"]
     override = ok("POST", "/actions", {"items": [item(e, "disable")]})
@@ -394,7 +393,7 @@ try:
     excluded_status, excluded = call("POST", "/batches/preflight", {
         "kind": "action", "scope": {"type": "filtered", "provider": "xai", "search": "xai-e.json", "pendingOnly": True, "suggested": True},
     })
-    assert excluded_status == 400 and "1 to 500" in excluded.get("error", ""), (excluded_status, excluded)
+    assert excluded_status == 400 and "requires at least 1 item" in excluded.get("error", ""), (excluded_status, excluded)
     note("manual_quota_override_resolves_pending", pendingBefore=pending_before, pendingAfter=pending_after, effect=resolved_e["executedEffect"])
 
     # An earlier delete confirmation cannot override a newer manual disable.

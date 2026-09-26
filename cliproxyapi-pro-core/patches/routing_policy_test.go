@@ -592,7 +592,7 @@ func TestRoutingInspectionReleaseImmediatelyUpdatesStatus(t *testing.T) {
 	}
 	preflight := httptest.NewRecorder()
 	router.ServeHTTP(preflight, httptest.NewRequest(http.MethodPost, "/account-inspection/batches/preflight", strings.NewReader(`{"kind":"action","scope":{"type":"filtered","provider":"codex","pendingOnly":true,"suggested":true}}`)))
-	if preflight.Code != http.StatusBadRequest || !strings.Contains(preflight.Body.String(), "1 to 500") {
+	if preflight.Code != http.StatusBadRequest || !strings.Contains(preflight.Body.String(), "requires at least 1 item") {
 		t.Fatalf("released result remained pending: %d %s", preflight.Code, preflight.Body.String())
 	}
 	select {
@@ -876,11 +876,48 @@ func TestSuggestedQuotaRecoveryBatchKeepsUnrelatedUpstreamRestriction(t *testing
 	}
 }
 
-func TestRecoveryBatchRejectsUnserviceableSerialCapacity(t *testing.T) {
+func TestInspectionBatchTargetCountUsesConfiguredConcurrencyInsteadOfHardCap(t *testing.T) {
 	f := newXAIRoutingRecoveryFixture(t, http.StatusOK, `{"id":"chatcmpl-test","choices":[]}`, false)
-	items := make([]accountInspectionActionItem, 21)
-	if _, err := f.h.preflightInspectionBatch("recover", items, false); err == nil {
-		t.Fatal("serial recovery accepted 21 targets")
+	// Failure matrix: recovery batches above the legacy 20-target cap, action
+	// batches above 500 targets, and filtered scopes must all preserve every
+	// target. Runtime concurrency is controlled by inspection settings instead.
+	recoveryItems := make([]accountInspectionActionItem, 21)
+	recovery, err := f.h.preflightInspectionBatch("recover", recoveryItems, false)
+	recoveryCount := 0
+	if recovery != nil {
+		recoveryCount = len(recovery.Items)
+	}
+	if err != nil || recoveryCount != len(recoveryItems) {
+		t.Fatalf("recovery target count was capped: items=%d err=%v", recoveryCount, err)
+	}
+	actionItems := make([]accountInspectionActionItem, 501)
+	action, err := f.h.preflightInspectionBatch("action", actionItems, false)
+	actionCount := 0
+	if action != nil {
+		actionCount = len(action.Items)
+	}
+	if err != nil || actionCount != len(actionItems) {
+		t.Fatalf("action target count was capped: items=%d err=%v", actionCount, err)
+	}
+
+	results := make([]accountInspectionResult, 25)
+	for index := range results {
+		suffix := strconv.Itoa(index)
+		results[index] = accountInspectionResult{
+			Key: "filtered-" + suffix, FileName: "filtered-" + suffix + ".json",
+			AuthIndex: "filtered-" + suffix, Provider: "xai", ResultRef: "result-" + suffix,
+			Action: accountInspectionActionEnable, QuotaCooling: true,
+		}
+	}
+	f.scheduler.mu.Lock()
+	f.scheduler.status.Results = results
+	f.scheduler.mu.Unlock()
+	resolved, status, err := f.h.resolveInspectionBatchItems(inspectionBatchRequest{
+		Kind: "recover",
+		Scope: &inspectionBatchScope{Type: "filtered"},
+	})
+	if err != nil || status != 0 || len(resolved) != len(results) {
+		t.Fatalf("filtered target count was capped: status=%d items=%d err=%v", status, len(resolved), err)
 	}
 }
 

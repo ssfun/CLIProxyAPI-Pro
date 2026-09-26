@@ -13,14 +13,14 @@ INSPECTION_SERVER=/absolute/path/to/server INSPECTION_E2E_OUTPUT=/absolute/path/
   python3 cliproxyapi-pro-core/e2e/account-inspection-batch-history/run.py --ci-fast
 ```
 
-The CI subset checks atomic `POST /batches` start, `clientRequestId` idempotency, zero-ready and oversized rejection, legacy preflight/execute compatibility, atomic retry execution, exact result filters plus legacy aliases, old `ResultRef` rejection, execute-time staleness, retry rebinding, quota protection, explicit quota override resolution, an old delete batch blocked by a newer manual disable, administrative disable, completion after an HTTP disconnect, retained delete evidence, bounded concurrent reinspection, recovery batch capacity, and evidence redaction. Quota recovery probing, restart recovery, and journal write-failure injection remain in the full run. In Validate, `result.json` and `server.log` are uploaded with Core validation diagnostics.
+The CI subset checks atomic `POST /batches` start, `clientRequestId` idempotency, zero-ready rejection, uncapped selected target scopes, legacy preflight/execute compatibility, atomic retry execution, exact result filters plus legacy aliases, old `ResultRef` rejection, execute-time staleness, retry rebinding, quota protection, explicit quota override resolution, an old delete batch blocked by a newer manual disable, administrative disable, completion after an HTTP disconnect, retained delete evidence, configured concurrent reinspection, uncapped recovery target scopes, and evidence redaction. Quota recovery probing, restart recovery, and journal write-failure injection remain in the full run. In Validate, `result.json` and `server.log` are uploaded with Core validation diagnostics.
 
 The script uses disposable xAI auth files and a local fake upstream. It allocates local ports, starts and stops Core, resets only its own output directory's `auth/` and `usage/`, verifies that public history and operation-list routes stay removed while internal safety-audit evidence remains durable, confirms that only HTTP 401/403 trigger the invalid-account automatic action while 400/404 remain inspection errors, and writes a repeatable receipt to `/private/tmp/inspection-batch-history-e2e/result.json`. Set `INSPECTION_E2E_OUTPUT` to use another output directory. It requires no live provider credentials.
 
 ## Failure cases checked
 
 1. Repeating an atomic start with the same `clientRequestId` returns one operation and performs one provider request.
-2. A scope with no ready targets returns a conflict without persisting or starting a batch; action batches above 500 targets are rejected.
+2. A scope with no ready targets returns a conflict without persisting or starting a batch; selected target counts are not capped before the existing controlled execution path runs them.
 3. The old preflight plus execute flow remains usable, and retry can still be prepared separately before `retry-execute` atomically persists and starts it.
 4. An old `ResultRef` is stale at preflight.
 5. Reinspection between preflight and execution makes the fixed item stale without disabling the account; retry creates another operation ID bound to the new result and can execute.
@@ -32,7 +32,7 @@ The script uses disposable xAI auth files and a local fake upstream. It allocate
 11. Making the evidence journal unwritable prevents a direct delete; restoring it permits exactly one delete and one operation record.
 12. The persisted evidence omits test credentials and uses mode `0600`.
 13. Three held probes for one provider overlap at two concurrent requests and never exceed the configured per-provider limit.
-14. A serial recovery batch rejects more than 20 targets before execution.
+14. Recovery batches accept more than 20 targets; execution still uses the existing inspection lifecycle and concurrency controls.
 
 The output directory contains `server.log`, the generated fixture, and `result.json`. The result records step receipts, operation IDs, the binary SHA256, and any coverage gaps. Tests do not depend on the browser or the full repository E2E suite.
 
