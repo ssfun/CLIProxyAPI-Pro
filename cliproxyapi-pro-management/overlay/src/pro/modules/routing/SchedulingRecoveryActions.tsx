@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { useNotificationStore } from '@/stores';
@@ -82,6 +82,12 @@ export function SchedulingBoardQuickActions({
   const { t } = useTranslation();
   const showConfirmation = useNotificationStore((state) => state.showConfirmation);
   const [busyAction, setBusyAction] = useState<'recheck' | 'resume' | null>(null);
+  const mounted = useRef(false);
+  const inFlight = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const requestBase = recoveryRequestBase(account);
   const releaseTargets = releasableRestrictions(account);
   const unavailable = !account.registrationEpoch;
@@ -91,16 +97,18 @@ export function SchedulingBoardQuickActions({
     action: 'recheck' | 'resume',
     operation: () => Promise<SchedulingRecoveryResult | undefined>
   ) => {
-    if (blocked) return;
+    if (blocked || !mounted.current || inFlight.current) return;
+    inFlight.current = true;
     setBusyAction(action);
     let response: SchedulingRecoveryResult | undefined;
     try {
       response = await operation();
-      await onResult(response);
+      if (mounted.current) await onResult(response);
     } catch (error) {
-      await onError?.(error);
+      if (mounted.current) await onError?.(error);
     } finally {
-      setBusyAction(null);
+      inFlight.current = false;
+      if (mounted.current) setBusyAction(null);
     }
   };
 
@@ -118,6 +126,7 @@ export function SchedulingBoardQuickActions({
       onConfirm: () => run('resume', async () => {
         let response: SchedulingRecoveryResult | undefined;
         for (const detail of releaseTargets) {
+          if (!mounted.current) break;
           response = await routingPolicyApi.release({
             ...requestBase,
             source: detail.source as 'inspection' | 'upstream',
@@ -245,9 +254,7 @@ export function SchedulingRecoveryActions({ account, onResult, disabled = false 
       <details className={styles.manual}>
         <summary>{t('routing_policy.recovery.manual_title')}</summary>
         <p>{t('routing_policy.recovery.manual_notice')}</p>
-        {account.details.filter((detail) => detail.revision && (
-          detail.source === 'inspection' || detail.source === 'upstream' && Boolean(detail.retryAt)
-        )).map((detail, index) => {
+        {releasableRestrictions(account).map((detail, index) => {
           const key = `${restrictionKey(detail)}:${index}`;
           const label = `${t(`routing_policy.sources.${detail.source}`, { defaultValue: detail.source })} · ${detail.model || t('routing_policy.runtime.all_models')}`;
           return (

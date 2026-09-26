@@ -212,6 +212,7 @@ function BoardActions({
         {t('routing_policy.runtime.details_short')}
       </Button>
       <SchedulingBoardQuickActions
+        key={JSON.stringify([account.authId, account.authIndex, account.registrationEpoch])}
         account={account}
         onResult={onRecovered}
         onError={onRecoveryError}
@@ -449,6 +450,14 @@ function SchedulingBoardDetailPanel({
 }
 
 export function RoutingPolicyPage() {
+  const apiBase = useAuthStore((state) => state.apiBase);
+  const managementKey = useAuthStore((state) => state.managementKey);
+  const connectionStatus = useAuthStore((state) => state.connectionStatus);
+  // A connection change starts a new board session, including pending actions.
+  return <RoutingPolicyBoard key={JSON.stringify([apiBase, managementKey, connectionStatus])} />;
+}
+
+function RoutingPolicyBoard() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
@@ -511,6 +520,7 @@ export function RoutingPolicyPage() {
               'success'
             );
           }
+          return true;
         }
       } catch (error) {
         if (request.isCurrent()) {
@@ -535,7 +545,7 @@ export function RoutingPolicyPage() {
       return undefined;
     }
     void loadBoard({ notify: false, showLoading: true });
-    const stop = startPolling(() => loadBoard(), 15000);
+    const stop = startPolling(async () => { await loadBoard(); }, 15000);
     return () => {
       stop();
       gate.invalidate();
@@ -678,8 +688,8 @@ export function RoutingPolicyPage() {
   }, []);
 
   const handleRecoveryResult = useCallback(async (result?: SchedulingRecoveryResult) => {
-    await loadBoard();
-    if (!result) return;
+    const refreshed = await loadBoard();
+    if (!refreshed || !result) return;
     const tone = schedulingRecoveryResultTone(result);
     showNotification(
       t(tone === 'error'

@@ -30,3 +30,28 @@ bash cliproxyapi-pro-management/e2e/routing-board-actions/run.sh \
 
 Use `before` against the old UI to preserve the failing evidence. The run writes
 `result.json`, `desktop.png`, and `mobile.png`.
+
+## Connection lifecycle review
+
+Failure scenarios frozen before the fix:
+
+- Switching API address/key while still connected leaves account A on server B.
+- A pending recheck from A refreshes/notifies the new connection after completion.
+- A delayed post-recheck board refresh notifies a new connection.
+- A confirmation opened on A sends release requests after switching to B.
+
+`lifecycle.mjs` runs these against the real page with controlled API promises,
+and writes `lifecycle.json`. Run through `ego-browser nodejs` with `config`
+containing `url`, `artifactDir`, and optionally `spaceId` / `expectBefore`.
+
+Example (reuse the same `spaceId` for before/after runs):
+
+```sh
+{
+  printf '%s\n' 'const config = {url:"http://127.0.0.1:4186/e2e/routing-board-actions/",artifactDir:"/private/tmp/scheduling-review-after"};'
+  cat cliproxyapi-pro-management/e2e/routing-board-actions/lifecycle.mjs
+} | ego-browser nodejs
+```
+
+The lifecycle runner retains its task space for subsequent layout checks.
+Finish that space after the last run, or pass it to `run.sh` as argument four.

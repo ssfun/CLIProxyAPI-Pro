@@ -111,22 +111,11 @@ type SchedulingBoardRawResponse = {
   accounts?: SchedulingBoardAccount[] | null;
 };
 
-const emptySummary = (): SchedulingBoardSummary => ({
-  blocked: 0,
-  quota: 0,
-  authTransient: 0,
-  recheck: 0,
-  overlap: 0,
-  excluded: 0,
-});
-
 export const normalizeSchedulingBoardResponse = (
   response: SchedulingBoardRawResponse | null | undefined
 ): SchedulingBoardResponse => ({
   generatedAt: Number(response?.generatedAt) || 0,
   summary: {
-    ...emptySummary(),
-    ...(response?.summary ?? {}),
     blocked: Number(response?.summary?.blocked) || 0,
     quota: Number(response?.summary?.quota) || 0,
     authTransient: Number(response?.summary?.authTransient) || 0,

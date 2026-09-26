@@ -5,31 +5,20 @@ export interface LatestRequestToken {
 }
 
 export function createLatestRequestGate() {
-  let generation = 0;
-  let sequence = 0;
-  let active: { generation: number; sequence: number; controller: AbortController } | null = null;
+  let active: AbortController | null = null;
 
   const invalidate = () => {
-    generation += 1;
-    active?.controller.abort();
+    active?.abort();
     active = null;
   };
 
   const begin = (): LatestRequestToken => {
-    active?.controller.abort();
-    const request = {
-      generation,
-      sequence: ++sequence,
-      controller: new AbortController(),
-    };
+    active?.abort();
+    const request = new AbortController();
     active = request;
-    const isCurrent = () =>
-      active === request &&
-      request.generation === generation &&
-      request.sequence === sequence &&
-      !request.controller.signal.aborted;
+    const isCurrent = () => active === request && !request.signal.aborted;
     return {
-      signal: request.controller.signal,
+      signal: request.signal,
       isCurrent,
       finish: () => {
         if (active === request) active = null;

@@ -53,6 +53,10 @@ const fillerAccounts = Array.from({ length: 17 }, (_, index) => makeAccount(
   }]
 ));
 let getCount = 0;
+let finishCheck: (() => void) | undefined;
+let delayCheck = false;
+let delayGet = false;
+let finishGet: (() => void) | undefined;
 const checkRequests: SchedulingRecoveryRequest[] = [];
 const releaseRequests: SchedulingRecoveryRequest[] = [];
 
@@ -72,10 +76,16 @@ const board = () => ({
 authFilesApi.list = async () => ({ files: [] });
 routingPolicyApi.get = async () => {
   getCount += 1;
-  return board();
+  const snapshot = board();
+  if (delayGet) {
+    delayGet = false;
+    await new Promise<void>((resolve) => { finishGet = resolve; });
+  }
+  return snapshot;
 };
 routingPolicyApi.check = async (request) => {
   checkRequests.push({ ...request });
+  if (delayCheck) await new Promise<void>((resolve) => { finishCheck = resolve; });
   return {
     before: account ?? undefined,
     after: account ?? undefined,
@@ -110,6 +120,15 @@ Object.assign(window, {
       checks: checkRequests.map((request) => ({ ...request })),
       releases: releaseRequests.map((request) => ({ ...request })),
     }),
+    delayGet: () => { delayGet = true; },
+    finishGet: () => finishGet?.(),
+    delayCheck: () => { delayCheck = true; },
+    finishCheck: () => { finishCheck?.(); delayCheck = false; },
+    switchConnection: () => {
+      account = makeAccount('B');
+      useAuthStore.setState({ apiBase: 'http://fixture-b.invalid', managementKey: 'fixture-b' });
+    },
+    notifications: () => useNotificationStore.getState().notifications,
     reset: () => {
       account = makeAccount();
       checkRequests.splice(0);

@@ -281,14 +281,6 @@
   font-size: 12px;
   flex-shrink: 0;
 }
-.authIdText {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
 .restrictionCell {
   display: flex;
   flex-direction: column;
