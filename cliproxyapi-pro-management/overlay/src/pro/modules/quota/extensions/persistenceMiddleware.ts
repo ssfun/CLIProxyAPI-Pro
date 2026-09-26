@@ -3,7 +3,11 @@
  * Automatically syncs quota state to SQLite quota cache.
  */
 
-import { useQuotaStore } from '@/stores';
+import {
+  captureQuotaCacheGeneration,
+  commitIfQuotaCacheCurrent,
+  useQuotaStore,
+} from '@/stores/useQuotaStore';
 import {
   getQuotaProviderMapName,
   getQuotaProviderSetterName,
@@ -31,7 +35,8 @@ type QuotaMapUpdater = (
 
 class QuotaPersistenceMiddleware {
   private unsubscribe: (() => void) | null = null;
-  private isPreloading = false;
+  private isHydrating = false;
+  private epoch = 0;
   private syncQueue = new Set<string>();
   private isFlushing = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -39,10 +44,9 @@ class QuotaPersistenceMiddleware {
   private syncedVersions = new Map<string, string>();
   private loadedGeneration = 0;
   private reloadRequested = false;
-  private preloadPromise: Promise<void> | null = null;
   private ensureFreshPromise: Promise<void> | null = null;
   private lastQuotaMaps = new Map<ProQuotaProviderType, Record<string, QuotaStatusState>>();
-  private hydratedKeys = new Map<ProQuotaProviderType, Set<string>>();
+  private hydratedStates = new Map<ProQuotaProviderType, Record<string, QuotaStatusState>>();
 
   /**
    * Start the middleware
@@ -55,19 +59,15 @@ class QuotaPersistenceMiddleware {
 
     // Check if upstream store structure is compatible
     if (!this.checkCompatibility()) {
-      console.warn('QuotaPersistenceMiddleware: Upstream store structure changed, persistence disabled');
+      console.warn(
+        'QuotaPersistenceMiddleware: Upstream store structure changed, persistence disabled'
+      );
       return;
     }
 
-    console.log('QuotaPersistenceMiddleware: Starting...');
-
-    // Preload cache first
-    this.ensureFresh().then(() => {
-      console.log('QuotaPersistenceMiddleware: Cache preloaded');
-    });
-
-    this.unsubscribe = useQuotaStore.subscribe((state) => {
-      if (this.isPreloading) return;
+    this.unsubscribe = useQuotaStore.subscribe((state, previous) => {
+      if (state.cacheGeneration !== previous.cacheGeneration) this.reset();
+      if (this.isHydrating) return;
 
       PRO_QUOTA_PROVIDER_TYPES.forEach((provider) => {
         const quotaMap = this.getQuotaMap(state, provider);
@@ -76,27 +76,28 @@ class QuotaPersistenceMiddleware {
         this.syncProvider(provider, quotaMap);
       });
     });
-
-    console.log('QuotaPersistenceMiddleware: Started successfully');
+    void this.ensureFresh();
   }
 
-  /**
-   * Stop the middleware
-   */
   stop() {
-    if (this.unsubscribe) {
-      this.unsubscribe();
-      this.unsubscribe = null;
-    }
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    this.reset();
+  }
+
+  private reset() {
+    this.epoch++;
     this.lastQuotaMaps.clear();
     this.syncedVersions.clear();
-    this.hydratedKeys.clear();
-    if (this.retryTimer) {
-      clearTimeout(this.retryTimer);
-      this.retryTimer = null;
-    }
-    void this.flushSyncQueue();
-    console.log('QuotaPersistenceMiddleware: Stopped');
+    this.hydratedStates.clear();
+    this.syncQueue.clear();
+    this.loadedGeneration = 0;
+    this.reloadRequested = true;
+    this.ensureFreshPromise = null;
+    this.isFlushing = false;
+    this.retryDelayMs = 1_000;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
   }
 
   /**
@@ -122,10 +123,7 @@ class QuotaPersistenceMiddleware {
   /**
    * Sync provider quota to SQLite quota cache.
    */
-  private syncProvider(
-    provider: ProQuotaProviderType,
-    quotaMap: Record<string, QuotaStatusState>
-  ) {
+  private syncProvider(provider: ProQuotaProviderType, quotaMap: Record<string, QuotaStatusState>) {
     let changed = false;
     const activeKeys = new Set<string>();
     Object.entries(quotaMap).forEach(([fileName, state]) => {
@@ -145,10 +143,6 @@ class QuotaPersistenceMiddleware {
   }
 
   private getSyncVersion(state: unknown) {
-    if (state && typeof state === 'object' && 'cachedAt' in state) {
-      const cachedAt = (state as QuotaStatusState).cachedAt;
-      if (cachedAt !== undefined) return String(cachedAt);
-    }
     return JSON.stringify(state);
   }
 
@@ -165,11 +159,12 @@ class QuotaPersistenceMiddleware {
    * Flush sync queue to SQLite quota cache
    */
   private async flushSyncQueue() {
-    if (this.isFlushing) return;
+    if (this.isFlushing || !this.unsubscribe || this.retryTimer) return;
+    const epoch = this.epoch;
     this.isFlushing = true;
 
     try {
-      while (this.syncQueue.size > 0) {
+      while (this.syncQueue.size > 0 && epoch === this.epoch) {
         const key = this.syncQueue.values().next().value as string | undefined;
         if (!key) break;
         this.syncQueue.delete(key);
@@ -187,8 +182,15 @@ class QuotaPersistenceMiddleware {
         if (provider === 'gemini-cli' && quotaState.quotaProviderSnapshot) continue;
 
         const version = this.getSyncVersion(quotaState);
+        if (this.syncedVersions.get(key) === version) continue;
         const cachedAt = quotaState.cachedAt ?? Date.now();
-        const synced = await sqliteQuotaCache.set(provider, fileName, { ...quotaState, cachedAt }, cachedAt);
+        const synced = await sqliteQuotaCache.set(
+          provider,
+          fileName,
+          { ...quotaState, cachedAt },
+          cachedAt
+        );
+        if (epoch !== this.epoch) return;
         if (synced) {
           this.syncedVersions.set(key, version);
           this.retryDelayMs = 1_000;
@@ -201,10 +203,7 @@ class QuotaPersistenceMiddleware {
     } catch (err) {
       console.error('QuotaPersistenceMiddleware: Failed to sync to SQLite quota cache:', err);
     } finally {
-      this.isFlushing = false;
-      if (this.syncQueue.size > 0 && !this.retryTimer) {
-        void this.flushSyncQueue();
-      }
+      if (epoch === this.epoch) this.isFlushing = false;
     }
   }
 
@@ -220,27 +219,52 @@ class QuotaPersistenceMiddleware {
 
   async ensureFresh() {
     if (this.ensureFreshPromise) return this.ensureFreshPromise;
+    const epoch = this.epoch;
+    const initialState = useQuotaStore.getState();
+    const generation = captureQuotaCacheGeneration();
 
     this.ensureFreshPromise = (async () => {
-      const stats = await sqliteQuotaCache.getStats();
-      if (!this.reloadRequested && stats.generation > 0 && stats.generation <= this.loadedGeneration) return;
-      await this.runPreload(stats.generation);
-      this.reloadRequested = false;
+      try {
+        const stats = await sqliteQuotaCache.getStats();
+        if (epoch !== this.epoch) return;
+        if (
+          !this.reloadRequested &&
+          stats.generation > 0 &&
+          stats.generation === this.loadedGeneration
+        )
+          return;
+        // Consume only the current request; markStale during the read must survive.
+        this.reloadRequested = false;
+        const cachedEntries = await sqliteQuotaCache.getAll();
+        if (epoch !== this.epoch) return;
+        const applied = commitIfQuotaCacheCurrent(generation, () => {
+          const entriesByProvider = new Map<ProQuotaProviderType, QuotaCacheEntry[]>();
+          cachedEntries.forEach((entry) => {
+            if (!isProQuotaProviderType(entry.provider)) return;
+            const entries = entriesByProvider.get(entry.provider) ?? [];
+            entries.push(entry);
+            entriesByProvider.set(entry.provider, entries);
+          });
+          // Suppress only our synchronous store writes, never network-time updates.
+          this.isHydrating = true;
+          try {
+            PRO_QUOTA_PROVIDER_TYPES.forEach((provider) => {
+              this.preloadProvider(provider, entriesByProvider.get(provider) ?? [], initialState);
+            });
+            this.loadedGeneration = stats.generation;
+          } finally {
+            this.isHydrating = false;
+          }
+        });
+        if (!applied) this.reloadRequested = true;
+      } catch (err) {
+        if (epoch === this.epoch) this.reloadRequested = true;
+        console.error('QuotaPersistenceMiddleware: Failed to preload cache:', err);
+      }
     })().finally(() => {
-      this.ensureFreshPromise = null;
+      if (epoch === this.epoch) this.ensureFreshPromise = null;
     });
-
     return this.ensureFreshPromise;
-  }
-
-  private runPreload(generation = 0) {
-    if (this.preloadPromise) return this.preloadPromise;
-
-    this.preloadPromise = this.preloadCache(generation).finally(() => {
-      this.preloadPromise = null;
-    });
-
-    return this.preloadPromise;
   }
 
   markStale() {
@@ -248,39 +272,17 @@ class QuotaPersistenceMiddleware {
   }
 
   /**
-   * Preload cache from SQLite quota cache to Zustand store
-   */
-  private async preloadCache(generation = 0) {
-    this.isPreloading = true;
-
-    try {
-      const cachedEntries = await sqliteQuotaCache.getAll();
-      const entriesByProvider = new Map<ProQuotaProviderType, QuotaCacheEntry[]>();
-      cachedEntries.forEach((entry) => {
-        if (!isProQuotaProviderType(entry.provider)) return;
-        const provider = entry.provider;
-        const entries = entriesByProvider.get(provider) ?? [];
-        entries.push(entry);
-        entriesByProvider.set(provider, entries);
-      });
-
-      PRO_QUOTA_PROVIDER_TYPES.forEach((provider) => {
-        this.preloadProvider(provider, entriesByProvider.get(provider) ?? []);
-      });
-      this.loadedGeneration = Math.max(this.loadedGeneration, generation);
-    } catch (err) {
-      console.error('QuotaPersistenceMiddleware: Failed to preload cache:', err);
-    } finally {
-      this.isPreloading = false;
-    }
-  }
-
-  /**
    * Preload single provider from SQLite quota cache
    */
-  private preloadProvider(provider: ProQuotaProviderType, cachedEntries: QuotaCacheEntry[]) {
+  private preloadProvider(
+    provider: ProQuotaProviderType,
+    cachedEntries: QuotaCacheEntry[],
+    initialState: QuotaStoreState
+  ) {
     const cached = selectPreferredQuotaCacheEntries(provider, cachedEntries);
-    const previouslyHydrated = this.hydratedKeys.get(provider) ?? new Set<string>();
+    const previouslyHydrated = this.hydratedStates.get(provider) ?? {};
+    const hydrated: Record<string, QuotaStatusState> = {};
+    const initial = this.getQuotaMap(initialState, provider);
 
     const setterName = getQuotaProviderSetterName(provider);
     const storeState = useQuotaStore.getState();
@@ -290,8 +292,8 @@ class QuotaPersistenceMiddleware {
       setter((prev) => {
         let changed = false;
         const next = { ...prev };
-        previouslyHydrated.forEach((fileName) => {
-          if (cached.has(fileName) || !(fileName in next)) return;
+        Object.entries(previouslyHydrated).forEach(([fileName, state]) => {
+          if (cached.has(fileName) || next[fileName] !== state) return;
           delete next[fileName];
           this.syncedVersions.delete(`${provider}:${fileName}`);
           changed = true;
@@ -300,6 +302,15 @@ class QuotaPersistenceMiddleware {
           const data = normalizePersistedQuotaState(provider, entry.data, entry.cachedAt);
           if (!isAuthCardQuotaCacheDataCompatible(provider, data)) return;
           const quotaState = data as QuotaStatusState;
+          const current = next[fileName];
+          if (current !== initial?.[fileName]) return;
+          if (
+            current &&
+            (current.status === 'loading' ||
+              (current.cachedAt ?? 0) > (quotaState.cachedAt ?? entry.cachedAt))
+          )
+            return;
+          hydrated[fileName] = quotaState;
           this.syncedVersions.set(`${provider}:${fileName}`, this.getSyncVersion(quotaState));
           if (next[fileName] === quotaState) return;
           next[fileName] = quotaState;
@@ -308,9 +319,9 @@ class QuotaPersistenceMiddleware {
         return changed ? next : prev;
       });
 
-      this.hydratedKeys.set(provider, new Set(cached.keys()));
-
-      console.log(`QuotaPersistenceMiddleware: Preloaded ${cached.size} entries for ${provider}`);
+      this.hydratedStates.set(provider, hydrated);
+      const quotaMap = this.getQuotaMap(useQuotaStore.getState(), provider);
+      if (quotaMap) this.lastQuotaMaps.set(provider, quotaMap);
     }
   }
 
@@ -323,26 +334,6 @@ class QuotaPersistenceMiddleware {
   ): Record<string, QuotaStatusState> | null {
     const mapName = getQuotaProviderMapName(provider);
     return state[mapName] || null;
-  }
-
-  /**
-   * Get cache statistics
-   */
-  async getStats() {
-    return await sqliteQuotaCache.getStats();
-  }
-
-  /**
-   * Clear all cache
-   */
-  async clearCache() {
-    await sqliteQuotaCache.clear();
-    this.syncedVersions.clear();
-    this.syncQueue.clear();
-    this.hydratedKeys.clear();
-    this.loadedGeneration = 0;
-    this.reloadRequested = true;
-    console.log('QuotaPersistenceMiddleware: Cache cleared');
   }
 }
 
