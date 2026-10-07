@@ -9,25 +9,35 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/embeddedusage"
 	proinspection "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/inspection"
+	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
 // Written before the fix: real HTTP transport, decision and persisted SQLite payload.
 func TestOtherProviderQuotaParityHTTPAndSQLite(t *testing.T) {
 	for _, tc := range []struct {
-		name, provider, fileName, domain, baseURL, host, body, rowID, plan string
-		used                                                               float64
+		name, provider, fileName, domain, baseURL, host, body, rowID, plan, scope string
+		blocked                                                                   []string
+		used                                                                      float64
 	}{
 		{name: "kimi-ai-monthly", provider: "kimi", domain: "ai", host: "api.kimi.ai", body: `{"usage":{"used":20,"limit":100},"usages":{"limit_month_total":{"used_ratio":0.95,"reset_time":"2099-11-01T00:00:00Z"}}}`, rowID: "monthly", used: 95},
 		{name: "kimi-ai-base-url", provider: "kimi", baseURL: "https://api.kimi.ai/coding", host: "api.kimi.ai", body: `{"usage":{"used":20,"limit":100}}`, rowID: "summary", used: 20},
 		{name: "kimi-com-explicit", provider: "kimi", fileName: "kimi-ai-explicit.json", domain: "com", host: "api.kimi.com", body: `{"usage":{"used":20,"limit":100}}`, rowID: "summary", used: 20},
 		{name: "kimi-arbitrary-base-url", provider: "kimi", baseURL: "https://example.invalid/steal", host: "api.kimi.com", body: `{"usage":{"used":20,"limit":100}}`, rowID: "summary", used: 20},
 		{name: "kimi-monthly-only", provider: "kimi", host: "api.kimi.com", body: `{"usages":{"limit_month_total":{"used_ratio":0.95,"reset_time":"2099-11-01T00:00:00Z"}}}`, rowID: "monthly", used: 95},
-		{name: "claude-fable-team", provider: "claude", host: "api.anthropic.com", body: `{"limits":[{"kind":"weekly_scoped","percent":95,"is_active":true,"scope":{"model":{"display_name":"Fable"}},"resets_at":"2099-11-01T00:00:00Z"}],"iguana_necktie":{"utilization":12,"resets_at":"2099-01-01T00:00:00Z"}}`, rowID: "seven-day-fable", used: 95, plan: "plan_team"},
+		{name: "claude-fable-team", provider: "claude", host: "api.anthropic.com", body: `{"limits":[{"kind":"weekly_scoped","percent":95,"is_active":true,"scope":{"model":{"display_name":"Fable"}},"resets_at":"2099-11-01T00:00:00Z"}],"iguana_necktie":{"utilization":12,"resets_at":"2099-01-01T00:00:00Z"}}`, rowID: "seven-day-fable", used: 95, plan: "plan_team", scope: "claude-fable-*", blocked: []string{"claude-fable-5", "claude-fable-5-1"}},
+		{name: "claude-fable-only", provider: "claude", host: "api.anthropic.com", body: `{"five_hour":{"utilization":10},"seven_day":{"utilization":20},"limits":[{"kind":"weekly_scoped","percent":95,"is_active":true,"scope":{"model":{"display_name":"Fable 5"}},"resets_at":"2099-11-01T00:00:00Z"}]}`, rowID: "seven-day-fable", used: 95, plan: "plan_team", scope: "claude-fable-*", blocked: []string{"claude-fable-5", "claude-fable-5-1"}},
+		{name: "claude-fable-legacy", provider: "claude", host: "api.anthropic.com", body: `{"five_hour":{"utilization":10},"seven_day":{"utilization":20},"iguana_necktie":{"utilization":95,"resets_at":"2099-11-01T00:00:00Z"}}`, rowID: "seven-day-fable", used: 95, plan: "plan_team", scope: "claude-fable-*", blocked: []string{"claude-fable-5", "claude-fable-5-1"}},
+		{name: "claude-fable-opus", provider: "claude", host: "api.anthropic.com", body: `{"five_hour":{"utilization":10},"seven_day":{"utilization":20},"limits":[{"kind":"weekly_scoped","percent":95,"is_active":true,"scope":{"model":{"display_name":"Fable 5"}},"resets_at":"2099-11-01T00:00:00Z"}],"seven_day_opus":{"utilization":95,"resets_at":"2099-11-01T00:00:00Z"}}`, rowID: "seven-day-fable", used: 95, plan: "plan_team", scope: "claude-opus-*,claude-fable-*", blocked: []string{"claude-fable-5", "claude-fable-5-1", "claude-opus-4-6"}},
+		{name: "claude-fable-five-hour", provider: "claude", host: "api.anthropic.com", body: `{"five_hour":{"utilization":95},"seven_day":{"utilization":20},"limits":[{"kind":"weekly_scoped","percent":95,"is_active":true,"scope":{"model":{"display_name":"Fable 5"}},"resets_at":"2099-11-01T00:00:00Z"}]}`, rowID: "seven-day-fable", used: 95, plan: "plan_team", scope: "", blocked: []string{"claude-fable-5", "claude-fable-5-1", "claude-opus-4-6", "claude-sonnet-4-6"}},
+		{name: "claude-fable-weekly", provider: "claude", host: "api.anthropic.com", body: `{"five_hour":{"utilization":10},"seven_day":{"utilization":95},"limits":[{"kind":"weekly_scoped","percent":95,"is_active":true,"scope":{"model":{"display_name":"Fable 5"}},"resets_at":"2099-11-01T00:00:00Z"}]}`, rowID: "seven-day-fable", used: 95, plan: "plan_team", scope: "", blocked: []string{"claude-fable-5", "claude-fable-5-1", "claude-opus-4-6", "claude-sonnet-4-6"}},
+		{name: "claude-fable-below", provider: "claude", host: "api.anthropic.com", body: `{"five_hour":{"utilization":10},"seven_day":{"utilization":20},"limits":[{"kind":"weekly_scoped","percent":20,"is_active":true,"scope":{"model":{"display_name":"Fable 5"}},"resets_at":"2099-11-01T00:00:00Z"}]}`, rowID: "seven-day-fable", used: 20, plan: "plan_team", scope: "", blocked: []string{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := startProQuotaTestService(t)
@@ -85,6 +95,29 @@ func TestOtherProviderQuotaParityHTTPAndSQLite(t *testing.T) {
 			if decision.UsedPercent == nil || *decision.UsedPercent != tc.used || decision.IsQuota != (tc.used >= 90) {
 				t.Errorf("decision=%+v want used=%v", decision, tc.used)
 			}
+			var scopeEvidence map[string]any
+			if tc.provider == "claude" {
+				if decision.QuotaModel != tc.scope {
+					t.Errorf("scope=%q want %q", decision.QuotaModel, tc.scope)
+				}
+				blocks := map[string]bool{}
+				if decision.IsQuota {
+					result := account.baseResult()
+					result.QuotaModel = decision.QuotaModel
+					result.QuotaResetAt = decision.QuotaResetAt
+					hold := newInspectionQuotaHold(auth, &result, settings)
+					if hold == nil {
+						t.Fatal("missing protection")
+					}
+					for _, model := range []string{"claude-fable-5", "claude-fable-5-1", "claude-opus-4-6", "claude-sonnet-4-6"} {
+						blocks[model] = prorouting.ProtectionBlocks(*hold, model, time.Now())
+						if blocks[model] != slices.Contains(tc.blocked, model) {
+							t.Errorf("model=%s blocked=%v want %v", model, blocks[model], slices.Contains(tc.blocked, model))
+						}
+					}
+				}
+				scopeEvidence = map[string]any{"scope": decision.QuotaModel, "isQuota": decision.IsQuota, "blocks": blocks}
+			}
 			entries, err := embeddedusage.GetQuotaCache(ctx, tc.provider, fileName)
 			if err != nil || len(entries) != 1 {
 				t.Fatalf("cache entries=%v err=%v", entries, err)
@@ -92,6 +125,15 @@ func TestOtherProviderQuotaParityHTTPAndSQLite(t *testing.T) {
 			if dir := os.Getenv("OTHER_PROVIDER_QUOTA_EVIDENCE_DIR"); dir != "" {
 				if err := os.MkdirAll(dir, 0755); err != nil {
 					t.Fatal(err)
+				}
+				if scopeEvidence != nil {
+					raw, err := json.MarshalIndent(scopeEvidence, "", "  ")
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(dir, tc.name+"-routing.json"), raw, 0600); err != nil {
+						t.Fatal(err)
+					}
 				}
 				if err := os.WriteFile(filepath.Join(dir, tc.name+".json"), entries[0].Data, 0600); err != nil {
 					t.Fatal(err)

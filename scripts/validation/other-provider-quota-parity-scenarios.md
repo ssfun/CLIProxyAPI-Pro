@@ -9,3 +9,7 @@ Failure scenarios written before transport changes. No live credentials required
 5. xAI optional requests are concurrent, bounded, and not retried. Cancellation or credential replacement while they are pending must not persist that observation. Official API accounts must not request CLI subscription endpoints. Existing quota failure/deep-probe behavior must remain unchanged.
 
 Validation order: run targeted HTTP -> inspection -> SQLite fixtures red, implement, run targeted fixtures green with race detector and exported SQLite JSON. At completion replay durable patches on clean pinned upstream and execute the binary HTTP E2E suite once. Preserve logs, replay inputs and result JSON under the validation artifact directory.
+
+## Fable routing scope regression
+
+Before implementation: extend HTTP -> inspection -> SQLite checks through `newInspectionQuotaHold` and the production routing matcher. Verify Fable-only exhaustion (including legacy alias) blocks Fable 5/5.1 but leaves Sonnet/Opus available; simultaneous Fable/Opus exhaustion protects both families; exhausted five-hour or shared weekly quota stays credential-wide; below-threshold Fable produces no quota action. Export the protection scope and per-model blocking results alongside SQLite snapshots.

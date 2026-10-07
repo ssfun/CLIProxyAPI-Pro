@@ -1234,6 +1234,8 @@ func claudeQuotaModelFromWindows(windows []map[string]any) string {
 			scopes = append(scopes, "claude-opus-*")
 		case "seven-day-sonnet":
 			scopes = append(scopes, "claude-sonnet-*")
+		case "seven-day-fable":
+			scopes = append(scopes, "claude-fable-*")
 		default:
 			return ""
 		}
