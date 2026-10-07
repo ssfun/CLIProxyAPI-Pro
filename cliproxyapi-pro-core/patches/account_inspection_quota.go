@@ -7,8 +7,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/embeddedusage"
@@ -300,8 +304,234 @@ func codexQuotaStateValues(auth *coreauth.Auth, payload map[string]any, windows 
 		"rawShapeHash": proquota.JSONShapeHash(rawBody),
 	}
 	values["subscriptionActiveUntil"] = codexSubscriptionActiveUntil(auth)
-	values["rateLimitResetCreditsAvailableCount"] = codexRateLimitResetCreditsAvailableCount(payload)
+	credits := firstMap(payload, "credits")
+	values["creditBalance"] = codexCreditBalance(credits["balance"])
+	values["creditsUnlimited"] = credits["unlimited"] == true
+	summary, _ := codexResetCreditsSummary(firstMap(payload, "rate_limit_reset_credits", "rateLimitResetCredits"), time.Now())
+	values["rateLimitResetCreditsAvailableCount"] = summary["availableCount"]
+	values["rateLimitResetCreditsApplicableAvailableCount"] = summary["applicableAvailableCount"]
+	values["rateLimitResetCredits"] = summary["credits"]
+	values["rateLimitResetCreditsError"] = ""
 	return values
+}
+
+const codexInspectionDetailsTTL = 15 * time.Minute
+
+func codexCreditBalance(value any) any {
+	text := codexQuotaString(value)
+	if text == "" {
+		return nil
+	}
+	dots := 0
+	for _, char := range text {
+		if char == '.' {
+			dots++
+			continue
+		}
+		if char < '0' || char > '9' {
+			return nil
+		}
+	}
+	if dots > 1 || strings.HasPrefix(text, ".") || strings.HasSuffix(text, ".") {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+		return nil
+	}
+	return text
+}
+
+func codexQuotaString(value any) string {
+	switch typed := value.(type) {
+	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) {
+			return ""
+		}
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	default:
+		return stringFromAny(value)
+	}
+}
+
+func codexResetCreditsSummary(payload map[string]any, now time.Time) (map[string]any, bool) {
+	credits := make([]map[string]any, 0)
+	summary := map[string]any{"availableCount": nil, "applicableAvailableCount": nil, "credits": credits}
+	valid := false
+	if raw, present := payload["credits"]; present {
+		if _, ok := raw.([]any); !ok {
+			return summary, false
+		}
+		valid = true
+	}
+	for key, aliases := range map[string][]string{"availableCount": {"available_count", "availableCount"}, "applicableAvailableCount": {"applicable_available_count", "applicableAvailableCount"}} {
+		raw := firstAny(payload, aliases...)
+		if raw == nil {
+			continue
+		}
+		if count, ok := floatFromAny(raw); ok && count >= 0 && !math.IsInf(count, 0) && !math.IsNaN(count) {
+			summary[key] = count
+			valid = true
+		} else {
+			return summary, false
+		}
+	}
+	items, _ := payload["credits"].([]any)
+	for _, item := range items {
+		credit, ok := item.(map[string]any)
+		if !ok || stringFromAny(firstAny(credit, "reset_type", "resetType")) != "codex_rate_limits" || stringFromAny(credit["status"]) != "available" {
+			continue
+		}
+		expires := codexQuotaString(firstAny(credit, "expires_at", "expiresAt"))
+		if !codexResetCreditUnexpired(expires, now) {
+			continue
+		}
+		credits = append(credits, map[string]any{"id": codexQuotaString(credit["id"]), "status": "available", "grantedAt": codexQuotaString(firstAny(credit, "granted_at", "grantedAt")), "expiresAt": expires})
+	}
+	summary["credits"] = credits
+	return summary, valid
+}
+
+func codexResetCreditUnexpired(value string, now time.Time) bool {
+	if timestamp, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return timestamp.After(now)
+	}
+	if timestamp, err := strconv.ParseFloat(value, 64); err == nil && timestamp > 0 && !math.IsInf(timestamp, 0) && !math.IsNaN(timestamp) {
+		if timestamp < 1e12 {
+			timestamp *= 1000
+		}
+		return timestamp > float64(now.UnixMilli())
+	}
+	return false
+}
+
+// A failed optional request may retain details, but never renew their age. The
+// binding prevents same-file replacement credentials inheriting reset credits.
+// Manual UI cache writes omit the binding and auth index: accept them only
+// when observed after the current auth update, rejecting any conflicting index.
+func cachedCodexInspectionDetails(ctx context.Context, account accountInspectionAccount) map[string]any {
+	entries, err := embeddedusage.GetQuotaCache(ctx, "codex", account.FileName)
+	if err != nil || len(entries) != 1 || account.Auth == nil || (entries[0].AuthIndex != "" && entries[0].AuthIndex != account.AuthIndex) {
+		return nil
+	}
+	var state map[string]any
+	if json.Unmarshal(entries[0].Data, &state) != nil || state["status"] != "success" {
+		return nil
+	}
+	if binding := stringFromAny(state["codexCredentialFingerprint"]); binding != "" {
+		if binding != account.CredentialFingerprint || stringFromAny(state["codexAccessTokenSHA256"]) != account.AccessTokenSHA256 {
+			return nil
+		}
+	} else if entries[0].ObservedAt < account.Auth.UpdatedAt.UnixMilli() {
+		return nil
+	}
+	if _, ok := state["rateLimitResetCreditsObservedAt"]; !ok {
+		state["rateLimitResetCreditsObservedAt"] = entries[0].ObservedAt
+	}
+	return state
+}
+
+func (s *accountInspectionScheduler) enrichCodexInspectionQuota(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings, values map[string]any) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	previous := cachedCodexInspectionDetails(ctx, account)
+	headers := map[string]string{"Authorization": "Bearer $TOKEN$", "Content-Type": "application/json", "User-Agent": s.codexUserAgent(), "Chatgpt-Account-Id": codexAccountID(account.Auth)}
+	resetHeaders := make(map[string]string, len(headers)+3)
+	for key, value := range headers {
+		resetHeaders[key] = value
+	}
+	resetHeaders["Accept"], resetHeaders["OpenAI-Beta"], resetHeaders["Originator"] = "application/json", "codex-1", "Codex Desktop"
+	timeout := settings.Timeout
+	if timeout <= 0 || timeout > 8000 {
+		timeout = 8000
+	}
+	var subscription, resets accountInspectionHTTPResult
+	var subscriptionErr, resetsErr error
+	var probes sync.WaitGroup
+	probes.Add(2)
+	go func() {
+		defer probes.Done()
+		subscription, subscriptionErr = s.apiCall(ctx, account.Auth, http.MethodGet, "https://chatgpt.com/backend-api/subscriptions?account_id="+url.QueryEscape(codexAccountID(account.Auth)), headers, "", timeout)
+	}()
+	go func() {
+		defer probes.Done()
+		resets, resetsErr = s.apiCall(ctx, account.Auth, http.MethodGet, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", resetHeaders, "", timeout)
+	}()
+	probes.Wait()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.inspectionAuthManager() != nil && !accountInspectionResultMatchesAuth(account.baseResult(), s.h.authByIndex(account.AuthIndex)) {
+		return coreauth.ErrInspectionAuthChanged
+	}
+	var subscriptionPayload map[string]any
+	var liveActiveUntil any
+	if subscriptionErr == nil && subscription.StatusCode >= 200 && subscription.StatusCode < 300 && json.Unmarshal([]byte(subscription.Body), &subscriptionPayload) == nil {
+		if activeUntil := dateLikeValue(firstAny(subscriptionPayload, "active_until", "activeUntil")); activeUntil != nil {
+			liveActiveUntil = activeUntil
+		}
+	}
+	if liveActiveUntil != nil {
+		values["subscriptionActiveUntil"] = liveActiveUntil
+	} else if previous != nil && previous["subscriptionActiveUntil"] != nil {
+		values["subscriptionActiveUntil"] = previous["subscriptionActiveUntil"]
+	}
+	var resetPayload map[string]any
+	var summary map[string]any
+	valid := false
+	if resetsErr == nil && resets.StatusCode >= 200 && resets.StatusCode < 300 && json.Unmarshal([]byte(resets.Body), &resetPayload) == nil {
+		summary, valid = codexResetCreditsSummary(resetPayload, time.Now())
+	}
+	if valid {
+		credits := summary["credits"].([]map[string]any)
+		values["rateLimitResetCredits"] = credits
+		values["rateLimitResetCreditsObservedAt"] = time.Now().UnixMilli()
+		if count := summary["availableCount"]; count != nil {
+			values["rateLimitResetCreditsAvailableCount"] = count
+		} else if len(credits) > 0 {
+			values["rateLimitResetCreditsAvailableCount"] = len(credits)
+		}
+		if values["rateLimitResetCreditsApplicableAvailableCount"] == nil {
+			values["rateLimitResetCreditsApplicableAvailableCount"] = summary["applicableAvailableCount"]
+		}
+	} else {
+		detailError := "invalid reset credits payload"
+		if resetsErr != nil {
+			detailError = resetsErr.Error()
+		} else if resets.StatusCode < 200 || resets.StatusCode >= 300 {
+			detailError = fmt.Sprintf("HTTP %d", resets.StatusCode)
+		}
+		values["rateLimitResetCreditsError"] = detailError
+		observedAt, _ := intFromAny(previous["rateLimitResetCreditsObservedAt"])
+		age := time.Since(time.UnixMilli(int64(observedAt)))
+		count, countKnown := floatFromAny(values["rateLimitResetCreditsAvailableCount"])
+		if previous != nil && observedAt > 0 && age >= 0 && age < codexInspectionDetailsTTL && (!countKnown || count > 0) {
+			credits := make([]map[string]any, 0)
+			items, _ := previous["rateLimitResetCredits"].([]any)
+			for _, raw := range items {
+				if credit, ok := raw.(map[string]any); ok && stringFromAny(credit["status"]) == "available" && codexResetCreditUnexpired(stringFromAny(credit["expiresAt"]), time.Now()) {
+					credits = append(credits, credit)
+				}
+			}
+			values["rateLimitResetCredits"] = credits
+			values["rateLimitResetCreditsObservedAt"] = observedAt
+			if values["rateLimitResetCreditsAvailableCount"] == nil && len(credits) > 0 {
+				values["rateLimitResetCreditsAvailableCount"] = len(credits)
+			}
+		} else {
+			values["rateLimitResetCredits"] = []map[string]any{}
+		}
+	}
+	if values["rateLimitResetCreditsApplicableAvailableCount"] == nil {
+		values["rateLimitResetCreditsApplicableAvailableCount"] = values["rateLimitResetCreditsAvailableCount"]
+	}
+	values["codexCredentialFingerprint"], values["codexAccessTokenSHA256"] = account.CredentialFingerprint, account.AccessTokenSHA256
+	return nil
 }
 
 func codexSubscriptionActiveUntil(auth *coreauth.Auth) any {
@@ -335,20 +565,6 @@ func codexSubscriptionActiveUntilFromMap(source map[string]any) any {
 		}
 	}
 	if value := idTokenClaimAny(source["id_token"], "chatgpt_subscription_active_until", "chatgptSubscriptionActiveUntil", "subscription_active_until", "subscriptionActiveUntil"); value != nil {
-		return value
-	}
-	return nil
-}
-
-func codexRateLimitResetCreditsAvailableCount(payload map[string]any) any {
-	if payload == nil {
-		return nil
-	}
-	resetCredits, _ := firstAny(payload, "rate_limit_reset_credits", "rateLimitResetCredits").(map[string]any)
-	if resetCredits == nil {
-		return nil
-	}
-	if value, ok := floatFromAny(firstAny(resetCredits, "available_count", "availableCount")); ok {
 		return value
 	}
 	return nil

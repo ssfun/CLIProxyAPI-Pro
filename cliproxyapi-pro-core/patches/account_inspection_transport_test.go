@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -25,6 +26,257 @@ import (
 	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 )
+
+// Written before the implementation. This fixture exercises HTTP transport,
+// current auth identity and the SQLite cache together; optional endpoint
+// failures must never change the usage decision or renew stale detail data.
+func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
+	for _, tc := range []struct {
+		name                                                                                                                                  string
+		optionalStatus                                                                                                                        int
+		invalid, invalidCounter, numeric, timeout, exhausted, empty, usageZero, expiredCache, expiredCredit, manualCache, replacement, cancel bool
+	}{
+		{name: "live details"},
+		{name: "numeric credits and expirations", numeric: true},
+		{name: "optional unauthorized preserves fresh details", optionalStatus: 401},
+		{name: "optional forbidden preserves fresh details", optionalStatus: 403},
+		{name: "optional unavailable preserves exhausted decision", optionalStatus: 503, exhausted: true},
+		{name: "optional malformed preserves details", invalid: true},
+		{name: "optional invalid counter preserves details", invalidCounter: true},
+		{name: "optional timeout preserves details", timeout: true},
+		{name: "successful empty clears details", empty: true},
+		{name: "usage zero clears failed details", optionalStatus: 503, usageZero: true},
+		{name: "expired cache cannot renew credits", optionalStatus: 503, expiredCache: true},
+		{name: "expired credit cannot be retained", optionalStatus: 503, expiredCredit: true},
+		{name: "manual cache without binding survives bounded failure", optionalStatus: 503, manualCache: true},
+		{name: "replacement while details pending cannot overwrite cache", replacement: true},
+		{name: "canceled details cannot overwrite cache", cancel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := startProQuotaTestService(t)
+			manager := coreauth.NewManager(nil, nil, nil)
+			auth, err := manager.Register(ctx, &coreauth.Auth{ID: "codex-details", FileName: "codex-details.json", Provider: "codex", UpdatedAt: time.Now().Add(-time.Hour), Metadata: map[string]any{"access_token": "observed-token", "account_id": "acct +/", "subscription_active_until": "2097-01-01T00:00:00Z"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			account := accountFromAuth(auth)
+			var phase atomic.Int32
+			var optionalRequests atomic.Int32
+			observed := time.Now().Add(-time.Minute).UnixMilli()
+			if tc.manualCache {
+				observed = time.Now().UnixMilli()
+			}
+			if tc.expiredCache {
+				observed = time.Now().Add(-time.Hour).UnixMilli()
+			}
+			oldCredit := map[string]any{"id": "old-credit", "status": "available", "grantedAt": "2026-01-01T00:00:00Z", "expiresAt": "2099-01-01T00:00:00Z"}
+			if tc.expiredCredit {
+				oldCredit["expiresAt"] = "2000-01-01T00:00:00Z"
+			}
+			seed := map[string]any{"windows": []map[string]any{{"id": "five-hour", "usedPercent": 10.0}}, "subscriptionActiveUntil": "2098-01-01T00:00:00Z", "rateLimitResetCreditsAvailableCount": 1, "rateLimitResetCreditsApplicableAvailableCount": 1, "rateLimitResetCredits": []map[string]any{oldCredit}, "rateLimitResetCreditsObservedAt": observed, "codexCredentialFingerprint": account.CredentialFingerprint, "codexAccessTokenSHA256": account.AccessTokenSHA256}
+			if tc.manualCache {
+				delete(seed, "rateLimitResetCreditsObservedAt")
+				delete(seed, "codexCredentialFingerprint")
+				delete(seed, "codexAccessTokenSHA256")
+			}
+			seedState := quotaSuccessState(seed)
+			seedState["cachedAt"] = observed
+			if err := persistQuotaState(ctx, account, seedState); err != nil {
+				t.Fatal(err)
+			}
+			before, err := embeddedusage.GetQuotaCache(ctx, "codex", account.FileName)
+			if err != nil || len(before) != 1 {
+				t.Fatalf("seed cache: %v %v", before, err)
+			}
+			if tc.manualCache {
+				// Match sqliteQuotaCache.set: the UI does not send AuthIndex.
+				before[0].AuthIndex = ""
+				if err := embeddedusage.SetQuotaCache(ctx, before[0]); err != nil {
+					t.Fatal(err)
+				}
+			}
+			probeCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				t.Logf("provider request method=%s path=%s query=%s account=%q accept=%q beta=%q originator=%q", r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Get("Chatgpt-Account-Id"), r.Header.Get("Accept"), r.Header.Get("OpenAI-Beta"), r.Header.Get("Originator"))
+				if r.Header.Get("Authorization") != "Bearer observed-token" || r.Header.Get("Chatgpt-Account-Id") != "acct +/" {
+					t.Errorf("observation headers: %v", r.Header)
+				}
+				if r.URL.Path == "/backend-api/wham/usage" {
+					used, count := 20, 3
+					if tc.exhausted {
+						used = 100
+					}
+					if tc.usageZero {
+						count = 0
+					}
+					balance := `" 42.50 "`
+					if tc.numeric {
+						balance = `42.5`
+					}
+					fmt.Fprintf(w, `{"plan_type":"pro","credits":{"balance":%s,"unlimited":true},"rate_limit_reset_credits":{"available_count":%d,"applicable_available_count":%d},"rate_limit":{"primary_window":{"used_percent":%d,"limit_window_seconds":18000,"reset_after_seconds":60}}}`, balance, count, count, used)
+					return
+				}
+				optionalRequests.Add(1)
+				if r.URL.Path == "/backend-api/subscriptions" {
+					if r.URL.Query().Get("account_id") != "acct +/" {
+						t.Errorf("account query: %s", r.URL.RawQuery)
+					}
+				} else if r.URL.Path == "/backend-api/wham/rate-limit-reset-credits" {
+					if r.Header.Get("Accept") != "application/json" || r.Header.Get("OpenAI-Beta") != "codex-1" || r.Header.Get("Originator") != "Codex Desktop" {
+						t.Errorf("reset headers: %v", r.Header)
+					}
+				} else {
+					t.Errorf("unexpected path: %s", r.URL.Path)
+					w.WriteHeader(404)
+					return
+				}
+				if tc.replacement && phase.CompareAndSwap(0, 1) {
+					_, e := manager.Register(ctx, &coreauth.Auth{ID: auth.ID, FileName: auth.FileName, Provider: auth.Provider, Metadata: map[string]any{"access_token": "replacement-token", "account_id": "replacement-account"}})
+					if e != nil {
+						t.Errorf("replacement: %v", e)
+					}
+				}
+				if tc.cancel {
+					cancel()
+					<-r.Context().Done()
+					return
+				}
+				if tc.timeout {
+					<-r.Context().Done()
+					return
+				}
+				if tc.optionalStatus != 0 {
+					w.WriteHeader(tc.optionalStatus)
+					_, _ = w.Write([]byte(`{"error":"temporary"}`))
+					return
+				}
+				if tc.invalid {
+					_, _ = w.Write([]byte(`{"credits":null,"available_count":"oops"}`))
+					return
+				}
+				if tc.invalidCounter {
+					_, _ = w.Write([]byte(`{"credits":[],"available_count":"oops"}`))
+					return
+				}
+				if r.URL.Path == "/backend-api/subscriptions" {
+					_, _ = w.Write([]byte(`{"active_until":"2099-02-03T00:00:00Z"}`))
+					return
+				}
+				if tc.empty {
+					_, _ = w.Write([]byte(`{"available_count":0,"applicable_available_count":0,"credits":[]}`))
+					return
+				}
+				if tc.numeric {
+					_, _ = w.Write([]byte(`{"available_count":2,"credits":[{"id":123,"reset_type":"codex_rate_limits","status":"available","granted_at":1767225600,"expires_at":4070908800}]}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"available_count":2,"applicable_available_count":1,"credits":[{"id":"fresh-credit","reset_type":"codex_rate_limits","status":"available","granted_at":"2026-01-01T00:00:00Z","expires_at":"2099-01-01T00:00:00Z"},{"id":"used-credit","reset_type":"codex_rate_limits","status":"used","expires_at":"2099-01-01T00:00:00Z"},{"id":"wrong-type","reset_type":"other","status":"available","expires_at":"2099-01-01T00:00:00Z"}]}`))
+			}))
+			defer server.Close()
+			transport := server.Client().Transport.(*http.Transport).Clone()
+			transport.TLSClientConfig.ServerName = "example.com"
+			transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+			}
+			previous := http.DefaultTransport
+			http.DefaultTransport = transport
+			defer func() { http.DefaultTransport = previous; transport.CloseIdleConnections() }()
+			scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
+			settings := proinspection.DefaultSettings()
+			settings.Retries, settings.Timeout = 0, 100
+			started := time.Now()
+			decision, status, probeErr := scheduler.inspectCodex(probeCtx, account, settings)
+			if time.Since(started) > 2*time.Second {
+				t.Fatal("optional requests exceeded configured bound")
+			}
+			entries, err := embeddedusage.GetQuotaCache(ctx, "codex", account.FileName)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("cache read: %v %v", entries, err)
+			}
+			if tc.replacement || tc.cancel {
+				if probeErr == nil {
+					t.Fatal("stale/canceled observation accepted")
+				}
+				if string(entries[0].Data) != string(before[0].Data) {
+					t.Fatal("stale/canceled observation overwrote cache")
+				}
+				return
+			}
+			if probeErr != nil || status == nil || *status != 200 || decision.IsQuota != tc.exhausted {
+				t.Fatalf("usage decision changed by optional fetch: %+v status=%v err=%v", decision, status, probeErr)
+			}
+			if optionalRequests.Load() != 2 {
+				t.Fatalf("optional requests=%d want 2", optionalRequests.Load())
+			}
+			var state map[string]any
+			if err := json.Unmarshal(entries[0].Data, &state); err != nil {
+				t.Fatal(err)
+			}
+			balance := "42.50"
+			if tc.numeric {
+				balance = "42.5"
+			}
+			if state["creditBalance"] != balance || state["creditsUnlimited"] != true {
+				t.Fatalf("credits: %v", state)
+			}
+			failed := tc.optionalStatus != 0 || tc.invalid || tc.invalidCounter || tc.timeout
+			if failed {
+				if state["subscriptionActiveUntil"] != "2098-01-01T00:00:00Z" {
+					t.Fatalf("subscription lost: %v", state)
+				}
+				if stringFromAny(state["rateLimitResetCreditsError"]) == "" {
+					t.Fatalf("optional failure hidden: %v", state)
+				}
+			} else if state["subscriptionActiveUntil"] != "2099-02-03T00:00:00Z" {
+				t.Fatalf("live subscription absent: %v", state)
+			}
+			credits, _ := state["rateLimitResetCredits"].([]any)
+			if tc.empty || tc.usageZero || tc.expiredCache || tc.expiredCredit {
+				if len(credits) != 0 {
+					t.Fatalf("stale credits retained: %v", state)
+				}
+				if tc.empty || tc.usageZero {
+					if count, _ := intFromAny(state["rateLimitResetCreditsAvailableCount"]); count != 0 {
+						t.Fatalf("explicit zero lost: %v", state)
+					}
+				}
+			} else {
+				if len(credits) != 1 {
+					t.Fatalf("details lost: %v", state)
+				}
+				id := "fresh-credit"
+				if tc.numeric {
+					id = "123"
+				}
+				if failed {
+					id = "old-credit"
+					if timestamp, _ := intFromAny(state["rateLimitResetCreditsObservedAt"]); int64(timestamp) != observed {
+						t.Fatalf("failed details freshness renewed: %v", state)
+					}
+				}
+				if credits[0].(map[string]any)["id"] != id {
+					t.Fatalf("unexpected credit detail: %v", credits)
+				}
+				if !failed {
+					if count, _ := intFromAny(state["rateLimitResetCreditsApplicableAvailableCount"]); count != 3 {
+						t.Fatalf("usage applicable count precedence: %v", state)
+					}
+				}
+			}
+			if evidenceDir := os.Getenv("CODEX_INSPECTION_EVIDENCE_DIR"); evidenceDir != "" {
+				if err := os.MkdirAll(evidenceDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				name := strings.ReplaceAll(tc.name, " ", "-") + ".json"
+				if err := os.WriteFile(filepath.Join(evidenceDir, name), entries[0].Data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
 
 func TestAntigravityConfirmationRequiresResolvableHealthEvidence(t *testing.T) {
 	used := 20.0

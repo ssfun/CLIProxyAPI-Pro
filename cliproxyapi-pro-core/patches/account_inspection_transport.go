@@ -571,8 +571,12 @@ func (s *accountInspectionScheduler) inspectCodex(ctx context.Context, account a
 	if used != nil && *used >= settings.UsedPercentThreshold {
 		isQuota = true
 	}
-	if payload != nil && len(windows) > 0 {
-		s.persistQuotaState(ctx, account, quotaSuccessState(codexQuotaStateValues(account.Auth, payload, windows, resp.Body)))
+	if payload != nil && len(windows) > 0 && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		values := codexQuotaStateValues(account.Auth, payload, windows, resp.Body)
+		if err := s.enrichCodexInspectionQuota(ctx, account, settings, values); err != nil {
+			return accountInspectionDecision{}, status, err
+		}
+		s.persistQuotaState(ctx, account, quotaSuccessState(values))
 	}
 	decision := proinspection.WithQuotaWindows(codexDecision(account, resp.StatusCode, used, isQuota, settings.UsedPercentThreshold), windows, settings.UsedPercentThreshold)
 	decision.QuotaModel = proinspection.QuotaModelScope("codex", windows, settings.UsedPercentThreshold)

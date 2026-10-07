@@ -18,9 +18,14 @@ export function ProXaiQuotaBody(props: QuotaBodyProps<XaiQuotaState>) {
     ? resolveXaiPlanType(billing.monthlyLimitCents, isXaiMonthlyBillingKnown(billing))
     : undefined;
   const planType = billing?.planType ?? monthlyPlanType;
+  // The upstream body prefers the enriched subscription label, then its two
+  // monthly-limit plans. Only render a fallback when that body has no plan.
   const nativePlanRendered =
-    (planType === 'supergrok' && billing?.monthlyLimitCents === 15_000) ||
-    (planType === 'supergrok-heavy' && billing?.monthlyLimitCents === 150_000);
+    billing?.mode === 'paid-health' ||
+    Boolean(
+      billing?.planLabel ??
+        (billing?.monthlyLimitCents === 15_000 || billing?.monthlyLimitCents === 150_000)
+    );
   const showProPlan = Boolean(
     planType && billing?.mode !== 'paid-health' && planType !== 'free' && !nativePlanRendered
   );
@@ -29,7 +34,7 @@ export function ProXaiQuotaBody(props: QuotaBodyProps<XaiQuotaState>) {
 
   return (
     <>
-      {planType === 'free' && (
+      {planType === 'free' && !nativePlanRendered && (
         <div className={classes.codexPlan}>
           <span className={classes.codexPlanLabel}>{t('xai_quota.plan_label')}</span>
           <span className={classes.codexPlanValue}>{t('xai_quota.plan_free')}</span>
