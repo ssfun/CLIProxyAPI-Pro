@@ -1188,6 +1188,10 @@ func TestOAuthInspectionUsesPreparedToken(t *testing.T) {
 								_, _ = w.Write([]byte(`{}`))
 							case "/backend-api/wham/usage":
 								_, _ = fmt.Fprintf(w, `{"rate_limit":{"primary_window":{"limit_window_seconds":18000,"used_percent":%d}}}`, used)
+							case "/backend-api/subscriptions":
+								_, _ = w.Write([]byte(`{"active_until":"2099-01-01T00:00:00Z"}`))
+							case "/backend-api/wham/rate-limit-reset-credits":
+								_, _ = w.Write([]byte(`{"available_count":0,"credits":[]}`))
 							case "/coding/v1/usages":
 								_, _ = fmt.Fprintf(w, `{"limits":[{"name":"Weekly","limit":100,"used":%d}]}`, used)
 							default:
@@ -1230,6 +1234,9 @@ func TestOAuthInspectionUsesPreparedToken(t *testing.T) {
 						expectedProbes := int32(1)
 						if provider == "claude" {
 							expectedProbes = 2
+						}
+						if provider == "codex" {
+							expectedProbes = 3
 						}
 						if refreshes != expectedRefreshes || probes.Load() != expectedProbes {
 							t.Fatalf("refreshes=%d probes=%d", refreshes, probes.Load())
