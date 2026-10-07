@@ -123,6 +123,139 @@ func TestKimiParserNormalizesLimits(t *testing.T) {
 	}
 }
 
+func TestKimiMonthlyUsageParticipatesInQuotaRecovery(t *testing.T) {
+	rows, used, err := BuildKimiRows(`{
+		"usage":{"used":20,"limit":100},
+		"usages":{"limit_month_total":{"used_ratio":0.95,"reset_time":"2026-11-01T00:00:00Z"}}
+	}`)
+	if err != nil || len(rows) != 2 || used == nil || *used != 95 {
+		t.Fatalf("rows/used/error = %+v / %v / %v", rows, used, err)
+	}
+	monthly := rows[1]
+	if monthly["id"] != "monthly" || monthly["labelKey"] != "kimi_quota.monthly_limit" || monthly["used"] != 95 || monthly["limit"] != 100 || monthly["resetAtMs"] != int64(1793491200000) || monthly["periodHours"] != float64(720) {
+		t.Fatalf("monthly row = %+v", monthly)
+	}
+	decision := WithQuotaWindows(Decision{UsedPercent: used, IsQuota: true}, rows, 95)
+	if decision.QuotaResetAt != int64(1793491200000) || !decision.QuotaKnown {
+		t.Fatalf("monthly quota recovery = %+v", decision)
+	}
+	if scope := QuotaModelScope("kimi", rows, 95); scope != "" {
+		t.Fatalf("monthly quota must stay credential-wide, got %q", scope)
+	}
+}
+
+func TestKimiMonthlyRatioNormalization(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		count int
+		used  int
+	}{
+		{name: "numeric-string-rounds", value: `"0.955"`, count: 1, used: 96},
+		{name: "zero", value: `0`, count: 1},
+		{name: "null-is-zero", value: `null`, count: 1},
+		{name: "over-limit", value: `1.5`, count: 1, used: 150},
+		{name: "negative-half-rounds-up", value: `-0.005`, count: 1},
+		{name: "invalid", value: `"invalid"`},
+		{name: "non-finite", value: `"Infinity"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows, used, err := BuildKimiRows(`{"usages":{"limit_month_total":{"used_ratio":` + tt.value + `}}}`)
+			if err != nil || len(rows) != tt.count {
+				t.Fatalf("rows/error = %+v / %v", rows, err)
+			}
+			if tt.count == 0 {
+				if used != nil {
+					t.Fatalf("invalid monthly usage = %v", used)
+				}
+				return
+			}
+			if rows[0]["used"] != tt.used || rows[0]["resetAtMs"] != nil || rows[0]["periodHours"] != float64(720) {
+				t.Fatalf("monthly row = %+v", rows[0])
+			}
+			want := float64(tt.used)
+			if want > 100 {
+				want = 100
+			}
+			if used == nil || *used != want {
+				t.Fatalf("used = %v, want %v", used, want)
+			}
+		})
+	}
+	rows, used, err := BuildKimiRows(`{"usages":{"limit_month_total":{"reset_time":"2026-11-01T00:00:00Z"}}}`)
+	if err != nil || len(rows) != 0 || used != nil {
+		t.Fatalf("missing ratio fabricated row: %+v / %v / %v", rows, used, err)
+	}
+}
+
+func TestClaudeFableLimitsPreferActiveAndReplaceLegacyAlias(t *testing.T) {
+	windows, _, err := BuildClaudeWindows(`{
+		"five_hour":{"utilization":20},
+		"iguana_necktie":{"utilization":12},
+		"limits":[
+			{"kind":"weekly_scoped","percent":70,"scope":{"model":{"display_name":"Fable"}}},
+			{"kind":" WEEKLY_SCOPED ","percent":"95","is_active":true,"scope":{"model":{"display_name":" FABLE 5 "}},"resets_at":"2026-11-01T00:00:00Z"},
+			{"kind":"weekly_scoped","percent":99,"is_active":true,"scope":{"model":{"display_name":"Fable"}}}
+		]
+	}`)
+	if err != nil || len(windows) != 2 {
+		t.Fatalf("windows/error = %+v / %v", windows, err)
+	}
+	fable := windows[1]
+	if fable["id"] != "seven-day-fable" || fable["labelKey"] != "claude_quota.seven_day_fable" || fable["usedPercent"] != float64(95) || fable["resetAtMs"] != int64(1793491200000) || fable["periodHours"] != float64(168) {
+		t.Fatalf("active fable row = %+v", fable)
+	}
+	used := MaxUsedPercentFromWindows(windows)
+	if used == nil || *used != 95 || WithQuotaWindows(Decision{UsedPercent: used}, windows, 95).QuotaResetAt != int64(1793491200000) {
+		t.Fatalf("fable did not participate in quota decision: %+v / %v", windows, used)
+	}
+}
+
+func TestClaudeFableCandidateValidationAndLegacyFallback(t *testing.T) {
+	tests := []struct {
+		name   string
+		limits string
+		used   float64
+	}{
+		{name: "legacy-only", limits: `[]`, used: 12},
+		{name: "wrong-kind", limits: `[{"kind":"daily_scoped","percent":99,"scope":{"model":{"display_name":"Fable"}}}]`, used: 12},
+		{name: "wrong-model", limits: `[{"kind":"weekly_scoped","percent":99,"scope":{"model":{"display_name":"Fable 50"}}}]`, used: 12},
+		{name: "invalid-percent", limits: `[{"kind":"weekly_scoped","percent":"Infinity","scope":{"model":{"display_name":"Fable"}}}]`, used: 12},
+		{name: "first-valid-without-active", limits: `[{"kind":"weekly_scoped","percent":35,"scope":{"model":{"display_name":"Fable 5"}}},{"kind":"weekly_scoped","percent":99,"is_active":"true","scope":{"model":{"display_name":"Fable"}}}]`, used: 35},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			windows, _, err := BuildClaudeWindows(`{"iguana_necktie":{"utilization":12},"limits":` + tt.limits + `}`)
+			if err != nil || len(windows) != 1 || windows[0]["id"] != "seven-day-fable" || windows[0]["labelKey"] != "claude_quota.seven_day_fable" || windows[0]["usedPercent"] != tt.used || windows[0]["resetAtMs"] != nil {
+				t.Fatalf("windows/error = %+v / %v", windows, err)
+			}
+		})
+	}
+}
+
+func TestResolveClaudePlanPrioritizesActiveTeam(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "active-team-over-max", body: `{"organization":{"organization_type":" CLAUDE_TEAM ","subscription_status":" ACTIVE "},"account":{"has_claude_max":true,"has_claude_pro":true}}`, want: "plan_team"},
+		{name: "active-team-over-pro", body: `{"organization":{"organization_type":"claude_team","subscription_status":"active"},"account":{"has_claude_pro":"yes"}}`, want: "plan_team"},
+		{name: "active-team-over-free", body: `{"organization":{"organization_type":"claude_team","subscription_status":"active"},"account":{"has_claude_max":false,"has_claude_pro":false}}`, want: "plan_team"},
+		{name: "inactive-team-falls-back", body: `{"organization":{"organization_type":"claude_team","subscription_status":"inactive"},"account":{"has_claude_max":"on"}}`, want: "plan_max"},
+		{name: "free", body: `{"account":{"has_claude_max":"off","has_claude_pro":0}}`, want: "plan_free"},
+		{name: "unknown-is-not-free", body: `{"account":{"has_claude_max":false}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ResolveClaudePlan(tt.body); got != tt.want {
+				t.Fatalf("plan = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestQuotaRecoveryUsesOnlyBlockingWindows(t *testing.T) {
 	now := time.Now()
 	short := now.Add(time.Hour).UnixMilli()

@@ -13,6 +13,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/misc"
 	upstreamexecutor "github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/executor"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	kimiauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kimi"
 	proinspection "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/inspection"
 	proquota "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/quota"
 )
@@ -628,8 +629,9 @@ func (s *accountInspectionScheduler) inspectGeminiCLI(ctx context.Context, accou
 }
 
 func (s *accountInspectionScheduler) inspectKimi(ctx context.Context, account accountInspectionAccount, settings accountInspectionSettings) (accountInspectionDecision, *int, error) {
+	quotaURL := kimiauth.ResolveKimiAPIBaseURL(kimiauth.ResolveKimiDomainFromAuth(account.Auth)) + "/v1/usages"
 	resp, err := s.withRetry(ctx, settings.Retries, func() (accountInspectionHTTPResult, error) {
-		return s.apiCall(ctx, account.Auth, http.MethodGet, "https://api.kimi.com/coding/v1/usages", map[string]string{"Authorization": "Bearer $TOKEN$"}, "", settings.Timeout)
+		return s.apiCall(ctx, account.Auth, http.MethodGet, quotaURL, map[string]string{"Authorization": "Bearer $TOKEN$"}, "", settings.Timeout)
 	})
 	status := intPtr(resp.StatusCode)
 	if err != nil {
@@ -840,6 +842,9 @@ func (s *accountInspectionScheduler) inspectXAICLI(ctx context.Context, account 
 	var used *float64
 	if freeQuotaCurrent {
 		used = proquota.XAISummaryUsedPercent(billing)
+	}
+	if err := s.enrichXAIInspectionSubscription(ctx, account, settings, billing); err != nil {
+		return accountInspectionDecision{}, status, err
 	}
 	s.persistQuotaState(ctx, account, quotaSuccessState(map[string]any{
 		"billing":             billing,

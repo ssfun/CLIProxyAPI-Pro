@@ -216,10 +216,13 @@ ACCOUNT_INSPECTION_SOURCE_FILES = (
     'account_inspection_probe_context.go',
     'account_inspection_transport.go',
     'account_inspection_quota.go',
+    'account_inspection_xai_subscription.go',
     'account_inspection_runtime_test.go',
     'account_inspection_http_test.go',
     'account_inspection_accounts_test.go',
     'account_inspection_transport_test.go',
+    'account_inspection_provider_parity_test.go',
+    'account_inspection_xai_subscription_test.go',
     'account_inspection_quota_test.go',
 )
 customization_sentinel = ROOT / 'internal/embeddedusage'

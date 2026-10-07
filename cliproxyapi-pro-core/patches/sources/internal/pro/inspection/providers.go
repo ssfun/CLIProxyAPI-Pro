@@ -430,15 +430,21 @@ func BuildClaudeWindows(body string) ([]map[string]any, any, error) {
 		{"seven_day_opus", "seven-day-opus", "claude_quota.seven_day_opus"},
 		{"seven_day_sonnet", "seven-day-sonnet", "claude_quota.seven_day_sonnet"},
 		{"seven_day_cowork", "seven-day-cowork", "claude_quota.seven_day_cowork"},
-		{"iguana_necktie", "iguana-necktie", "claude_quota.iguana_necktie"},
+		{"iguana_necktie", "seven-day-fable", "claude_quota.seven_day_fable"},
 	}
+	fableLimit := findClaudeFableLimit(payload)
 	windows := make([]map[string]any, 0)
 	for _, def := range defs {
 		window, ok := payload[def.Key].(map[string]any)
+		usedKey := "utilization"
+		if def.Key == "iguana_necktie" && fableLimit != nil {
+			window, ok = fableLimit, true
+			usedKey = "percent"
+		}
 		if !ok {
 			continue
 		}
-		used, ok := floatFromAny(window["utilization"])
+		used, ok := floatFromAny(window[usedKey])
 		if !ok {
 			continue
 		}
@@ -464,10 +470,39 @@ func BuildClaudeWindows(body string) ([]map[string]any, any, error) {
 	return windows, payload["extra_usage"], nil
 }
 
+func findClaudeFableLimit(payload map[string]any) map[string]any {
+	var first map[string]any
+	for _, raw := range anySlice(payload["limits"]) {
+		limit, ok := raw.(map[string]any)
+		if !ok || !strings.EqualFold(stringFromProviderValue(limit["kind"]), "weekly_scoped") {
+			continue
+		}
+		scope, _ := limit["scope"].(map[string]any)
+		model, _ := scope["model"].(map[string]any)
+		name := strings.ToLower(stringFromProviderValue(model["display_name"]))
+		percent, valid := floatFromAny(limit["percent"])
+		if (name != "fable" && name != "fable 5") || !valid || math.IsNaN(percent) || math.IsInf(percent, 0) {
+			continue
+		}
+		if limit["is_active"] == true {
+			return limit
+		}
+		if first == nil {
+			first = limit
+		}
+	}
+	return first
+}
+
 func ResolveClaudePlan(body string) string {
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(body), &payload); err != nil {
 		return ""
+	}
+	if org, ok := payload["organization"].(map[string]any); ok {
+		if strings.EqualFold(stringFromProviderValue(org["organization_type"]), "claude_team") && strings.EqualFold(stringFromProviderValue(org["subscription_status"]), "active") {
+			return "plan_team"
+		}
 	}
 	if account, ok := payload["account"].(map[string]any); ok {
 		hasMax, hasMaxOK := boolValue(account["has_claude_max"])
@@ -480,11 +515,6 @@ func ResolveClaudePlan(body string) string {
 		}
 		if hasMaxOK && hasProOK && !hasMax && !hasPro {
 			return "plan_free"
-		}
-	}
-	if org, ok := payload["organization"].(map[string]any); ok {
-		if strings.EqualFold(stringFromProviderValue(org["organization_type"]), "claude_team") && strings.EqualFold(stringFromProviderValue(org["subscription_status"]), "active") {
-			return "plan_team"
 		}
 	}
 	return ""
@@ -697,6 +727,23 @@ func BuildKimiRows(body string) ([]map[string]any, *float64, error) {
 		if row := toKimiUsageRow(detail, kimiLimitLabel(item, detail, window, i), duration, timeUnit, now); row != nil {
 			row["id"] = "limit-" + strconv.Itoa(i)
 			rows = append(rows, row)
+		}
+	}
+	if usages, ok := payload["usages"].(map[string]any); ok {
+		if monthly, ok := usages["limit_month_total"].(map[string]any); ok {
+			if rawRatio, exists := monthly["used_ratio"]; exists {
+				// The UI uses Number(used_ratio), which also treats null as zero.
+				if rawRatio == nil {
+					rawRatio = 0
+				}
+				if ratio, valid := floatFromAny(rawRatio); valid && !math.IsNaN(ratio) && !math.IsInf(ratio, 0) {
+					data := map[string]any{"used": math.Floor(float64(ratio*100) + 0.5), "limit": 100, "reset_time": monthly["reset_time"]}
+					if row := toKimiUsageRow(data, map[string]any{"labelKey": "kimi_quota.monthly_limit"}, 0, nil, now); row != nil {
+						row["id"] = "monthly"
+						rows = append(rows, row)
+					}
+				}
+			}
 		}
 	}
 	usedValues := make([]float64, 0, len(rows))

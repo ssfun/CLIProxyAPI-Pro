@@ -704,6 +704,8 @@ func TestXAIInspectionRoutesByUsingAPI(t *testing.T) {
 				"https://cli-chat-proxy.grok.com/v1/billing?format=credits",
 				"https://cli-chat-proxy.grok.com/v1/billing",
 				"https://cli-chat-proxy.grok.com/v1/responses",
+				"https://cli-chat-proxy.grok.com/v1/user?include=subscription",
+				"https://cli-chat-proxy.grok.com/v1/settings",
 			},
 			forbiddenPath: "/chat/completions",
 		},
