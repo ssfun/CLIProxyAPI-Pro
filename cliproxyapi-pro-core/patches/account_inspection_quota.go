@@ -426,8 +426,16 @@ func cachedCodexInspectionDetails(ctx context.Context, account accountInspection
 		if binding != account.CredentialFingerprint || stringFromAny(state["codexAccessTokenSHA256"]) != account.AccessTokenSHA256 {
 			return nil
 		}
-	} else if entries[0].ObservedAt < account.Auth.UpdatedAt.UnixMilli() {
-		return nil
+	} else {
+		if entries[0].ObservedAt < account.Auth.UpdatedAt.UnixMilli() {
+			return nil
+		}
+		// UI writes are direct observations. Bound Core caches from older
+		// versions may have renewed cachedAt while retaining an old date,
+		// so only an unbound UI entry can supply the missing timestamp.
+		if _, ok := state["subscriptionObservedAt"]; !ok {
+			state["subscriptionObservedAt"] = entries[0].ObservedAt
+		}
 	}
 	if _, ok := state["rateLimitResetCreditsObservedAt"]; !ok {
 		state["rateLimitResetCreditsObservedAt"] = entries[0].ObservedAt
@@ -478,8 +486,14 @@ func (s *accountInspectionScheduler) enrichCodexInspectionQuota(ctx context.Cont
 	}
 	if liveActiveUntil != nil {
 		values["subscriptionActiveUntil"] = liveActiveUntil
+		values["subscriptionObservedAt"] = time.Now().UnixMilli()
 	} else if previous != nil && previous["subscriptionActiveUntil"] != nil {
-		values["subscriptionActiveUntil"] = previous["subscriptionActiveUntil"]
+		observedAt, _ := intFromAny(previous["subscriptionObservedAt"])
+		age := time.Since(time.UnixMilli(int64(observedAt)))
+		if observedAt > 0 && age >= 0 && age < codexInspectionDetailsTTL && int64(observedAt) >= account.Auth.UpdatedAt.UnixMilli() {
+			values["subscriptionActiveUntil"] = previous["subscriptionActiveUntil"]
+			values["subscriptionObservedAt"] = observedAt
+		}
 	}
 	var resetPayload map[string]any
 	var summary map[string]any

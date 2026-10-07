@@ -32,9 +32,10 @@ import (
 // failures must never change the usage decision or renew stale detail data.
 func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
 	for _, tc := range []struct {
-		name                                                                                                                                  string
-		optionalStatus                                                                                                                        int
-		invalid, invalidCounter, numeric, timeout, exhausted, empty, usageZero, expiredCache, expiredCredit, manualCache, replacement, cancel bool
+		name                                                                                                                                                         string
+		optionalStatus                                                                                                                                               int
+		invalid, invalidCounter, numeric, timeout, exhausted, empty, usageZero, expiredCache, expiredCredit, manualCache, replacement, cancel                        bool
+		subscriptionFailure, nullSubscription, unknownSubscription, subscriptionBeforeAuth, futureSubscription, repeatSubscription, recoverSubscription, manualStale bool
 	}{
 		{name: "live details"},
 		{name: "numeric credits and expirations", numeric: true},
@@ -49,6 +50,13 @@ func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
 		{name: "expired cache cannot renew credits", optionalStatus: 503, expiredCache: true},
 		{name: "expired credit cannot be retained", optionalStatus: 503, expiredCredit: true},
 		{name: "manual cache without binding survives bounded failure", optionalStatus: 503, manualCache: true},
+		{name: "subscription failure preserves fresh independent observation", subscriptionFailure: true},
+		{name: "subscription old bound cache without observation falls back to auth", subscriptionFailure: true, unknownSubscription: true},
+		{name: "subscription prior to current auth cannot replace new auth date", subscriptionFailure: true, subscriptionBeforeAuth: true},
+		{name: "subscription future observation is untrusted", subscriptionFailure: true, futureSubscription: true},
+		{name: "subscription repeated failures expire and recover", subscriptionFailure: true, repeatSubscription: true, recoverSubscription: true},
+		{name: "subscription null cannot renew old date", nullSubscription: true, repeatSubscription: true},
+		{name: "manual subscription older than auth is discarded", subscriptionFailure: true, manualCache: true, manualStale: true},
 		{name: "replacement while details pending cannot overwrite cache", replacement: true},
 		{name: "canceled details cannot overwrite cache", cancel: true},
 	} {
@@ -60,11 +68,30 @@ func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
 				t.Fatal(err)
 			}
 			account := accountFromAuth(auth)
+			if evidenceDir := os.Getenv("CODEX_INSPECTION_EVIDENCE_DIR"); evidenceDir != "" {
+				t.Cleanup(func() {
+					entries, err := embeddedusage.GetQuotaCache(ctx, "codex", account.FileName)
+					if err != nil || len(entries) != 1 {
+						t.Errorf("evidence cache read: %v %v", entries, err)
+						return
+					}
+					if err := os.MkdirAll(evidenceDir, 0o755); err != nil {
+						t.Fatal(err)
+					}
+					name := strings.ReplaceAll(tc.name, " ", "-") + ".json"
+					if err := os.WriteFile(filepath.Join(evidenceDir, name), entries[0].Data, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				})
+			}
 			var phase atomic.Int32
 			var optionalRequests atomic.Int32
 			observed := time.Now().Add(-time.Minute).UnixMilli()
 			if tc.manualCache {
 				observed = time.Now().UnixMilli()
+			}
+			if tc.manualStale {
+				observed = time.Now().Add(-time.Minute).UnixMilli()
 			}
 			if tc.expiredCache {
 				observed = time.Now().Add(-time.Hour).UnixMilli()
@@ -73,8 +100,20 @@ func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
 			if tc.expiredCredit {
 				oldCredit["expiresAt"] = "2000-01-01T00:00:00Z"
 			}
-			seed := map[string]any{"windows": []map[string]any{{"id": "five-hour", "usedPercent": 10.0}}, "subscriptionActiveUntil": "2098-01-01T00:00:00Z", "rateLimitResetCreditsAvailableCount": 1, "rateLimitResetCreditsApplicableAvailableCount": 1, "rateLimitResetCredits": []map[string]any{oldCredit}, "rateLimitResetCreditsObservedAt": observed, "codexCredentialFingerprint": account.CredentialFingerprint, "codexAccessTokenSHA256": account.AccessTokenSHA256}
+			subscriptionObserved := time.Now().UnixMilli()
+			if tc.expiredCache || tc.subscriptionBeforeAuth {
+				subscriptionObserved = observed
+			}
+			if tc.futureSubscription {
+				subscriptionObserved = time.Now().Add(time.Hour).UnixMilli()
+			}
+			seed := map[string]any{"windows": []map[string]any{{"id": "five-hour", "usedPercent": 10.0}}, "subscriptionActiveUntil": "2098-01-01T00:00:00Z", "subscriptionObservedAt": subscriptionObserved, "rateLimitResetCreditsAvailableCount": 1, "rateLimitResetCreditsApplicableAvailableCount": 1, "rateLimitResetCredits": []map[string]any{oldCredit}, "rateLimitResetCreditsObservedAt": observed, "codexCredentialFingerprint": account.CredentialFingerprint, "codexAccessTokenSHA256": account.AccessTokenSHA256}
+			if tc.unknownSubscription {
+				delete(seed, "subscriptionObservedAt")
+			}
 			if tc.manualCache {
+				subscriptionObserved = observed
+				delete(seed, "subscriptionObservedAt")
 				delete(seed, "rateLimitResetCreditsObservedAt")
 				delete(seed, "codexCredentialFingerprint")
 				delete(seed, "codexAccessTokenSHA256")
@@ -146,6 +185,16 @@ func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
 				if tc.timeout {
 					<-r.Context().Done()
 					return
+				}
+				if r.URL.Path == "/backend-api/subscriptions" && phase.Load() == 0 {
+					if tc.subscriptionFailure {
+						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					}
+					if tc.nullSubscription {
+						_, _ = w.Write([]byte(`{"active_until":null}`))
+						return
+					}
 				}
 				if tc.optionalStatus != 0 {
 					w.WriteHeader(tc.optionalStatus)
@@ -222,15 +271,34 @@ func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
 				t.Fatalf("credits: %v", state)
 			}
 			failed := tc.optionalStatus != 0 || tc.invalid || tc.invalidCounter || tc.timeout
-			if failed {
-				if state["subscriptionActiveUntil"] != "2098-01-01T00:00:00Z" {
-					t.Fatalf("subscription lost: %v", state)
+			subscriptionFailed := failed || tc.subscriptionFailure || tc.nullSubscription
+			if subscriptionFailed {
+				wantDate := "2098-01-01T00:00:00Z"
+				if tc.expiredCache || tc.unknownSubscription || tc.subscriptionBeforeAuth || tc.futureSubscription || tc.manualStale {
+					wantDate = "2097-01-01T00:00:00Z"
 				}
+				if state["subscriptionActiveUntil"] != wantDate {
+					t.Fatalf("untrusted subscription overrides current auth: got=%v want=%s state=%v", state["subscriptionActiveUntil"], wantDate, state)
+				}
+				if wantDate == "2098-01-01T00:00:00Z" {
+					if timestamp, _ := intFromAny(state["subscriptionObservedAt"]); int64(timestamp) != subscriptionObserved {
+						t.Fatalf("failed subscription observation renewed or lost: %v", state)
+					}
+				} else if state["subscriptionObservedAt"] != nil {
+					t.Fatalf("auth fallback labeled as live subscription: %v", state)
+				}
+			} else {
+				if state["subscriptionActiveUntil"] != "2099-02-03T00:00:00Z" {
+					t.Fatalf("live subscription absent: %v", state)
+				}
+				if timestamp, _ := intFromAny(state["subscriptionObservedAt"]); int64(timestamp) < started.UnixMilli() {
+					t.Fatalf("live subscription observation absent: %v", state)
+				}
+			}
+			if failed {
 				if stringFromAny(state["rateLimitResetCreditsError"]) == "" {
 					t.Fatalf("optional failure hidden: %v", state)
 				}
-			} else if state["subscriptionActiveUntil"] != "2099-02-03T00:00:00Z" {
-				t.Fatalf("live subscription absent: %v", state)
 			}
 			credits, _ := state["rateLimitResetCredits"].([]any)
 			if tc.empty || tc.usageZero || tc.expiredCache || tc.expiredCredit {
@@ -265,15 +333,55 @@ func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
 					}
 				}
 			}
-			if evidenceDir := os.Getenv("CODEX_INSPECTION_EVIDENCE_DIR"); evidenceDir != "" {
-				if err := os.MkdirAll(evidenceDir, 0o755); err != nil {
+			if tc.repeatSubscription {
+				checkNext := func(wantDate string, wantObserved int64) {
+					t.Helper()
+					nextDecision, nextStatus, nextErr := scheduler.inspectCodex(probeCtx, account, settings)
+					if nextErr != nil || nextStatus == nil || *nextStatus != 200 || nextDecision.IsQuota != tc.exhausted {
+						t.Fatalf("repeated subscription changed usage decision: %+v status=%v err=%v", nextDecision, nextStatus, nextErr)
+					}
+					state = nil
+					entries, err = embeddedusage.GetQuotaCache(ctx, "codex", account.FileName)
+					if err != nil || len(entries) != 1 || json.Unmarshal(entries[0].Data, &state) != nil {
+						t.Fatalf("repeated cache read: %v %v", entries, err)
+					}
+					if state["subscriptionActiveUntil"] != wantDate {
+						t.Fatalf("repeated subscription date=%v want=%s", state["subscriptionActiveUntil"], wantDate)
+					}
+					if timestamp, _ := intFromAny(state["subscriptionObservedAt"]); int64(timestamp) != wantObserved {
+						t.Fatalf("repeated failure renewed subscription: %v", state)
+					}
+					credits, _ := state["rateLimitResetCredits"].([]any)
+					if len(credits) != 1 || credits[0].(map[string]any)["id"] != "fresh-credit" || state["rateLimitResetCreditsError"] != "" {
+						t.Fatalf("subscription failure affected successful reset credits: %v", state)
+					}
+				}
+				checkNext("2098-01-01T00:00:00Z", subscriptionObserved)
+				// Advance only the independent subscription observation, retaining
+				// a freshly written overall cache and fresh reset-credits details.
+				state["subscriptionObservedAt"] = time.Now().Add(-16 * time.Minute).UnixMilli()
+				if err := persistQuotaState(ctx, account, state); err != nil {
 					t.Fatal(err)
 				}
-				name := strings.ReplaceAll(tc.name, " ", "-") + ".json"
-				if err := os.WriteFile(filepath.Join(evidenceDir, name), entries[0].Data, 0o600); err != nil {
-					t.Fatal(err)
+				checkNext("2097-01-01T00:00:00Z", 0)
+				checkNext("2097-01-01T00:00:00Z", 0)
+				if tc.recoverSubscription {
+					phase.Store(1)
+					recoveredAt := time.Now().UnixMilli()
+					if _, _, err := scheduler.inspectCodex(probeCtx, account, settings); err != nil {
+						t.Fatal(err)
+					}
+					state = nil
+					entries, err = embeddedusage.GetQuotaCache(ctx, "codex", account.FileName)
+					if err != nil || len(entries) != 1 || json.Unmarshal(entries[0].Data, &state) != nil {
+						t.Fatalf("recovery cache read: %v %v", entries, err)
+					}
+					if timestamp, _ := intFromAny(state["subscriptionObservedAt"]); state["subscriptionActiveUntil"] != "2099-02-03T00:00:00Z" || int64(timestamp) < recoveredAt {
+						t.Fatalf("live subscription recovery absent: %v", state)
+					}
 				}
 			}
+
 		})
 	}
 }

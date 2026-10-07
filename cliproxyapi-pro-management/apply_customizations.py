@@ -1709,6 +1709,16 @@ def _ensure_interface_field(path: Path, interface_name: str, field: str) -> None
     write(path, f'{text[:end]}\n{field}{text[end:]}')
 
 
+def patch_codex_retained_details_error(target: Path) -> None:
+    # Inspection can retain recent detail rows after an optional request fails.
+    # Render the error independently so retained rows do not hide that failure.
+    replace_once(
+        target / 'src/features/quota/providers/codex/CodexQuotaBody.tsx',
+        '      ) : rateLimitResetCreditsError ? (\n',
+        '      ) : null}\n      {rateLimitResetCreditsError ? (\n',
+    )
+
+
 def patch_quota_types_latest(target: Path) -> None:
     path = target / 'src/types/quota.ts'
     insert_once(
@@ -2086,6 +2096,7 @@ def main() -> None:
     patch_routes(target)
     patch_layout(target)
     patch_quota_types_latest(target)
+    patch_codex_retained_details_error(target)
     patch_quota_store(target)
     patch_quota_constants(target)
     patch_api_call_executor_contract(target)

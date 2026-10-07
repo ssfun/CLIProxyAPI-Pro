@@ -17,6 +17,7 @@ src/features/quota/QuotaPage.tsx
 src/features/quota/components/QuotaCard.tsx
 src/features/quota/constants.ts
 src/features/quota/logic.ts
+src/features/quota/providers/codex/CodexQuotaBody.tsx
 src/features/quota/providers/index.ts
 src/features/quota/providers/types.ts
 src/features/quota/providers/xai/data.ts
