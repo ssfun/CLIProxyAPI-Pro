@@ -6407,8 +6407,8 @@ replace_once(
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_lifecycle.go'
 replace_once(
     auth_conductor,
-    '\tauth.RegistrationEpoch = m.authEpochs[auth.ID]\n\tauth.Generation = 1\n',
-    '\tauth.RegistrationEpoch = m.authEpochs[auth.ID]\n\tauth.Generation = 1\n\trestoreQuotaProtection(auth)\n',
+    '\tauth.Generation = 1\n\t// Serialize this credential, but release the manager lock during store I/O.\n',
+    '\tauth.Generation = 1\n\trestoreQuotaProtection(auth)\n\t// Serialize this credential, but release the manager lock during store I/O.\n',
     'restoreQuotaProtection(auth)',
 )
 
@@ -6601,6 +6601,13 @@ replace_once(
     auth_conductor,
     '''\tm.mu.Lock()
 \tif auth, ok := m.auths[result.AuthID]; ok && auth != nil {
+\t\tif isStaleExecutionResult(result, auth) {
+\t\t\tm.mu.Unlock()
+\t\t\treleaseMutation()
+\t\t\tm.hook.OnResult(ctx, result)
+\t\t\tm.publishErrorEvent(result, nil)
+\t\t\treturn
+\t\t}
 \t\tif modelKey == ""''',
     '''\tm.mu.Lock()
 \tif !pinnedResultIdentityMatches(result, m.auths[result.AuthID]) {
@@ -6608,6 +6615,13 @@ replace_once(
 \t\treturn false
 \t}
 \tif auth, ok := m.auths[result.AuthID]; ok && auth != nil {
+\t\tif isStaleExecutionResult(result, auth) {
+\t\t\tm.mu.Unlock()
+\t\t\treleaseMutation()
+\t\t\tm.hook.OnResult(ctx, result)
+\t\t\tm.publishErrorEvent(result, nil)
+\t\t\treturn false
+\t\t}
 \t\tif modelKey == ""''',
     'pinnedResultIdentityMatches(result, m.auths[result.AuthID])',
 )
@@ -6780,6 +6794,49 @@ if policy_candidate_append not in auth_conductor_text:
     write(auth_conductor, auth_conductor_text.replace(candidate_append, policy_candidate_append))
 
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_refresh.go'
+# Preserve v8.0.17 rejected-token and canceled-refresh state changes, but keep
+# scheduler snapshots policy-aware and acquire them only after releasing m.mu.
+replace_once(
+    auth_conductor,
+    '''\t\t\tcurrent.RejectedAccessToken = failedAccessToken
+\t\t\tm.auths[id] = current
+\t\t\tif m.scheduler != nil {
+\t\t\t\tm.scheduler.upsertAuth(current.Clone())
+\t\t\t}
+\t\t}
+\t}
+\tm.mu.Unlock()
+}''',
+    '''\t\t\tcurrent.RejectedAccessToken = failedAccessToken
+\t\t\tm.auths[id] = current
+\t\t\tm.mu.Unlock()
+\t\t\treleaseMutation()
+\t\t\tm.RefreshSchedulerEntry(id)
+\t\t\treturn
+\t\t}
+\t}
+\tm.mu.Unlock()
+}''',
+)
+replace_once(
+    auth_conductor,
+    '''\t\t\tm.auths[id] = current
+\t\t\tif m.scheduler != nil {
+\t\t\t\tm.scheduler.upsertAuth(current.Clone())
+\t\t\t}
+\t\t}
+\t\tm.mu.Unlock()
+\t\tm.queueRefreshReschedule(id)
+\t\treturn nil, err
+''',
+    '''\t\t\tm.auths[id] = current
+\t\t}
+\t\tm.mu.Unlock()
+\t\tm.RefreshSchedulerEntry(id)
+\t\tm.queueRefreshReschedule(id)
+\t\treturn nil, err
+''',
+)
 # v8.0.12 adds an early return for failed refresh of terminal 401 credentials.
 # Keep its terminal state, but refresh the policy-aware scheduler outside m.mu.
 if '\t\t\tif wasTerminalUnauthorized {\n' in read(auth_conductor):

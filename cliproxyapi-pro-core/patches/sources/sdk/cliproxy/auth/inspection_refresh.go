@@ -67,7 +67,8 @@ func reconcileInspectionRefreshStatus(base, current, merged *Auth) {
 func inspectionRefreshIdentityMatches(base, current *Auth) bool {
 	if base == nil || current == nil || base.ID != current.ID || base.Index != current.Index ||
 		base.Provider != current.Provider || base.FileName != current.FileName ||
-		base.RegistrationEpoch != current.RegistrationEpoch || AccessTokenSHA256(base) != AccessTokenSHA256(current) {
+		base.RegistrationEpoch != current.RegistrationEpoch || base.CredentialVersion != current.CredentialVersion ||
+		AccessTokenSHA256(base) != AccessTokenSHA256(current) {
 		return false
 	}
 	for _, key := range []string{"access_token", "accessToken", "token", "Token", "refresh_token", "refreshToken", "id_token", "idToken", "session_id"} {

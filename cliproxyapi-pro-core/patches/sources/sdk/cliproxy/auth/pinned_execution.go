@@ -36,6 +36,8 @@ func BindPinnedResult(observed *Auth, result Result) Result {
 	if observed != nil {
 		result.AuthID = observed.ID
 		result.Provider = observed.Provider
+		result.CredentialVersion = observed.CredentialVersion
+		result.RegistrationEpoch = observed.RegistrationEpoch
 	}
 	result.Options = pinnedResultOptions(result.Options, observed)
 	return result
@@ -88,7 +90,7 @@ func pinnedResultIdentity(auth *Auth) string {
 	for _, key := range []string{"access_token", "accessToken", "token", "Token", "refresh_token", "refreshToken", "id_token", "idToken", "session_id"} {
 		tokens[key] = auth.Metadata[key]
 	}
-	return pinnedFingerprint([]any{auth.ID, auth.EnsureIndex(), auth.RegistrationEpoch,
+	return pinnedFingerprint([]any{auth.ID, auth.EnsureIndex(), auth.RegistrationEpoch, auth.CredentialVersion,
 		auth.Provider, auth.FileName, authRuntimeIdentityFingerprint(auth), tokens, auth.Attributes, auth.ProxyURL})
 }
 
@@ -264,7 +266,7 @@ func (m *Manager) ExecutePinnedAuth(ctx context.Context, authID string, req clip
 		if errors.Is(errPrepare, ErrSchedulingBlockChanged) {
 			return cliproxyexecutor.Response{}, errPrepare
 		}
-		result := Result{AuthID: auth.ID, Provider: provider, Model: routeModel, Success: false, Error: resultErrorFromError(errPrepare), Options: pinnedResultOptions(opts, auth)}
+		result := BindPinnedResult(auth, Result{Model: routeModel, Success: false, Error: resultErrorFromError(errPrepare), Options: opts})
 		m.MarkResult(execCtx, result)
 		return cliproxyexecutor.Response{}, errPrepare
 	}
@@ -316,7 +318,7 @@ func (m *Manager) ExecutePinnedAuth(ctx context.Context, authID string, req clip
 			return cliproxyexecutor.Response{}, errCancel
 		}
 
-		result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: errExecute == nil, Options: pinnedResultOptions(opts, auth)}
+		result := BindPinnedResult(auth, Result{Model: resultModel, Success: errExecute == nil, Options: opts})
 		if errExecute != nil {
 			result.Error = resultErrorFromError(errExecute)
 			if retryAfter := retryAfterFromError(errExecute); retryAfter != nil {
