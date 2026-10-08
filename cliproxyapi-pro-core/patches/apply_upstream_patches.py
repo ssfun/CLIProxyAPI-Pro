@@ -3053,9 +3053,13 @@ add_go_import(handlers_execution_source, '"' + import_path('internal/interfaces'
 replace_once(
     handlers_execution_source,
     '''\toriginalRequestedModel := modelName
+\t// Speech-only models are reachable solely through the speech entry protocol.
+\texecOptions.AllowSpeechModel = isModelExecutionSpeechProtocol(entryProtocol)
 \trouteDecision := h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, false, execOptions)
 ''',
     '''\toriginalRequestedModel := modelName
+\t// Speech-only models are reachable solely through the speech entry protocol.
+\texecOptions.AllowSpeechModel = isModelExecutionSpeechProtocol(entryProtocol)
 \tvar policyErr *interfaces.ErrorMessage
 \tctx, modelName, rawJSON, policyErr = applyAPIKeyModelPolicy(h, ctx, modelName, rawJSON)
 \tif policyErr != nil {
@@ -3232,9 +3236,13 @@ handlers_stream_source = ROOT / 'sdk/api/handlers/handlers_stream.go'
 replace_once(
     handlers_stream_source,
     '''\toriginalRequestedModel := modelName
+\t// Speech-only models are reachable solely through the speech entry protocol.
+\texecOptions.AllowSpeechModel = isModelExecutionSpeechProtocol(entryProtocol)
 \trouteDecision, preparedRoute := preparedModelRouteFromContext(ctx, execOptions.SkipRouterPluginID)
 ''',
     '''\toriginalRequestedModel := modelName
+\t// Speech-only models are reachable solely through the speech entry protocol.
+\texecOptions.AllowSpeechModel = isModelExecutionSpeechProtocol(entryProtocol)
 \tvar policyErr *interfaces.ErrorMessage
 \tctx, modelName, rawJSON, policyErr = applyAPIKeyModelPolicy(h, ctx, modelName, rawJSON)
 \tif policyErr != nil {
@@ -4694,7 +4702,7 @@ replace_once(
 )
 replace_once(
     updater,
-    '''\tif token := util.ResolveGitHubToken(); token != "" {
+    '''\tif token := githubauth.TokenForURL(releaseURL); token != "" {
 \t\theaders["Authorization"] = "Bearer " + token
 \t}
 ''',
@@ -4704,13 +4712,13 @@ replace_once(
 \t\t\theaders["Authorization"] = "Bearer " + token
 \t\t}
 \t} else {
-\t\ttoken = util.ResolveGitHubToken()
+\t\ttoken = githubauth.TokenForURL(releaseURL)
 \t\tif token != "" {
 \t\t\theaders["Authorization"] = "Bearer " + token
 \t\t}
 \t}
 ''',
-    'token = util.ResolveGitHubToken()',
+    'token = githubauth.TokenForURL(releaseURL)',
 )
 insert_before(
     updater,
@@ -4720,7 +4728,7 @@ insert_before(
 \tif err != nil || parsed.Host == "" || parsed.User != nil {
 \t\treturn false
 \t}
-\treturn strings.EqualFold(parsed.Scheme, "https") && strings.EqualFold(parsed.Hostname(), "api.github.com")
+\treturn strings.EqualFold(parsed.Scheme, "https") && strings.EqualFold(parsed.Hostname(), "api.github.com") && (parsed.Port() == "" || parsed.Port() == "443")
 }
 
 ''',
@@ -4781,7 +4789,7 @@ insert_before(
 \t\treturn "", false
 \t}
 \tparsed, err := url.Parse(strings.TrimSpace(requestURL))
-\tif err != nil || parsed.User != nil || !strings.EqualFold(parsed.Scheme, "https") || !strings.EqualFold(parsed.Hostname(), "api.github.com") {
+\tif err != nil || parsed.User != nil || !strings.EqualFold(parsed.Scheme, "https") || !strings.EqualFold(parsed.Hostname(), "api.github.com") || (parsed.Port() != "" && parsed.Port() != "443") {
 \t\treturn "", false
 \t}
 \tpath := strings.ToLower(parsed.Path)
@@ -4820,6 +4828,10 @@ replace_once(
     pluginstore_auth,
     '''\titem, ok := matchingAuthConfig(auth, requestURL, kind)
 \tif !ok {
+\t\tif token := githubauth.TokenForURL(requestURL); token != "" {
+\t\t\theaders.Set("Authorization", "Bearer "+token)
+\t\t\treturn true, nil
+\t\t}
 \t\treturn false, nil
 \t}
 \tswitch strings.ToLower(strings.TrimSpace(item.Type)) {
@@ -4827,6 +4839,10 @@ replace_once(
     '''\titem, ok := matchingAuthConfig(auth, requestURL, kind)
 \tif !ok {
 \t\tif token, configured := gitStoreGitHubToken(requestURL, kind); configured {
+\t\t\theaders.Set("Authorization", "Bearer "+token)
+\t\t\treturn true, nil
+\t\t}
+\t\tif token := githubauth.TokenForURL(requestURL); token != "" {
 \t\t\theaders.Set("Authorization", "Bearer "+token)
 \t\t\treturn true, nil
 \t\t}

@@ -29,7 +29,10 @@ func TestConvertOpenAIRequestToCodexNormalizesFastServiceTier(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			output := ConvertOpenAIRequestToCodex("gpt-5.6", input, true)
+			output, err := ConvertOpenAIRequestToCodex("gpt-5.6", input, true)
+			if err != nil {
+				t.Fatal(err)
+			}
 			serviceTier := gjson.GetBytes(output, "service_tier")
 			if got := serviceTier.String(); got != tt.want {
 				t.Fatalf("service_tier = %q, want %q: %s", got, tt.want, output)
