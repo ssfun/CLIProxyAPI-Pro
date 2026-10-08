@@ -3720,6 +3720,7 @@ replace_once(
 \t\tservice.registerModelsForAuthBatch(policyCtx, service.coreManager.List())
 \t})
 \tservice.coreManager.SetAccountPolicyResolver(proApplication.ApplyCachedAccountPolicy)
+\tservice.coreManager.BindXAIQuotaCache()
 \tif b.postAuthHook != nil {
 \t\tservice.serverOptions = append(service.serverOptions, api.WithPostAuthHook(b.postAuthHook))
 \t}
@@ -6356,6 +6357,11 @@ insert_before_nth(
 )
 
 queue_go_source('sdk/cliproxy/auth/inspection_refresh.go')
+queue_go_source('sdk/cliproxy/auth/xai_quota_fence.go')
+queue_go_source('sdk/cliproxy/auth/xai_quota_fence_test.go')
+queue_go_source('internal/runtime/executor/xai_quota_fence_test.go')
+queue_go_source('internal/api/handlers/management/xai_quota_fence_test.go')
+queue_go_source('internal/api/handlers/management/xai_quota_id_token_http_test.go')
 queue_go_source('sdk/cliproxy/auth/inspection_refresh_test.go')
 queue_go_source('sdk/cliproxy/auth/pinned_execution.go')
 

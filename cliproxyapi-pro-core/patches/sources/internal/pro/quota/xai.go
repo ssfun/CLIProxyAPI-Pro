@@ -22,17 +22,18 @@ const (
 )
 
 type XAIObservation struct {
-	FileName    string
-	AuthIndex   string
-	Subject     string
-	Email       string
-	AccessToken string
-	Label       string
-	Model       string
-	Status      int
-	Header      http.Header
-	Body        []byte
-	ObservedAt  time.Time
+	RegistrationEpoch uint64
+	FileName          string
+	AuthIndex         string
+	Subject           string
+	Email             string
+	AccessToken       string
+	Label             string
+	Model             string
+	Status            int
+	Header            http.Header
+	Body              []byte
+	ObservedAt        time.Time
 }
 
 type CacheMutation struct {
@@ -121,6 +122,40 @@ func XAIQuotaIdentityFingerprint(fileName, subject, email, accessToken string) s
 	raw, _ := json.Marshal([]string{"xai", strings.ToLower(strings.TrimSpace(fileName)), kind, identity})
 	fingerprint := sha256.Sum256(raw)
 	return "xai:v2:" + hex.EncodeToString(fingerprint[:])
+}
+
+// XAIQuotaAuthIdentity is shared by request, inspection and runtime-fence
+// writers, including uploaded credentials whose email exists only in id_token.
+func XAIQuotaAuthIdentity(metadata map[string]any, attributes map[string]string) (subject, email, credential string) {
+	first := func(keys ...string) string {
+		for _, key := range keys {
+			if value, ok := metadata[key].(string); ok && strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+			if value := strings.TrimSpace(attributes[key]); value != "" {
+				return value
+			}
+		}
+		return ""
+	}
+	subject = first("subject", "sub", "user_id", "userId")
+	email = first("email")
+	if email == "" {
+		claims, _ := metadata["id_token"].(map[string]any)
+		if token, ok := metadata["id_token"].(string); ok {
+			if json.Unmarshal([]byte(strings.TrimSpace(token)), &claims) != nil {
+				parts := strings.Split(strings.TrimSpace(token), ".")
+				if len(parts) >= 2 {
+					if payload, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
+						_ = json.Unmarshal(payload, &claims)
+					}
+				}
+			}
+		}
+		email, _ = claims["email"].(string)
+		email = strings.TrimSpace(email)
+	}
+	return subject, email, XAIQuotaCredential(metadata, attributes)
 }
 
 // XAIQuotaCredential mirrors xAI's API-key precedence and handles the access

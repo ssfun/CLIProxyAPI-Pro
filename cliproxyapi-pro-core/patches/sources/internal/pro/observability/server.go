@@ -1746,6 +1746,10 @@ func (s *Server) handleQuotaCachePut(c *gin.Context) {
 		err = s.store.SetQuotaCache(c.Request.Context(), entry)
 	}
 	if err != nil {
+		if errors.Is(err, ErrXAIQuotaIdentityChanged) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

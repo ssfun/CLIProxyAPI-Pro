@@ -99,5 +99,7 @@ var (
 	DeleteAuthRuntimeState                    = proobservability.DeleteAuthRuntimeState
 	ObserveXAIQuotaResponse                   = proobservability.ObserveXAIQuotaResponse
 	MergeXAIQuotaCache                        = proobservability.MergeXAIQuotaCache
+	SetXAIQuotaCacheGuard                     = proobservability.SetXAIQuotaCacheGuard
+	ErrXAIQuotaIdentityChanged                = proobservability.ErrXAIQuotaIdentityChanged
 	GetXAIQuotaState                          = proobservability.GetXAIQuotaState
 )

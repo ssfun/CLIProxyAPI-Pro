@@ -134,6 +134,9 @@ func persistQuotaState(ctx context.Context, account accountInspectionAccount, st
 	}
 	if strings.EqualFold(strings.TrimSpace(account.Provider), "xai") {
 		entry.IdentityFingerprint = xaiAccountQuotaIdentityFingerprint(account)
+		if account.Auth != nil {
+			entry.XAIRegistrationEpoch = account.Auth.RegistrationEpoch
+		}
 		return embeddedusage.MergeXAIQuotaCache(ctx, entry)
 	}
 	return embeddedusage.SetQuotaCache(ctx, entry)
@@ -165,9 +168,11 @@ func mergeCachedXAIFreeQuota(ctx context.Context, account accountInspectionAccou
 }
 
 func xaiAccountQuotaIdentityFingerprint(account accountInspectionAccount) string {
-	return proquota.XAIQuotaIdentityFingerprint(account.FileName,
-		firstNonEmptyAuthValue(account.Auth, "subject", "sub", "user_id", "userId"), firstNonEmptyStringValue(account.Email, firstNonEmptyAuthValue(account.Auth, "email")),
-		xaiAccountQuotaCredential(account.Auth))
+	if account.Auth == nil {
+		return proquota.XAIQuotaIdentityFingerprint(account.FileName, "", account.Email, "")
+	}
+	subject, email, credential := proquota.XAIQuotaAuthIdentity(account.Auth.Metadata, account.Auth.Attributes)
+	return proquota.XAIQuotaIdentityFingerprint(account.FileName, subject, email, credential)
 }
 
 func xaiAccountQuotaCredential(auth *coreauth.Auth) string {
@@ -200,18 +205,25 @@ func shouldRefreshXAIFreeQuota(billing map[string]any, now time.Time, trigger in
 
 func observeAccountXAIQuota(ctx context.Context, account accountInspectionAccount, model string, result accountInspectionHTTPResult) map[string]any {
 	observedAt := time.Now()
+	var registrationEpoch uint64
+	subject, email, credential := "", account.Email, ""
+	if account.Auth != nil {
+		registrationEpoch = account.Auth.RegistrationEpoch
+		subject, email, credential = proquota.XAIQuotaAuthIdentity(account.Auth.Metadata, account.Auth.Attributes)
+	}
 	_ = embeddedusage.ObserveXAIQuotaResponse(ctx, embeddedusage.XAIQuotaObservation{
-		FileName:    account.FileName,
-		AuthIndex:   account.AuthIndex,
-		Subject:     firstNonEmptyAuthValue(account.Auth, "subject", "sub", "user_id", "userId"),
-		Email:       firstNonEmptyStringValue(account.Email, firstNonEmptyAuthValue(account.Auth, "email")),
-		AccessToken: xaiAccountQuotaCredential(account.Auth),
-		Label:       firstNonEmptyStringValue(account.Name, account.DisplayName),
-		Model:       model,
-		Status:      result.StatusCode,
-		Header:      result.Header,
-		Body:        []byte(result.Body),
-		ObservedAt:  observedAt,
+		RegistrationEpoch: registrationEpoch,
+		FileName:          account.FileName,
+		AuthIndex:         account.AuthIndex,
+		Subject:           subject,
+		Email:             email,
+		AccessToken:       credential,
+		Label:             firstNonEmptyStringValue(account.Name, account.DisplayName),
+		Model:             model,
+		Status:            result.StatusCode,
+		Header:            result.Header,
+		Body:              []byte(result.Body),
+		ObservedAt:        observedAt,
 	})
 	var freeQuota map[string]any
 	if proquota.XAIHeadersStatus(result.StatusCode) {

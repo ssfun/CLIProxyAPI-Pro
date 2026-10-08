@@ -68,6 +68,7 @@ func (h *Handler) BindQuotaCacheIdentity(c *gin.Context) {
 	entry.Provider = "xai"
 	entry.ID = "xai:" + entry.FileName
 	entry.AuthIndex = auth.Index
+	entry.XAIRegistrationEpoch = auth.RegistrationEpoch
 	raw, err = json.Marshal(entry)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})

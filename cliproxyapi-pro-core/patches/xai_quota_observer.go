@@ -36,18 +36,20 @@ func observeXAIQuotaResponse(ctx context.Context, auth *cliproxyauth.Auth, model
 	if fileName == "." || fileName == "" {
 		fileName = filepath.Base(strings.TrimSpace(auth.ID))
 	}
+	subject, email, credential := proquota.XAIQuotaAuthIdentity(auth.Metadata, auth.Attributes)
 	_ = embeddedusage.ObserveXAIQuotaResponse(ctx, embeddedusage.XAIQuotaObservation{
-		FileName:    fileName,
-		AuthIndex:   auth.Index,
-		Subject:     firstXAIQuotaAuthString(auth, "subject", "sub", "user_id", "userId"),
-		Email:       firstXAIQuotaAuthString(auth, "email"),
-		AccessToken: proquota.XAIQuotaCredential(auth.Metadata, auth.Attributes),
-		Label:       auth.Label,
-		Model:       model,
-		Status:      status,
-		Header:      header,
-		Body:        body,
-		ObservedAt:  time.Now(),
+		RegistrationEpoch: auth.RegistrationEpoch,
+		FileName:          fileName,
+		AuthIndex:         auth.Index,
+		Subject:           subject,
+		Email:             email,
+		AccessToken:       credential,
+		Label:             auth.Label,
+		Model:             model,
+		Status:            status,
+		Header:            header,
+		Body:              body,
+		ObservedAt:        time.Now(),
 	})
 }
 
@@ -58,16 +60,4 @@ func shouldObserveXAIQuota(auth *cliproxyauth.Auth) bool {
 	// Free-usage quota is a Grok CLI chat-proxy concept. Official API and
 	// custom-gateway rate-limit headers must not contaminate this cache.
 	return !xaiUsingAPI(auth) && xaiIsCLIChatProxyBaseURL(xaiChatBaseURL(auth))
-}
-
-func firstXAIQuotaAuthString(auth *cliproxyauth.Auth, keys ...string) string {
-	for _, key := range keys {
-		if value := xaiMetadataString(auth.Metadata, key); value != "" {
-			return value
-		}
-		if value := strings.TrimSpace(auth.Attributes[key]); value != "" {
-			return value
-		}
-	}
-	return ""
 }

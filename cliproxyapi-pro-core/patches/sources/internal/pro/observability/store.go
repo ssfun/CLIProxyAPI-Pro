@@ -197,18 +197,20 @@ type cachedUsageSummary struct {
 }
 
 type QuotaCacheEntry struct {
-	ID                  string          `json:"id"`
-	Provider            string          `json:"provider"`
-	FileName            string          `json:"fileName"`
-	AuthIndex           string          `json:"authIndex,omitempty"`
-	IdentityFingerprint string          `json:"identityFingerprint,omitempty"`
-	Data                json.RawMessage `json:"data"`
-	CachedAt            int64           `json:"cachedAt"`
-	AccessedAt          int64           `json:"accessedAt"`
-	ObservedAt          int64           `json:"observedAt"`
-	StoredAt            int64           `json:"storedAt"`
-	Version             int             `json:"version"`
-	Revision            int64           `json:"revision"`
+	ID                  string `json:"id"`
+	Provider            string `json:"provider"`
+	FileName            string `json:"fileName"`
+	AuthIndex           string `json:"authIndex,omitempty"`
+	IdentityFingerprint string `json:"identityFingerprint,omitempty"`
+	// XAIRegistrationEpoch is a runtime write fence, not persisted quota data.
+	XAIRegistrationEpoch uint64          `json:"xaiRegistrationEpoch,omitempty"`
+	Data                 json.RawMessage `json:"data"`
+	CachedAt             int64           `json:"cachedAt"`
+	AccessedAt           int64           `json:"accessedAt"`
+	ObservedAt           int64           `json:"observedAt"`
+	StoredAt             int64           `json:"storedAt"`
+	Version              int             `json:"version"`
+	Revision             int64           `json:"revision"`
 }
 
 type QuotaCacheStats struct {
@@ -361,6 +363,8 @@ type Store struct {
 	database              *prostorage.Database
 	db                    *sql.DB
 	quotaCacheMu          sync.Mutex
+	xaiQuotaGuardMu       sync.RWMutex
+	xaiQuotaGuard         func(QuotaCacheEntry, func() error) error
 	usageWriteMu          sync.Mutex
 	summaryMu             sync.RWMutex
 	summaryCache          *cachedUsageSummary

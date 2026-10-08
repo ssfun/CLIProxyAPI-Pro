@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -18,6 +19,22 @@ type XAIQuotaObservation = proquota.XAIObservation
 
 var xaiQuotaCacheMu sync.Mutex
 
+var ErrXAIQuotaIdentityChanged = errors.New("xAI quota observation identity is missing or no longer current")
+
+// SetXAIQuotaCacheGuard binds only the current service Store. A new service
+// must be bound to its own runtime manager; standalone Stores have no guard.
+func SetXAIQuotaCacheGuard(guard func(QuotaCacheEntry, func() error) error) {
+	globalStateMu.RLock()
+	service := globalService
+	globalStateMu.RUnlock()
+	if service == nil || service.store == nil {
+		return
+	}
+	service.store.xaiQuotaGuardMu.Lock()
+	service.store.xaiQuotaGuard = guard
+	service.store.xaiQuotaGuardMu.Unlock()
+}
+
 func ObserveXAIQuotaResponse(ctx context.Context, observation XAIQuotaObservation) error {
 	mutation, ok, err := proquota.BuildXAIMutation(observation)
 	if err != nil || !ok {
@@ -26,7 +43,8 @@ func ObserveXAIQuotaResponse(ctx context.Context, observation XAIQuotaObservatio
 	return MergeXAIQuotaCache(ctx, QuotaCacheEntry{
 		ID: mutation.ID, Provider: mutation.Provider, FileName: mutation.FileName,
 		AuthIndex: mutation.AuthIndex, IdentityFingerprint: mutation.IdentityFingerprint,
-		Data: mutation.Data, CachedAt: mutation.CachedAt, ObservedAt: mutation.ObservedAt,
+		XAIRegistrationEpoch: observation.RegistrationEpoch,
+		Data:                 mutation.Data, CachedAt: mutation.CachedAt, ObservedAt: mutation.ObservedAt,
 		AccessedAt: mutation.AccessedAt, Version: mutation.Version,
 	})
 }
@@ -40,17 +58,34 @@ func MergeXAIQuotaCache(ctx context.Context, entry QuotaCacheEntry) error {
 		return SetQuotaCache(ctx, entry)
 	}
 	globalStateMu.RLock()
-	defer globalStateMu.RUnlock()
-	if globalService == nil || globalService.store == nil {
+	service := globalService
+	globalStateMu.RUnlock()
+	// A guard takes the auth-manager lock. Never retain globalStateMu here:
+	// registration already reads persisted policy under that manager lock.
+	if service == nil || service.store == nil {
 		return fmt.Errorf("usage service is not available")
 	}
-	return globalService.store.MergeXAIQuotaCache(ctx, entry)
+	return service.store.MergeXAIQuotaCache(ctx, entry)
 }
 
 func (s *Store) MergeXAIQuotaCache(ctx context.Context, entry QuotaCacheEntry) error {
 	if !strings.EqualFold(strings.TrimSpace(entry.Provider), "xai") || strings.TrimSpace(entry.FileName) == "" {
 		return s.SetQuotaCache(ctx, entry)
 	}
+	entry.Provider = "xai"
+	entry.FileName = strings.TrimSpace(entry.FileName)
+	entry.ID = "xai:" + entry.FileName
+	s.xaiQuotaGuardMu.RLock()
+	guard := s.xaiQuotaGuard
+	s.xaiQuotaGuardMu.RUnlock()
+	write := func() error { return s.mergeXAIQuotaCache(ctx, entry) }
+	if guard != nil {
+		return guard(entry, write)
+	}
+	return write()
+}
+
+func (s *Store) mergeXAIQuotaCache(ctx context.Context, entry QuotaCacheEntry) error {
 	xaiQuotaCacheMu.Lock()
 	defer xaiQuotaCacheMu.Unlock()
 
