@@ -606,39 +606,30 @@ func idTokenClaim(raw any, keys ...string) string {
 }
 
 func idTokenClaimAny(raw any, keys ...string) any {
-	switch value := raw.(type) {
-	case map[string]any:
-		for _, key := range keys {
-			if claim := dateLikeValue(value[key]); claim != nil {
-				return claim
+	data, decoded := raw.(map[string]any)
+	if !decoded {
+		token := stringFromAny(raw)
+		if token == "" {
+			return nil
+		}
+		if err := json.Unmarshal([]byte(token), &data); err != nil {
+			parts := strings.Split(token, ".")
+			if len(parts) < 2 {
+				return nil
+			}
+			payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+			if err != nil {
+				return nil
+			}
+			if err := json.Unmarshal(payload, &data); err != nil {
+				return nil
 			}
 		}
-		return nil
 	}
-	token := stringFromAny(raw)
-	if token == "" {
-		return nil
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(token), &parsed); err == nil {
-		for _, key := range keys {
-			if value := dateLikeValue(parsed[key]); value != nil {
-				return value
-			}
-		}
-		return nil
-	}
-	parts := strings.Split(token, ".")
-	if len(parts) < 2 {
-		return nil
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil
-	}
-	var data map[string]any
-	if err := json.Unmarshal(payload, &data); err != nil {
-		return nil
+	// Match Management's resolveCodexAuthInfo: OpenAI auth claims live in
+	// this namespace in real JWTs; flattened auth-file summaries remain valid.
+	if authInfo, ok := data["https://api.openai.com/auth"].(map[string]any); ok && authInfo != nil {
+		data = authInfo
 	}
 	for _, key := range keys {
 		if value := dateLikeValue(data[key]); value != nil {

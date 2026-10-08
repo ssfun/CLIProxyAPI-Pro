@@ -25,3 +25,7 @@
 重复验证：在干净上游重放 apply_upstream_patches.py，运行 `go test -race -json ./internal/api/handlers/management -run '^TestCodexInspectionQuotaDetailsHTTPAndSQLite$' -count=1` 保存 JSONL；设置 `CODEX_INSPECTION_EVIDENCE_DIR` 保存各场景实际 SQLite 缓存 JSON。最终构建真实 Core 二进制，设置 `INSPECTION_SERVER` 与 `INSPECTION_E2E_OUTPUT` 后运行 `python3 cliproxyapi-pro-core/e2e/account-inspection-batch-history/run.py --ci-fast`。具体树与完整命令见本次验证产物。
 
 验证界限：请求期间发生身份替换或取消时拦截旧结果；提交前身份检查与 SQLite 写入沿用既有分离步骤，本次不引入跨系统原子 CAS，也不声称消除了二者之间的所有竞态窗口。UI 未记录 AuthIndex/凭据绑定的旧缓存只在文件对应且 observation 不早于当前认证更新时间时回退；无法证明归属的旧缓存保守舍弃。
+
+## Nested JWT renewal fallback regression
+
+Before implementation: extend HTTP -> inspection -> SQLite fixtures with the real `https://api.openai.com/auth` claim namespace. Cover JWT text, JSON text and already-decoded objects; nested-vs-top-level conflicts follow Management's nested precedence; flat JWT compatibility; missing/malformed claims remain unknown. On subscription failure with no eligible old cache, persist the credential renewal date without a live observation timestamp. Verify nested account ID selection, live API precedence, repeated failure and recovery, and rerun existing cancellation/credential replacement scenarios.

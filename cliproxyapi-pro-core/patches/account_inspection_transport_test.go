@@ -32,12 +32,22 @@ import (
 // failures must never change the usage decision or renew stale detail data.
 func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
 	for _, tc := range []struct {
+		tokenShape                                                                                                                                                   string
 		name                                                                                                                                                         string
 		optionalStatus                                                                                                                                               int
 		invalid, invalidCounter, numeric, timeout, exhausted, empty, usageZero, expiredCache, expiredCredit, manualCache, replacement, cancel                        bool
 		subscriptionFailure, nullSubscription, unknownSubscription, subscriptionBeforeAuth, futureSubscription, repeatSubscription, recoverSubscription, manualStale bool
 	}{
 		{name: "live details"},
+		{name: "nested renewal jwt", tokenShape: "jwt", subscriptionFailure: true, unknownSubscription: true},
+		{name: "nested renewal object", tokenShape: "object", subscriptionFailure: true, unknownSubscription: true},
+		{name: "nested renewal json", tokenShape: "json", subscriptionFailure: true, unknownSubscription: true},
+		{name: "nested renewal priority", tokenShape: "priority", subscriptionFailure: true, unknownSubscription: true},
+		{name: "nested renewal flat", tokenShape: "flat", subscriptionFailure: true, unknownSubscription: true},
+		{name: "nested renewal missing", tokenShape: "missing", subscriptionFailure: true, unknownSubscription: true},
+		{name: "nested renewal malformed", tokenShape: "malformed", subscriptionFailure: true, unknownSubscription: true},
+		{name: "nested renewal live date wins", tokenShape: "jwt"},
+		{name: "nested renewal repeated failure and recovery", tokenShape: "jwt", subscriptionFailure: true, repeatSubscription: true, recoverSubscription: true},
 		{name: "numeric credits and expirations", numeric: true},
 		{name: "optional unauthorized preserves fresh details", optionalStatus: 401},
 		{name: "optional forbidden preserves fresh details", optionalStatus: 403},
@@ -63,7 +73,37 @@ func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := startProQuotaTestService(t)
 			manager := coreauth.NewManager(nil, nil, nil)
-			auth, err := manager.Register(ctx, &coreauth.Auth{ID: "codex-details", FileName: "codex-details.json", Provider: "codex", UpdatedAt: time.Now().Add(-time.Hour), Metadata: map[string]any{"access_token": "observed-token", "account_id": "acct +/", "subscription_active_until": "2097-01-01T00:00:00Z"}})
+			metadata := map[string]any{"access_token": "observed-token", "account_id": "acct +/", "subscription_active_until": "2097-01-01T00:00:00Z"}
+			if tc.tokenShape != "" {
+				delete(metadata, "subscription_active_until")
+				claims := map[string]any{"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acct +/", "chatgpt_subscription_active_until": "2097-01-01T00:00:00Z"}}
+				switch tc.tokenShape {
+				case "flat":
+					claims = claims["https://api.openai.com/auth"].(map[string]any)
+				case "priority":
+					claims["chatgpt_subscription_active_until"] = "2096-01-01T00:00:00Z"
+				case "missing":
+					claims["https://api.openai.com/auth"] = map[string]any{"chatgpt_account_id": "acct +/"}
+				}
+				raw, err := json.Marshal(claims)
+				if err != nil {
+					t.Fatal(err)
+				}
+				switch tc.tokenShape {
+				case "object":
+					metadata["id_token"] = claims
+				case "json":
+					metadata["id_token"] = string(raw)
+				case "malformed":
+					metadata["id_token"] = "invalid.jwt"
+				default:
+					metadata["id_token"] = "e30." + base64.RawURLEncoding.EncodeToString(raw) + ".fixture"
+				}
+				if tc.tokenShape == "jwt" || tc.tokenShape == "object" || tc.tokenShape == "json" {
+					delete(metadata, "account_id")
+				}
+			}
+			auth, err := manager.Register(ctx, &coreauth.Auth{ID: "codex-details", FileName: "codex-details.json", Provider: "codex", UpdatedAt: time.Now().Add(-time.Hour), Metadata: metadata})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -273,12 +313,15 @@ func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
 			failed := tc.optionalStatus != 0 || tc.invalid || tc.invalidCounter || tc.timeout
 			subscriptionFailed := failed || tc.subscriptionFailure || tc.nullSubscription
 			if subscriptionFailed {
-				wantDate := "2098-01-01T00:00:00Z"
+				var wantDate any = "2098-01-01T00:00:00Z"
 				if tc.expiredCache || tc.unknownSubscription || tc.subscriptionBeforeAuth || tc.futureSubscription || tc.manualStale {
 					wantDate = "2097-01-01T00:00:00Z"
 				}
+				if tc.tokenShape == "missing" || tc.tokenShape == "malformed" {
+					wantDate = nil
+				}
 				if state["subscriptionActiveUntil"] != wantDate {
-					t.Fatalf("untrusted subscription overrides current auth: got=%v want=%s state=%v", state["subscriptionActiveUntil"], wantDate, state)
+					t.Fatalf("untrusted subscription overrides current auth: got=%v want=%v state=%v", state["subscriptionActiveUntil"], wantDate, state)
 				}
 				if wantDate == "2098-01-01T00:00:00Z" {
 					if timestamp, _ := intFromAny(state["subscriptionObservedAt"]); int64(timestamp) != subscriptionObserved {
