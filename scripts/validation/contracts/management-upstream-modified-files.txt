@@ -17,6 +17,7 @@ src/features/quota/QuotaPage.tsx
 src/features/quota/components/QuotaCard.tsx
 src/features/quota/constants.ts
 src/features/quota/logic.ts
+src/features/quota/providers/antigravity/data.ts
 src/features/quota/providers/codex/CodexQuotaBody.tsx
 src/features/quota/providers/index.ts
 src/features/quota/providers/types.ts
@@ -36,6 +37,7 @@ src/types/quota.ts
 src/utils/quota/builders.ts
 src/utils/quota/constants.ts
 src/utils/quota/resolvers.ts
+src/utils/quota/validators.ts
 src/utils/quota/xaiPaid.ts
 tests/authFileCooldowns.test.ts
 tests/quotaPageLogic.test.ts
