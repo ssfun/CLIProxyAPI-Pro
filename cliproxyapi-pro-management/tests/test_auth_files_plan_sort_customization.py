@@ -101,6 +101,13 @@ class AuthFilesSortingCustomizationTest(unittest.TestCase):
     def test_adds_sort_locale_labels(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir)
+            vietnamese_path = target / 'src/i18n/locales/vi.json'
+            vietnamese_path.parent.mkdir(parents=True)
+            vietnamese_path.write_text(
+                '{\n  "claude_quota": {\n'
+                '    "seven_day_fable": "Fable 5 · 7 ngày",\n'
+                '    "extra_usage_label": "Sử dụng thêm"\n  }\n}\n'
+            )
 
             CUSTOMIZATIONS.patch_locales(target)
             CUSTOMIZATIONS.flush_writes()
