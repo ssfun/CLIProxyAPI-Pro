@@ -6,7 +6,7 @@ import { normalizeNumberValue, resolveAuthProvider } from '@/utils/quota';
 
 export type AccountPlanQuotaStore = Pick<
   ReturnType<typeof useQuotaStore.getState>,
-  'antigravityQuota' | 'claudeQuota' | 'codexQuota' | 'geminiCliQuota' | 'kimiQuota' | 'xaiQuota'
+  'antigravityQuota' | 'claudeQuota' | 'codexQuota' | 'devinQuota' | 'geminiCliQuota' | 'kimiQuota' | 'metaQuota' | 'xaiQuota'
 >;
 
 type ResolveAccountPlanLabelOptions = {
@@ -121,9 +121,10 @@ export const resolveAccountPlanLabel = ({
   t,
   emptyLabel = '--',
 }: ResolveAccountPlanLabelOptions): string => {
-  const providerKey = (provider?.trim() || (authFile ? resolveAuthProvider(authFile) : ''))
-    .toLowerCase()
-    .replace(/_/g, '-');
+  const providerKey = resolveAuthProvider({
+    name: fileName,
+    provider: provider?.trim() || (authFile ? resolveAuthProvider(authFile) : ''),
+  });
   const authFileFallbackPlan = readNestedPlanValue(
     authFile,
     'planType',
@@ -152,6 +153,9 @@ export const resolveAccountPlanLabel = ({
   if (providerKey === 'codex') {
     return formatCodexPlanLabel(quotaStore.codexQuota[fileName]?.planType ?? resolvedFallbackPlan, t) || emptyLabel;
   }
+  if (providerKey === 'devin') {
+    return formatRawAccountPlanLabel(quotaStore.devinQuota[fileName]?.plan ?? resolvedFallbackPlan) || emptyLabel;
+  }
   if (providerKey === 'gemini-cli') {
     const quota = quotaStore.geminiCliQuota[fileName];
     return readPlanValue(quota?.tierLabel) || formatRawAccountPlanLabel(quota?.tierId ?? resolvedFallbackPlan) || emptyLabel;
@@ -159,6 +163,9 @@ export const resolveAccountPlanLabel = ({
   if (providerKey === 'kimi') {
     const quota = toPlanRecord(quotaStore.kimiQuota[fileName]);
     return formatRawAccountPlanLabel(quota?.planType ?? quota?.tierLabel ?? resolvedFallbackPlan) || emptyLabel;
+  }
+  if (providerKey === 'meta') {
+    return formatRawAccountPlanLabel(quotaStore.metaQuota[fileName]?.data?.planName ?? resolvedFallbackPlan) || emptyLabel;
   }
   if (providerKey === 'xai') {
     return formatXaiPlanLabel(quotaStore.xaiQuota[fileName]?.billing, resolvedFallbackPlan, t) || emptyLabel;

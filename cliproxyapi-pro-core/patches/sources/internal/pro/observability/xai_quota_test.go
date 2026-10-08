@@ -100,13 +100,13 @@ func TestStoreMergeXAIQuotaCachePreservesRequestObservation(t *testing.T) {
 	ctx := context.Background()
 	freeState := json.RawMessage(`{"status":"success","billing":{"freeQuota":{"observedAt":200,"remainingTokens":10}}}`)
 	if err := store.MergeXAIQuotaCache(ctx, QuotaCacheEntry{
-		Provider: "xai", FileName: "free.json", Data: freeState, CachedAt: 200, ObservedAt: 200,
+		Provider: "xai", FileName: "free.json", IdentityFingerprint: "same-person", Data: freeState, CachedAt: 200, ObservedAt: 200,
 	}); err != nil {
 		t.Fatalf("MergeXAIQuotaCache(free) error = %v", err)
 	}
 	billingState := json.RawMessage(`{"status":"success","billing":{"planType":"free","monthlyLimitCents":null}}`)
 	if err := store.MergeXAIQuotaCache(ctx, QuotaCacheEntry{
-		Provider: "xai", FileName: "free.json", Data: billingState, CachedAt: 300, ObservedAt: 300,
+		Provider: "xai", FileName: "free.json", IdentityFingerprint: "same-person", Data: billingState, CachedAt: 300, ObservedAt: 300,
 	}); err != nil {
 		t.Fatalf("MergeXAIQuotaCache(billing) error = %v", err)
 	}
@@ -121,5 +121,56 @@ func TestStoreMergeXAIQuotaCachePreservesRequestObservation(t *testing.T) {
 	billing := state["billing"].(map[string]any)
 	if billing["planType"] != "free" || billing["freeQuota"].(map[string]any)["remainingTokens"] != float64(10) {
 		t.Fatalf("merged billing = %#v", billing)
+	}
+}
+
+// Failure contract: filenames and auth indexes can survive an account
+// replacement. Only matching, nonempty identity fingerprints permit merging;
+// unbound legacy records must never lend quota or plan details to a new writer.
+func TestStoreMergeXAIQuotaCacheIdentityBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name, previous, incoming, oldIndex, newIndex string
+		merge                                        bool
+	}{
+		{"same identity across indexes", "same-person", "same-person", "old", "new", true},
+		{"different identity same index", "old-person", "new-person", "same", "same", false},
+		{"missing previous fingerprint", "", "new-person", "same", "same", false},
+		{"missing incoming fingerprint", "old-person", "", "same", "same", false},
+		{"both fingerprints missing", "", "", "same", "same", false},
+		{"legacy fingerprint", "legacy-person-format", "new-person-format", "same", "same", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := openTestStore(t)
+			ctx := context.Background()
+			if err := store.MergeXAIQuotaCache(ctx, QuotaCacheEntry{
+				Provider: "xai", FileName: "same.json", AuthIndex: tc.oldIndex, IdentityFingerprint: tc.previous,
+				Data:       json.RawMessage(`{"status":"success","billing":{"planLabel":"Old Plan","freeQuota":{"observedAt":100,"exhausted":true}}}`),
+				ObservedAt: 100, CachedAt: 100,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.MergeXAIQuotaCache(ctx, QuotaCacheEntry{
+				Provider: "xai", FileName: "same.json", AuthIndex: tc.newIndex, IdentityFingerprint: tc.incoming,
+				Data:       json.RawMessage(`{"status":"success","billing":{"planType":"free","usagePercent":0}}`),
+				ObservedAt: 200, CachedAt: 200,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := store.GetQuotaCache(ctx, "xai", "same.json")
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("entries=%v err=%v", entries, err)
+			}
+			var state map[string]any
+			if err := json.Unmarshal(entries[0].Data, &state); err != nil {
+				t.Fatal(err)
+			}
+			billing := state["billing"].(map[string]any)
+			if (billing["freeQuota"] != nil) != tc.merge || (billing["planLabel"] != nil) != tc.merge {
+				t.Fatalf("identity boundary failed: billing=%v expected merge=%v", billing, tc.merge)
+			}
+			if entries[0].IdentityFingerprint != tc.incoming || entries[0].AuthIndex != tc.newIndex {
+				t.Fatalf("writer identity was replaced: %+v", entries[0])
+			}
+		})
 	}
 }

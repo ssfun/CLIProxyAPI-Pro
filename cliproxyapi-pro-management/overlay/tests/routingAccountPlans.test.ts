@@ -11,6 +11,8 @@ const emptyQuota = (): AccountPlanQuotaStore => ({
   antigravityQuota: {},
   claudeQuota: {},
   codexQuota: {},
+  devinQuota: {},
+  metaQuota: {},
   geminiCliQuota: {},
   kimiQuota: {},
   xaiQuota: {},

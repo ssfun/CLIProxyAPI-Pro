@@ -133,14 +133,23 @@ func persistQuotaState(ctx context.Context, account accountInspectionAccount, st
 		Version:             version,
 	}
 	if strings.EqualFold(strings.TrimSpace(account.Provider), "xai") {
+		entry.IdentityFingerprint = xaiAccountQuotaIdentityFingerprint(account)
 		return embeddedusage.MergeXAIQuotaCache(ctx, entry)
 	}
 	return embeddedusage.SetQuotaCache(ctx, entry)
 }
 
 func mergeCachedXAIFreeQuota(ctx context.Context, account accountInspectionAccount, billing map[string]any) map[string]any {
-	state, ok, err := embeddedusage.GetXAIQuotaState(ctx, account.FileName)
-	if err != nil || !ok {
+	fingerprint := xaiAccountQuotaIdentityFingerprint(account)
+	if fingerprint == "" {
+		return billing
+	}
+	entries, err := embeddedusage.GetQuotaCache(ctx, "xai", account.FileName)
+	if err != nil || len(entries) == 0 || entries[0].IdentityFingerprint != fingerprint {
+		return billing
+	}
+	state := map[string]any{}
+	if json.Unmarshal(entries[0].Data, &state) != nil {
 		return billing
 	}
 	cachedBilling := firstMap(state, "billing")
@@ -153,6 +162,19 @@ func mergeCachedXAIFreeQuota(ctx context.Context, account accountInspectionAccou
 	}
 	billing["freeQuota"] = freeQuota
 	return billing
+}
+
+func xaiAccountQuotaIdentityFingerprint(account accountInspectionAccount) string {
+	return proquota.XAIQuotaIdentityFingerprint(account.FileName,
+		firstNonEmptyAuthValue(account.Auth, "subject", "sub", "user_id", "userId"), firstNonEmptyStringValue(account.Email, firstNonEmptyAuthValue(account.Auth, "email")),
+		xaiAccountQuotaCredential(account.Auth))
+}
+
+func xaiAccountQuotaCredential(auth *coreauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	return proquota.XAIQuotaCredential(auth.Metadata, auth.Attributes)
 }
 
 const xaiFreeQuotaRefreshInterval = 15 * time.Minute
@@ -179,15 +201,17 @@ func shouldRefreshXAIFreeQuota(billing map[string]any, now time.Time, trigger in
 func observeAccountXAIQuota(ctx context.Context, account accountInspectionAccount, model string, result accountInspectionHTTPResult) map[string]any {
 	observedAt := time.Now()
 	_ = embeddedusage.ObserveXAIQuotaResponse(ctx, embeddedusage.XAIQuotaObservation{
-		FileName:   account.FileName,
-		AuthIndex:  account.AuthIndex,
-		Email:      account.Email,
-		Label:      firstNonEmptyStringValue(account.Name, account.DisplayName),
-		Model:      model,
-		Status:     result.StatusCode,
-		Header:     result.Header,
-		Body:       []byte(result.Body),
-		ObservedAt: observedAt,
+		FileName:    account.FileName,
+		AuthIndex:   account.AuthIndex,
+		Subject:     firstNonEmptyAuthValue(account.Auth, "subject", "sub", "user_id", "userId"),
+		Email:       firstNonEmptyStringValue(account.Email, firstNonEmptyAuthValue(account.Auth, "email")),
+		AccessToken: xaiAccountQuotaCredential(account.Auth),
+		Label:       firstNonEmptyStringValue(account.Name, account.DisplayName),
+		Model:       model,
+		Status:      result.StatusCode,
+		Header:      result.Header,
+		Body:        []byte(result.Body),
+		ObservedAt:  observedAt,
 	})
 	var freeQuota map[string]any
 	if proquota.XAIHeadersStatus(result.StatusCode) {
@@ -291,6 +315,11 @@ func codexPlanType(auth *coreauth.Auth, payload map[string]any) any {
 	}
 	for _, raw := range []any{auth.Metadata["plan_type"], auth.Metadata["planType"], auth.Attributes["plan_type"], auth.Attributes["planType"]} {
 		if value := stringFromAny(raw); value != "" {
+			return value
+		}
+	}
+	for _, token := range []any{auth.Metadata["id_token"], auth.Attributes["id_token"]} {
+		if value := idTokenClaim(token, "chatgpt_plan_type", "plan_type", "planType"); value != "" {
 			return value
 		}
 	}

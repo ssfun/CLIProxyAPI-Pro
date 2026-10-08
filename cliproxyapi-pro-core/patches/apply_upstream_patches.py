@@ -212,17 +212,21 @@ ACCOUNT_INSPECTION_SOURCE_FILES = (
     'account_inspection_batch.go',
     'account_inspection_history.go',
     'account_inspection_accounts.go',
+    'account_inspection_extended_providers.go',
     'account_inspection_metrics.go',
     'account_inspection_probe_context.go',
     'account_inspection_transport.go',
     'account_inspection_quota.go',
     'account_inspection_xai_subscription.go',
+    'account_inspection_xai_identity.go',
     'account_inspection_runtime_test.go',
     'account_inspection_http_test.go',
     'account_inspection_accounts_test.go',
+    'account_inspection_provider_coverage_test.go',
     'account_inspection_transport_test.go',
     'account_inspection_provider_parity_test.go',
     'account_inspection_xai_subscription_test.go',
+    'account_inspection_xai_identity_test.go',
     'account_inspection_quota_test.go',
 )
 customization_sentinel = ROOT / 'internal/embeddedusage'
@@ -5255,6 +5259,9 @@ replace_once(
 \tif plan := xaiAuthFilePlanType(auth); plan != "" {
 \t\tentry["plan_type"] = plan
 \t}
+\tif strings.EqualFold(strings.TrimSpace(auth.Provider), "xai") {
+\t\tentry["quota_identity_fingerprint"] = xaiAccountQuotaIdentityFingerprint(accountFromAuth(auth))
+\t}
 \t// Expose priority from Attributes (set by synthesizer from JSON "priority" field).
 ''',
 )
@@ -6085,7 +6092,7 @@ replace_once(
 \t\tmgmt.GET("/config", s.mgmt.GetConfig)
 ''',
     '''\t{
-\t\tembeddedusage.RegisterGinRoutes(mgmt.Group("/usage"))
+\t\tembeddedusage.RegisterGinRoutes(mgmt.Group("/usage", s.mgmt.BindQuotaCacheIdentity))
 \t\tembeddedusage.RegisterDataManagementGinRoutes(mgmt.Group("/data"))
 
 \t\tmgmt.GET("/config", s.mgmt.GetConfig)

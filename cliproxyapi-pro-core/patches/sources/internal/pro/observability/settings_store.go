@@ -69,7 +69,11 @@ func (SettingsStore) GetPlanSnapshot(ctx context.Context, provider, fileName, au
 	if fileName == "" {
 		fileName = authIndex
 	}
-	entries, err := GetQuotaCache(ctx, provider, fileName)
+	cacheProvider := strings.ToLower(provider)
+	if cacheProvider == "kimi-ai" || cacheProvider == "kimi.ai" {
+		cacheProvider = "kimi"
+	}
+	entries, err := GetQuotaCache(ctx, cacheProvider, fileName)
 	if err != nil {
 		return settings.PlanSnapshot{}, false, err
 	}
@@ -79,10 +83,10 @@ func (SettingsStore) GetPlanSnapshot(ctx context.Context, provider, fileName, au
 		if (authIndex == "" && entryAuthIndex != "") || (authIndex != "" && entryAuthIndex != "" && entryAuthIndex != authIndex) {
 			continue
 		}
-		if !isAuthCardQuotaSnapshotCompatible(provider, entry.Data) {
+		if !isAuthCardQuotaSnapshotCompatible(cacheProvider, entry.Data) {
 			continue
 		}
-		if selected == nil || preferredQuotaCacheEntry(provider, entry, *selected) {
+		if selected == nil || preferredQuotaCacheEntry(cacheProvider, entry, *selected) {
 			candidate := entry
 			selected = &candidate
 		}

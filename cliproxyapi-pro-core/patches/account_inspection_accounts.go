@@ -221,7 +221,7 @@ func accountInspectionCredentialFingerprint(auth *coreauth.Auth) string {
 }
 
 func accountInspectionProvider(auth *coreauth.Auth) string {
-	return strings.ToLower(strings.TrimSpace(auth.Provider))
+	return proinspection.CanonicalProvider(auth.Provider)
 }
 
 func accountInspectionAuthEmail(auth *coreauth.Auth) string {
@@ -305,12 +305,17 @@ func isAccountInspectionAPIKeyAuth(auth *coreauth.Auth) bool {
 	if auth == nil {
 		return false
 	}
-	label := strings.ToLower(strings.TrimSpace(auth.Label))
-	if strings.Contains(label, "apikey") || strings.Contains(label, "api-key") {
-		return true
-	}
 	source := strings.ToLower(strings.TrimSpace(authAttribute(auth, "source")))
 	if strings.HasPrefix(source, "config:") && strings.TrimSpace(authAttribute(auth, "api_key")) != "" {
+		return true
+	}
+	// Devin OAuth records carry their permanent session token in api_key as
+	// well as session_token, including before a source file has been written.
+	if auth.AuthKind() == coreauth.AuthKindOAuth {
+		return false
+	}
+	label := strings.ToLower(strings.TrimSpace(auth.Label))
+	if strings.Contains(label, "apikey") || strings.Contains(label, "api-key") {
 		return true
 	}
 	return strings.TrimSpace(authAttribute(auth, "api_key")) != "" && strings.TrimSpace(authAttribute(auth, "path")) == ""
@@ -399,6 +404,10 @@ func (s *accountInspectionScheduler) inspectAccountObserved(ctx context.Context,
 		decision, statusCode, err = s.inspectKimi(ctx, account, settings)
 	case "xai":
 		decision, statusCode, err = s.inspectXAI(ctx, account, settings)
+	case "devin":
+		decision, statusCode, err = s.inspectDevin(ctx, account, settings)
+	case "meta":
+		decision, statusCode, err = s.inspectMeta(ctx, account, settings)
 	default:
 		stopPrimary()
 		result.ActionReason = "暂不支持该 provider 巡检"
@@ -542,7 +551,7 @@ func accountInspectionObservationMatchesAuth(authID, authIndex, provider, fileNa
 	if authIndex != "" && strings.TrimSpace(authIndex) != current.AuthIndex {
 		return false
 	}
-	if provider != "" && !strings.EqualFold(strings.TrimSpace(provider), current.Provider) {
+	if provider != "" && proinspection.CanonicalProvider(provider) != current.Provider {
 		return false
 	}
 	if fileName != "" && strings.TrimSpace(fileName) != current.FileName {

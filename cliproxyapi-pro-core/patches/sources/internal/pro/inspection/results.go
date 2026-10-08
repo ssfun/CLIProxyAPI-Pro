@@ -120,7 +120,7 @@ func ResultHealthCounts(results []Result) HealthCounts {
 func ResultProviderHealthCounts(results []Result) map[string]HealthCounts {
 	counts := make(map[string]HealthCounts)
 	for _, result := range results {
-		provider := strings.ToLower(strings.TrimSpace(result.Provider))
+		provider := CanonicalProvider(result.Provider)
 		if provider == "" {
 			provider = "unknown"
 		}
@@ -178,7 +178,7 @@ func IsQuotaResult(result Result) bool {
 		return true
 	}
 	message := strings.Join([]string{result.Error, result.ErrorDetail, result.DeepProbeError}, "\n")
-	switch strings.ToLower(strings.TrimSpace(result.Provider)) {
+	switch CanonicalProvider(result.Provider) {
 	case "antigravity":
 		return IsAntigravityQuotaFailure(message)
 	case "xai":
@@ -229,8 +229,8 @@ func ResultMatchesFilter(result Result, filter string) bool {
 }
 
 func ResultMatchesProvider(result Result, provider string) bool {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	return provider == "" || provider == ProviderAll || strings.EqualFold(result.Provider, provider)
+	provider = CanonicalProvider(provider)
+	return provider == "" || provider == ProviderAll || CanonicalProvider(result.Provider) == provider
 }
 
 func ResultMatchesSearch(result Result, search string) bool {

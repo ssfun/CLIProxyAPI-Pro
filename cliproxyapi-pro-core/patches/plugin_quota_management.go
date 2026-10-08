@@ -44,14 +44,7 @@ func (h *Handler) FetchProPluginQuota(c *gin.Context) {
 	// Explicit selections must never fall back to a credential-local probe.
 	if !result.Handled && result.Err == nil && strings.TrimSpace(req.PluginID) == "" &&
 		(strings.TrimSpace(req.Provider) == "" || strings.EqualFold(strings.TrimSpace(req.Provider), strings.TrimSpace(auth.Provider))) {
-		if probe, ok := auth.Metadata["quota_probe"].(map[string]any); ok {
-			resp, handled, err := h.executeQuotaProbe(c, auth, probe)
-			result = pluginhost.QuotaResult{Handled: handled, Response: resp, Err: err}
-			if handled && err == nil {
-				// Declarative HTTP responses supply quota data, never auth mutations.
-				result.Snapshot, result.Err = pluginhost.NormalizeProQuotaSnapshot(auth.Provider, previous, resp)
-			}
-		}
+		result = h.fetchCredentialQuotaProbe(ctx, auth, previous)
 	}
 	if !result.Handled && result.Err == nil {
 		c.JSON(http.StatusNotImplemented, gin.H{"error": "no quota provider available for credential"})
@@ -106,12 +99,32 @@ func (h *Handler) fetchAndPersistPluginQuota(ctx context.Context, auth *coreauth
 	host := h.pluginHost
 	manager := h.authManager
 	h.mu.Unlock()
-	if host == nil || manager == nil {
+	if manager == nil {
 		return pluginhost.QuotaResult{}, http.StatusServiceUnavailable, "plugin quota service unavailable", fmt.Errorf("plugin quota service unavailable")
 	}
 	previous := loadPluginQuotaSnapshot(ctx, auth.Provider, auth.FileName, auth.Index)
 	result := host.FetchProQuota(ctx, auth, previous)
+	if !result.Handled && result.Err == nil {
+		result = h.fetchCredentialQuotaProbe(ctx, auth, previous)
+	}
 	return h.persistPluginQuotaResult(ctx, auth, result)
+}
+
+// Keep the unselected manual endpoint and inspection gateway on the same
+// declarative fallback. Selected plugin requests never reach this helper.
+func (h *Handler) fetchCredentialQuotaProbe(ctx context.Context, auth *coreauth.Auth, previous *pluginapi.QuotaSnapshot) pluginhost.QuotaResult {
+	probe, ok := auth.Metadata["quota_probe"].(map[string]any)
+	if !ok {
+		return pluginhost.QuotaResult{}
+	}
+	c := &gin.Context{Request: (&http.Request{}).WithContext(ctx)}
+	resp, handled, err := h.executeQuotaProbe(c, auth, probe)
+	result := pluginhost.QuotaResult{Handled: handled, Response: resp, Err: err}
+	if handled && err == nil {
+		// Declarative responses supply quota data, never credential mutations.
+		result.Snapshot, result.Err = pluginhost.NormalizeProQuotaSnapshot(auth.Provider, previous, resp)
+	}
+	return result
 }
 
 func (h *Handler) persistPluginQuotaResult(ctx context.Context, auth *coreauth.Auth, result pluginhost.QuotaResult) (pluginhost.QuotaResult, int, string, error) {

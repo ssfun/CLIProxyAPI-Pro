@@ -2,15 +2,14 @@ package inspection
 
 import (
 	"math/rand"
-	"strings"
 )
 
 func ShouldInspectCandidate(hasAuth, apiKey bool, provider, targetType string) bool {
 	if !hasAuth || apiKey {
 		return false
 	}
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	targetType = strings.ToLower(strings.TrimSpace(targetType))
+	provider = CanonicalProvider(provider)
+	targetType = CanonicalProvider(targetType)
 	if !IsSupportedProvider(provider) {
 		return false
 	}

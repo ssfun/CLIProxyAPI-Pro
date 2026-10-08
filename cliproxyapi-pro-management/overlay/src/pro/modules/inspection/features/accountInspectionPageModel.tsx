@@ -524,10 +524,13 @@ const isAccountInspectionApiKeyAuthFile = (file: AuthFileItem) => {
   const source = readAuthFileField(file, 'source').toLowerCase();
   const apiKey = readAuthFileField(file, 'api_key') || readAuthFileField(file, 'apiKey');
   const path = readAuthFileField(file, 'path');
+  const accountType = readAuthFileField(file, 'account_type').toLowerCase();
+
+  if (source.startsWith('config:') && apiKey) return true;
+  if (accountType === 'oauth') return false;
 
   return label.includes('apikey') ||
     label.includes('api-key') ||
-    (source.startsWith('config:') && Boolean(apiKey)) ||
     (Boolean(apiKey) && !path);
 };
 
@@ -718,8 +721,16 @@ const isProviderQuotaLow = (
       return isQuotaLowState(quotaStore.claudeQuota[fileName], usedPercentThreshold);
     case 'codex':
       return isQuotaLowState(quotaStore.codexQuota[fileName], usedPercentThreshold);
+    case 'devin':
+      return isQuotaLowState(quotaStore.devinQuota[fileName], usedPercentThreshold);
+    case 'gemini-cli':
+      return isQuotaLowState(quotaStore.geminiCliQuota[fileName], usedPercentThreshold);
     case 'kimi':
       return isQuotaLowState(quotaStore.kimiQuota[fileName], usedPercentThreshold);
+    case 'meta': {
+      const quota = quotaStore.metaQuota[fileName];
+      return isQuotaLowState({ ...quota?.data, status: quota?.status }, usedPercentThreshold);
+    }
     case 'xai':
       return isXaiQuotaLow(quotaStore.xaiQuota[fileName], usedPercentThreshold);
     default:

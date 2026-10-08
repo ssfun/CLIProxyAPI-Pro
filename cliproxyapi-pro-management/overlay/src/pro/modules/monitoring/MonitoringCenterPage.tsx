@@ -232,8 +232,10 @@ export function MonitoringCenterPage() {
   const antigravityQuota = useQuotaStore((state) => state.antigravityQuota);
   const claudeQuota = useQuotaStore((state) => state.claudeQuota);
   const codexQuota = useQuotaStore((state) => state.codexQuota);
+  const devinQuota = useQuotaStore((state) => state.devinQuota);
   const geminiCliQuota = useQuotaStore((state) => state.geminiCliQuota);
   const kimiQuota = useQuotaStore((state) => state.kimiQuota);
+  const metaQuota = useQuotaStore((state) => state.metaQuota);
   const xaiQuota = useQuotaStore((state) => state.xaiQuota);
   const [timeRange, setTimeRange] = useState<TimeRangeSelection>(DEFAULT_TIME_RANGE);
   const [searchInput, setSearchInput] = useState('');
@@ -795,10 +797,12 @@ export function MonitoringCenterPage() {
     antigravityQuota,
     claudeQuota,
     codexQuota,
+    devinQuota,
     geminiCliQuota,
     kimiQuota,
+    metaQuota,
     xaiQuota,
-  }), [antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota]);
+  }), [antigravityQuota, claudeQuota, codexQuota, devinQuota, geminiCliQuota, kimiQuota, metaQuota, xaiQuota]);
   const realtimeLogPageRows = useMemo(
     () => buildRealtimeLogPageRows(scopedRows, 1, realtimeLogPageSize).rows.map((row) => {
       const authFile = authFileByAuthIndex.get(row.authIndex);

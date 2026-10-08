@@ -29,8 +29,10 @@ export function useRoutingAccountPlans(accounts: SchedulingBoardAccount[] = NO_A
       antigravityQuota: state.antigravityQuota,
       claudeQuota: state.claudeQuota,
       codexQuota: state.codexQuota,
+      devinQuota: state.devinQuota,
       geminiCliQuota: state.geminiCliQuota,
       kimiQuota: state.kimiQuota,
+      metaQuota: state.metaQuota,
       xaiQuota: state.xaiQuota,
     }))
   );

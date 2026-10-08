@@ -4,6 +4,7 @@ package quota
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -21,15 +22,17 @@ const (
 )
 
 type XAIObservation struct {
-	FileName   string
-	AuthIndex  string
-	Email      string
-	Label      string
-	Model      string
-	Status     int
-	Header     http.Header
-	Body       []byte
-	ObservedAt time.Time
+	FileName    string
+	AuthIndex   string
+	Subject     string
+	Email       string
+	AccessToken string
+	Label       string
+	Model       string
+	Status      int
+	Header      http.Header
+	Body        []byte
+	ObservedAt  time.Time
 }
 
 type CacheMutation struct {
@@ -77,18 +80,65 @@ func BuildXAIMutation(observation XAIObservation) (CacheMutation, bool, error) {
 	if err != nil {
 		return CacheMutation{}, false, err
 	}
-	fingerprintSource := strings.Join([]string{
-		"xai", strings.ToLower(fileName),
-		strings.ToLower(strings.TrimSpace(observation.Email)),
-		strings.ToLower(strings.TrimSpace(observation.Label)),
-	}, "|")
-	fingerprint := sha256.Sum256([]byte(fingerprintSource))
 	return CacheMutation{
 		ID: "xai:" + fileName, Provider: "xai", FileName: fileName,
 		AuthIndex:           strings.TrimSpace(observation.AuthIndex),
-		IdentityFingerprint: hex.EncodeToString(fingerprint[:]),
+		IdentityFingerprint: XAIQuotaIdentityFingerprint(fileName, observation.Subject, observation.Email, observation.AccessToken),
 		Data:                raw, CachedAt: now, ObservedAt: now, AccessedAt: now, Version: 2,
 	}, true, nil
+}
+
+// XAIQuotaIdentityFingerprint binds all cache writers to the stable xAI
+// subject. Display names and auth indexes are mutable and are not identities.
+// Older filename/email/label fingerprints intentionally do not match this
+// version. Without a stable subject/email, an exact credential hash allows
+// API-key accounts to cache safely; credential rotation then starts fresh.
+func XAIQuotaIdentityFingerprint(fileName, subject, email, accessToken string) string {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		parts := strings.Split(strings.TrimSpace(accessToken), ".")
+		if len(parts) >= 2 {
+			payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+			if err == nil {
+				var claims map[string]any
+				if json.Unmarshal(payload, &claims) == nil {
+					subject, _ = claims["sub"].(string)
+					subject = strings.TrimSpace(subject)
+				}
+			}
+		}
+	}
+	kind, identity := "subject", subject
+	if identity == "" {
+		kind, identity = "email", strings.ToLower(strings.TrimSpace(email))
+	}
+	if identity == "" {
+		kind, identity = "credential", strings.TrimSpace(accessToken)
+	}
+	if identity == "" || strings.TrimSpace(fileName) == "" {
+		return ""
+	}
+	raw, _ := json.Marshal([]string{"xai", strings.ToLower(strings.TrimSpace(fileName)), kind, identity})
+	fingerprint := sha256.Sum256(raw)
+	return "xai:v2:" + hex.EncodeToString(fingerprint[:])
+}
+
+// XAIQuotaCredential mirrors xAI's API-key precedence and handles the access
+// token aliases used by auth-file inspection. Every quota writer uses it so a
+// config API key and an OAuth credential receive the same identity binding.
+func XAIQuotaCredential(metadata map[string]any, attributes map[string]string) string {
+	if value := strings.TrimSpace(attributes["api_key"]); value != "" {
+		return value
+	}
+	for _, key := range []string{"access_token", "accessToken", "api_key"} {
+		if value, ok := metadata[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+		if value := strings.TrimSpace(attributes[key]); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func MergeXAIState(existing, incoming map[string]any) map[string]any {

@@ -18,7 +18,17 @@ const (
 	MaxRetries         = 1
 )
 
-var supportedProviders = []string{"antigravity", "claude", "codex", "gemini-cli", "kimi", "xai"}
+var supportedProviders = []string{"antigravity", "claude", "codex", "gemini-cli", "kimi", "xai", "devin", "meta"}
+
+// CanonicalProvider groups domain aliases for inspection and display without
+// changing the provider on the underlying runtime credential.
+func CanonicalProvider(provider string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "kimi-ai" || provider == "kimi.ai" {
+		return "kimi"
+	}
+	return provider
+}
 
 type AntigravityQuotaMode string
 
@@ -45,8 +55,8 @@ type Settings struct {
 	AutoExecuteQuotaRecoveryEnable  bool                 `json:"autoExecuteQuotaRecoveryEnable"`
 	AutoExecuteAccountInvalidAction Action               `json:"autoExecuteAccountInvalidAction"`
 	// Retained in JSON for old schedules and backups; always normalized to none.
-	AutoExecuteRequestErrorAction   Action               `json:"autoExecuteRequestErrorAction"`
-	AutoExecuteConfirmations        int                  `json:"autoExecuteConfirmations,omitempty"`
+	AutoExecuteRequestErrorAction Action `json:"autoExecuteRequestErrorAction"`
+	AutoExecuteConfirmations      int    `json:"autoExecuteConfirmations,omitempty"`
 }
 
 type Schedule struct {
@@ -102,7 +112,7 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 func NormalizeSchedule(input Schedule, now time.Time) Schedule {
 	defaults := DefaultSettings()
 	settings := input.Settings
-	settings.TargetType = strings.ToLower(strings.TrimSpace(settings.TargetType))
+	settings.TargetType = CanonicalProvider(settings.TargetType)
 	if settings.TargetType == "" || (!IsSupportedProvider(settings.TargetType) && settings.TargetType != ProviderAll) {
 		settings.TargetType = defaults.TargetType
 	}
@@ -190,7 +200,7 @@ func NormalizeAutoAction(action Action) Action {
 }
 
 func IsSupportedProvider(provider string) bool {
-	provider = strings.ToLower(strings.TrimSpace(provider))
+	provider = CanonicalProvider(provider)
 	for _, supported := range supportedProviders {
 		if provider == supported {
 			return true

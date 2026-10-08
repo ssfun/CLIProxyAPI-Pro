@@ -144,8 +144,10 @@ export function AccountInspectionPage() {
   const antigravityQuota = useQuotaStore((state) => state.antigravityQuota);
   const claudeQuota = useQuotaStore((state) => state.claudeQuota);
   const codexQuota = useQuotaStore((state) => state.codexQuota);
+  const devinQuota = useQuotaStore((state) => state.devinQuota);
   const geminiCliQuota = useQuotaStore((state) => state.geminiCliQuota);
   const kimiQuota = useQuotaStore((state) => state.kimiQuota);
+  const metaQuota = useQuotaStore((state) => state.metaQuota);
   const xaiQuota = useQuotaStore((state) => state.xaiQuota);
   const [backendState, dispatchBackendState] = useReducer(
     inspectionBackendReducer,
@@ -1062,8 +1064,8 @@ export function AccountInspectionPage() {
   }, []);
 
   const quotaStore = useMemo(
-    () => ({ antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota }),
-    [antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota]
+    () => ({ antigravityQuota, claudeQuota, codexQuota, devinQuota, geminiCliQuota, kimiQuota, metaQuota, xaiQuota }),
+    [antigravityQuota, claudeQuota, codexQuota, devinQuota, geminiCliQuota, kimiQuota, metaQuota, xaiQuota]
   );
 
   const authFilesByName = useMemo(
@@ -1229,7 +1231,7 @@ export function AccountInspectionPage() {
       const providers = new Set<string>();
       authFileStats.providers.forEach((provider) => providers.add(provider.provider));
       result?.results.forEach((item) => {
-        const provider = item.provider.trim().toLowerCase();
+        const provider = resolveAuthProvider({ name: item.fileName, provider: item.provider });
         if (ACCOUNT_INSPECTION_SUPPORTED_PROVIDER_SET.has(provider)) providers.add(provider);
       });
       return [

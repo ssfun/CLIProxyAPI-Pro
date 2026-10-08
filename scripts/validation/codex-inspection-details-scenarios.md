@@ -29,3 +29,7 @@
 ## Nested JWT renewal fallback regression
 
 Before implementation: extend HTTP -> inspection -> SQLite fixtures with the real `https://api.openai.com/auth` claim namespace. Cover JWT text, JSON text and already-decoded objects; nested-vs-top-level conflicts follow Management's nested precedence; flat JWT compatibility; missing/malformed claims remain unknown. On subscription failure with no eligible old cache, persist the credential renewal date without a live observation timestamp. Verify nested account ID selection, live API precedence, repeated failure and recovery, and rerun existing cancellation/credential replacement scenarios.
+
+## JWT plan fallback parity (before implementation)
+
+Extend the real HTTP -> inspection -> SQLite fixture before editing production code: usage missing plan must fall back to nested JWT, decoded object, JSON object text and flattened claims; missing or malformed token stays unknown. A live usage plan takes precedence over JWT claims. Nested auth namespace takes precedence over conflicting flattened claims. Existing renewal date and optional-failure behavior must remain unchanged. Save SQLite output per scenario.

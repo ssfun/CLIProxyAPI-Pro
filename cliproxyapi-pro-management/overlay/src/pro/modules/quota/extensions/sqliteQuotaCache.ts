@@ -1,4 +1,5 @@
 import { proApiClient as apiClient } from '@/pro/shared/proManagementTransport';
+import { getStatusFromError } from '@/utils/quota/formatters';
 
 export interface QuotaCacheEntry<T = unknown> {
   id: string;
@@ -31,12 +32,18 @@ class SqliteQuotaCache {
     fileName: string,
     data: unknown,
     cachedAt = Date.now()
-  ): Promise<boolean> {
+  ): Promise<boolean | 'stale'> {
+    const rawIdentity = (data as { quotaIdentityFingerprint?: unknown } | null)
+      ?.quotaIdentityFingerprint;
+    const identityFingerprint = typeof rawIdentity === 'string' ? rawIdentity.trim() : '';
+    // Unbound xAI observations cannot be assigned the current credential identity.
+    if (provider === 'xai' && !identityFingerprint) return false;
     try {
       await apiClient.put('/usage/quota-cache', {
         provider,
         fileName,
         data,
+        ...(provider === 'xai' ? { identityFingerprint } : {}),
         cachedAt,
         observedAt: cachedAt,
         accessedAt: Date.now(),
@@ -44,6 +51,7 @@ class SqliteQuotaCache {
       });
       return true;
     } catch (err) {
+      if (provider === 'xai' && getStatusFromError(err) === 409) return 'stale';
       console.error('SQLite quota cache set error:', err);
       return false;
     }

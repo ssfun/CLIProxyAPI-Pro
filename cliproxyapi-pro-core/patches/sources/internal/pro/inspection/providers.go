@@ -436,15 +436,14 @@ func BuildClaudeWindows(body string) ([]map[string]any, any, error) {
 	windows := make([]map[string]any, 0)
 	for _, def := range defs {
 		window, ok := payload[def.Key].(map[string]any)
-		usedKey := "utilization"
-		if def.Key == "iguana_necktie" && fableLimit != nil {
-			window, ok = fableLimit, true
-			usedKey = "percent"
-		}
 		if !ok {
 			continue
 		}
-		used, ok := floatFromAny(window[usedKey])
+		isCreditPool := def.Key == "iguana_necktie" && isClaudeDollarDenominatedWindow(window)
+		if def.Key == "iguana_necktie" && fableLimit != nil && !isCreditPool {
+			continue
+		}
+		used, ok := floatFromAny(window["utilization"])
 		if !ok {
 			continue
 		}
@@ -453,9 +452,13 @@ func BuildClaudeWindows(body string) ([]map[string]any, any, error) {
 		if parsed, ok := quotaResetAtMS(window["resets_at"]); ok {
 			resetAtMS = parsed
 		}
-		periodHours := float64(24 * 7)
+		var periodHours any = float64(24 * 7)
 		if def.Key == "five_hour" {
-			periodHours = 5
+			periodHours = float64(5)
+		}
+		if isCreditPool {
+			def.ID, def.LabelKey = "cloud-session-credits", "claude_quota.cloud_session_credits"
+			periodHours = nil
 		}
 		windows = append(windows, map[string]any{
 			"id":          def.ID,
@@ -467,7 +470,32 @@ func BuildClaudeWindows(body string) ([]map[string]any, any, error) {
 			"periodHours": periodHours,
 		})
 	}
+	if fableLimit != nil {
+		used, _ := floatFromAny(fableLimit["percent"])
+		var resetAtMS any
+		if parsed, ok := quotaResetAtMS(fableLimit["resets_at"]); ok {
+			resetAtMS = parsed
+		}
+		windows = append(windows, map[string]any{
+			"id":          "seven-day-fable",
+			"label":       "claude_quota.seven_day_fable",
+			"labelKey":    "claude_quota.seven_day_fable",
+			"usedPercent": used,
+			"resetLabel":  stringFromProviderValue(fableLimit["resets_at"]),
+			"resetAtMs":   resetAtMS,
+			"periodHours": float64(24 * 7),
+		})
+	}
 	return windows, payload["extra_usage"], nil
+}
+
+func isClaudeDollarDenominatedWindow(window map[string]any) bool {
+	for _, key := range []string{"limit_dollars", "used_dollars", "remaining_dollars"} {
+		if value, ok := floatFromAny(window[key]); ok && !math.IsNaN(value) && !math.IsInf(value, 0) {
+			return true
+		}
+	}
+	return false
 }
 
 func findClaudeFableLimit(payload map[string]any) map[string]any {
@@ -828,14 +856,14 @@ func kimiResetAtMS(data map[string]any, now time.Time) (int64, bool) {
 
 func kimiPeriodHours(label string, duration int, rawTimeUnit any) (float64, bool) {
 	if duration > 0 {
-		switch strings.ToUpper(strings.TrimSpace(stringFromProviderValue(rawTimeUnit))) {
-		case "SECONDS", "SECOND":
+		switch normalizeKimiTimeUnit(rawTimeUnit) {
+		case "SECOND":
 			return float64(duration) / 3600, true
-		case "HOURS", "HOUR":
+		case "HOUR":
 			return float64(duration), true
-		case "DAYS", "DAY":
+		case "DAY":
 			return float64(duration * 24), true
-		case "WEEKS", "WEEK":
+		case "WEEK":
 			return float64(duration * 7 * 24), true
 		default:
 			return float64(duration) / 60, true
@@ -888,20 +916,32 @@ func intFromAny(value any) (int, bool) {
 	return int(parsed), true
 }
 
-func kimiDurationToken(duration int, rawTimeUnit any) string {
+func normalizeKimiTimeUnit(rawTimeUnit any) string {
 	unit := strings.ToUpper(strings.TrimSpace(stringFromProviderValue(rawTimeUnit)))
+	unit = strings.TrimSuffix(strings.TrimPrefix(unit, "TIME_UNIT_"), "S")
 	switch unit {
-	case "MINUTES":
+	case "SECOND", "MINUTE", "HOUR", "DAY", "WEEK":
+		return unit
+	default:
+		return "MINUTE"
+	}
+}
+
+func kimiDurationToken(duration int, rawTimeUnit any) string {
+	switch normalizeKimiTimeUnit(rawTimeUnit) {
+	case "SECOND":
+		return fmt.Sprintf("%ds", duration)
+	case "HOUR":
+		return fmt.Sprintf("%dh", duration)
+	case "DAY":
+		return fmt.Sprintf("%dd", duration)
+	case "WEEK":
+		return fmt.Sprintf("%dw", duration)
+	default:
 		if duration%60 == 0 {
 			return fmt.Sprintf("%dh", duration/60)
 		}
 		return fmt.Sprintf("%dm", duration)
-	case "HOURS":
-		return fmt.Sprintf("%dh", duration)
-	case "DAYS":
-		return fmt.Sprintf("%dd", duration)
-	default:
-		return fmt.Sprintf("%ds", duration)
 	}
 }
 

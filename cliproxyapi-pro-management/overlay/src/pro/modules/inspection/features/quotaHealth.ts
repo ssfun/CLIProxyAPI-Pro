@@ -11,7 +11,9 @@ const isQuotaLowWindow = (window: unknown, usedPercentThreshold: number): boolea
   const remainingFraction = normalizeNumberValue(
     window.remainingFraction ?? window.remaining_fraction
   );
-  if (remainingFraction !== null && remainingFraction <= 0) return true;
+  if (remainingFraction !== null && remainingFraction * 100 <= 100 - threshold) return true;
+  const remainingPercent = normalizeNumberValue(window.remainingPercent ?? window.remaining_percent);
+  if (remainingPercent !== null && remainingPercent <= 100 - threshold) return true;
   const remainingAmount = normalizeNumberValue(
     window.remainingAmount ?? window.remaining_amount ?? window.remaining
   );

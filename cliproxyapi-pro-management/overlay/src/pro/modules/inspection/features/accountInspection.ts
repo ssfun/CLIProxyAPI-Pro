@@ -1,5 +1,5 @@
 import type { AuthFileItem } from '@/types';
-import { normalizeNumberValue } from '@/utils/quota';
+import { normalizeNumberValue, resolveAuthProvider } from '@/utils/quota';
 import { isRecordValue, readBooleanValue, readStringValue } from '@/pro/shared/value';
 
 export type AccountInspectionLogLevel = 'info' | 'success' | 'warning' | 'error';
@@ -285,8 +285,10 @@ export const ACCOUNT_INSPECTION_SUPPORTED_PROVIDERS = [
   'antigravity',
   'claude',
   'codex',
+  'devin',
   'gemini-cli',
   'kimi',
+  'meta',
   'xai',
 ] as const;
 
@@ -375,7 +377,7 @@ const formatAccountInspectionIdentity = (
 };
 
 const normalizeInspectionTargetType = (value: unknown) => {
-  const targetType = readStringValue(value).toLowerCase();
+  const targetType = resolveAuthProvider({ name: '', provider: readStringValue(value) });
   return targetType === ACCOUNT_INSPECTION_ALL_PROVIDER_TYPE ||
     ACCOUNT_INSPECTION_SUPPORTED_PROVIDER_SET.has(targetType)
     ? targetType

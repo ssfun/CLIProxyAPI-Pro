@@ -1394,6 +1394,108 @@ def patch_antigravity_quota_builders(target: Path) -> None:
     )
 
 
+def patch_antigravity_quota_refresh(target: Path) -> None:
+    data_path = target / 'src/features/quota/providers/antigravity/data.ts'
+    replace_once(
+        data_path,
+        '  normalizeStringValue,\n',
+        '  normalizeStringValue,\n  normalizeQuotaFraction,\n',
+    )
+    insert_once(
+        data_path,
+        'const fetchAntigravityQuota = async (\n',
+        '''// Only an explicit, structurally valid summary can replace cached quota.
+const isValidAntigravityQuotaPayload = (
+  payload: Record<string, unknown> | null
+): payload is AntigravityQuotaSummaryPayload & Record<string, unknown> => {
+  if (!payload || payload.error != null || !Array.isArray(payload.groups)) return false;
+  return payload.groups.every((group: unknown) => {
+    if (!group || typeof group !== 'object' || Array.isArray(group)) return false;
+    const buckets = (group as Record<string, unknown>).buckets;
+    if (!Array.isArray(buckets)) return false;
+    return buckets.every((bucket: unknown) => {
+      if (!bucket || typeof bucket !== 'object' || Array.isArray(bucket)) return false;
+      const value = bucket as Record<string, unknown>;
+      return normalizeQuotaFraction(value.remainingFraction ?? value.remaining_fraction) !== null;
+    });
+  });
+};
+
+const fetchAntigravityQuota = async (
+''',
+        'const isValidAntigravityQuotaPayload =',
+    )
+    replace_once(data_path, '  let hadSuccess = false;\n', '  // A transport success alone is not quota evidence.\n')
+    replace_once(
+        data_path,
+        '''      hadSuccess = true;
+      const payload = parseAntigravityPayload(
+        result.body ?? result.bodyText
+      ) as AntigravityQuotaSummaryPayload | null;
+      if (!payload || !Array.isArray(payload.groups)) {
+''',
+        '''      const payload = parseAntigravityPayload(result.body ?? result.bodyText);
+      if (!isValidAntigravityQuotaPayload(payload)) {
+''',
+    )
+    replace_once(
+        data_path,
+        '''      if (groups.length === 0) {
+        lastError = t('antigravity_quota.empty_models');
+        continue;
+      }
+
+''',
+        '      // Explicit empty groups or buckets are a valid empty summary.\n\n',
+    )
+    replace_once(
+        data_path,
+        '''  if (hadSuccess) {
+    return { groups: [], subscription: await subscriptionPromise, serverTimeOffsetMs: null };
+  }
+
+''',
+        '  // Invalid HTTP 2xx responses must fail without replacing cached quota.\n\n',
+    )
+
+    # The quota page's single/batch hooks and auth-file cards all use this setter.
+    # Keep previous evidence through loading/error, while explicit success and
+    # clearQuotaCache remain authoritative replacements/invalidation.
+    store_path = target / 'src/stores/useQuotaStore.ts'
+    insert_once(
+        store_path,
+        'export const useQuotaStore = create<QuotaStoreState>((set) => ({\n',
+        '''const resolveAntigravityUpdater = (
+  updater: QuotaUpdater<Record<string, AntigravityQuotaState>>,
+  previous: Record<string, AntigravityQuotaState>
+): Record<string, AntigravityQuotaState> => {
+  const next = { ...resolveUpdater(updater, previous) };
+  Object.entries(next).forEach(([key, state]) => {
+    const cached = previous[key];
+    if (cached && (state.status === 'loading' || state.status === 'error')) {
+      next[key] = {
+        ...cached,
+        ...state,
+        groups: cached.groups,
+        subscription: cached.subscription,
+        serverTimeOffsetMs: cached.serverTimeOffsetMs,
+      };
+    }
+  });
+  return next;
+};
+
+export const useQuotaStore = create<QuotaStoreState>((set) => ({
+''',
+        'const resolveAntigravityUpdater =',
+    )
+    replace_once(
+        store_path,
+        '      antigravityQuota: resolveUpdater(updater, state.antigravityQuota),\n',
+        '      antigravityQuota: resolveAntigravityUpdater(updater, state.antigravityQuota),\n',
+    )
+
+
 def patch_auth_files_runtime_state(target: Path) -> None:
     type_path = target / 'src/types/authFile.ts'
     card_path = target / 'src/features/authFiles/components/AuthFileCard.tsx'
@@ -1548,6 +1650,7 @@ def patch_management_update_check(target: Path) -> None:
 
 def patch_supporting_api_and_types(target: Path) -> None:
     auth_file_type_path = target / 'src/types/authFile.ts'
+    _ensure_interface_field(auth_file_type_path, 'AuthFileItem', '  quota_identity_fingerprint?: string;')
     replace_once(
         auth_file_type_path,
         "export interface AuthFileItem {\n  name: string;\n",
@@ -1745,7 +1848,13 @@ def patch_quota_types_latest(target: Path) -> None:
         "  planType?: 'free' | 'supergrok' | 'x-basic' | 'x-premium' | 'x-premium-plus' | 'supergrok-heavy' | 'supergrok-lite' | 'paid' | 'paid-unknown';\n",
     )
     _ensure_interface_field(path, 'XaiBillingSummary', '  freeQuota?: XaiFreeQuotaSummary;')
+    _ensure_interface_field(path, 'XaiQuotaState', '  quotaIdentityFingerprint?: string;')
 def patch_quota_provider_model_latest(target: Path) -> None:
+    replace_once(
+        target / 'src/utils/quota/validators.ts',
+        "  if (key === 'kimi-ai') return 'kimi';\n",
+        "  if (key === 'kimi-ai' || key === 'kimi.ai') return 'kimi';\n",
+    )
     types_path = target / 'src/features/quota/providers/types.ts'
     replace_once(types_path, '  CodexQuotaState,\n', '  CodexQuotaState,\n  GeminiCliQuotaState,\n')
     ensure_string_union_member(types_path, 'QuotaProviderType', 'gemini-cli', 'codex')
@@ -2074,6 +2183,7 @@ def main() -> None:
     patch_quota_provider_model_latest(target)
     patch_quota_success_timestamps(target)
     patch_antigravity_quota_builders(target)
+    patch_antigravity_quota_refresh(target)
     patch_quota_page_latest(target)
     patch_quota_cards_latest(target)
     patch_auth_files_page_search_latest(target)

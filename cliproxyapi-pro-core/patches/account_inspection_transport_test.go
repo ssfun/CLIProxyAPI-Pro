@@ -33,12 +33,20 @@ import (
 func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
 	for _, tc := range []struct {
 		tokenShape                                                                                                                                                   string
+		missingUsagePlan                                                                                                                                             bool
 		name                                                                                                                                                         string
 		optionalStatus                                                                                                                                               int
 		invalid, invalidCounter, numeric, timeout, exhausted, empty, usageZero, expiredCache, expiredCredit, manualCache, replacement, cancel                        bool
 		subscriptionFailure, nullSubscription, unknownSubscription, subscriptionBeforeAuth, futureSubscription, repeatSubscription, recoverSubscription, manualStale bool
 	}{
 		{name: "live details"},
+		{name: "plan fallback jwt", tokenShape: "jwt", missingUsagePlan: true},
+		{name: "plan fallback object", tokenShape: "object", missingUsagePlan: true},
+		{name: "plan fallback json", tokenShape: "json", missingUsagePlan: true},
+		{name: "plan fallback priority", tokenShape: "priority", missingUsagePlan: true},
+		{name: "plan fallback flat", tokenShape: "flat", missingUsagePlan: true},
+		{name: "plan fallback missing", tokenShape: "missing", missingUsagePlan: true},
+		{name: "plan fallback malformed", tokenShape: "malformed", missingUsagePlan: true},
 		{name: "nested renewal jwt", tokenShape: "jwt", subscriptionFailure: true, unknownSubscription: true},
 		{name: "nested renewal object", tokenShape: "object", subscriptionFailure: true, unknownSubscription: true},
 		{name: "nested renewal json", tokenShape: "json", subscriptionFailure: true, unknownSubscription: true},
@@ -76,11 +84,12 @@ func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
 			metadata := map[string]any{"access_token": "observed-token", "account_id": "acct +/", "subscription_active_until": "2097-01-01T00:00:00Z"}
 			if tc.tokenShape != "" {
 				delete(metadata, "subscription_active_until")
-				claims := map[string]any{"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acct +/", "chatgpt_subscription_active_until": "2097-01-01T00:00:00Z"}}
+				claims := map[string]any{"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acct +/", "chatgpt_plan_type": "plus", "chatgpt_subscription_active_until": "2097-01-01T00:00:00Z"}}
 				switch tc.tokenShape {
 				case "flat":
 					claims = claims["https://api.openai.com/auth"].(map[string]any)
 				case "priority":
+					claims["chatgpt_plan_type"] = "free"
 					claims["chatgpt_subscription_active_until"] = "2096-01-01T00:00:00Z"
 				case "missing":
 					claims["https://api.openai.com/auth"] = map[string]any{"chatgpt_account_id": "acct +/"}
@@ -194,7 +203,11 @@ func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
 					if tc.numeric {
 						balance = `42.5`
 					}
-					fmt.Fprintf(w, `{"plan_type":"pro","credits":{"balance":%s,"unlimited":true},"rate_limit_reset_credits":{"available_count":%d,"applicable_available_count":%d},"rate_limit":{"primary_window":{"used_percent":%d,"limit_window_seconds":18000,"reset_after_seconds":60}}}`, balance, count, count, used)
+					planField := `"plan_type":"pro",`
+					if tc.missingUsagePlan {
+						planField = ""
+					}
+					fmt.Fprintf(w, `{%s"credits":{"balance":%s,"unlimited":true},"rate_limit_reset_credits":{"available_count":%d,"applicable_available_count":%d},"rate_limit":{"primary_window":{"used_percent":%d,"limit_window_seconds":18000,"reset_after_seconds":60}}}`, planField, balance, count, count, used)
 					return
 				}
 				optionalRequests.Add(1)
@@ -302,6 +315,16 @@ func TestCodexInspectionQuotaDetailsHTTPAndSQLite(t *testing.T) {
 			var state map[string]any
 			if err := json.Unmarshal(entries[0].Data, &state); err != nil {
 				t.Fatal(err)
+			}
+			var wantPlan any = "pro"
+			if tc.missingUsagePlan {
+				wantPlan = "plus"
+				if tc.tokenShape == "missing" || tc.tokenShape == "malformed" {
+					wantPlan = nil
+				}
+			}
+			if state["planType"] != wantPlan {
+				t.Fatalf("plan fallback got=%v want=%v", state["planType"], wantPlan)
 			}
 			balance := "42.50"
 			if tc.numeric {
@@ -2072,7 +2095,7 @@ func TestXAICLIFreeRefreshFailureDoesNotDecideFromCachedQuota(t *testing.T) {
 				Auth: &coreauth.Auth{
 					Provider: "xai", FileName: "old-free.json",
 					Attributes: map[string]string{"using_api": "false"},
-					Metadata:   map[string]any{"access_token": "header." + base64.RawURLEncoding.EncodeToString([]byte(`{"tier":0}`)) + ".signature"},
+					Metadata:   map[string]any{"access_token": "header." + base64.RawURLEncoding.EncodeToString([]byte(`{"tier":0,"sub":"same-free-subject"}`)) + ".signature"},
 				},
 				Provider: "xai", FileName: "old-free.json", AuthIndex: "old-free",
 			}
@@ -2158,7 +2181,7 @@ func TestXAICLIFreeRefreshPreservesCurrentProbeEvidence(t *testing.T) {
 			ctx := startProQuotaTestService(t)
 			observedAt := time.Now().Add(-30 * time.Minute).UnixMilli()
 			account := accountInspectionAccount{
-				Auth:     &coreauth.Auth{Provider: "xai", FileName: "old-free.json", Attributes: map[string]string{"using_api": "false"}, Metadata: map[string]any{"access_token": "header." + base64.RawURLEncoding.EncodeToString([]byte(`{"tier":0}`)) + ".signature"}},
+				Auth:     &coreauth.Auth{Provider: "xai", FileName: "old-free.json", Attributes: map[string]string{"using_api": "false"}, Metadata: map[string]any{"access_token": "header." + base64.RawURLEncoding.EncodeToString([]byte(`{"tier":0,"sub":"same-free-subject"}`)) + ".signature"}},
 				Provider: "xai", FileName: "old-free.json", AuthIndex: "old-free",
 			}
 			oldQuota := map[string]any{"model": "grok-4.5", "observedAt": observedAt, "usedTokens": 1000, "limitTokens": 1000, "exhausted": true}

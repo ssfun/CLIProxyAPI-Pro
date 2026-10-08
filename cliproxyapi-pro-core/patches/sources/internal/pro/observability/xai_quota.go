@@ -64,15 +64,12 @@ func (s *Store) MergeXAIQuotaCache(ctx context.Context, entry QuotaCacheEntry) e
 	if err != nil {
 		return err
 	}
-	if len(existingEntries) > 0 {
+	if len(existingEntries) > 0 && entry.IdentityFingerprint != "" && entry.IdentityFingerprint == existingEntries[0].IdentityFingerprint {
 		existing := map[string]any{}
 		if json.Unmarshal(existingEntries[0].Data, &existing) == nil {
 			incoming = proquota.MergeXAIState(existing, incoming)
 			if entry.AuthIndex == "" {
 				entry.AuthIndex = existingEntries[0].AuthIndex
-			}
-			if entry.IdentityFingerprint == "" {
-				entry.IdentityFingerprint = existingEntries[0].IdentityFingerprint
 			}
 		}
 	}

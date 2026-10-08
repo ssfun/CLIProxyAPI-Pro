@@ -69,6 +69,7 @@ export const selectPreferredQuotaCacheEntries = (
   const selected = new Map<string, QuotaCacheEntry>();
 
   entries.forEach((entry) => {
+    if (provider === 'xai' && !entry.identityFingerprint?.trim()) return;
     // Account policy consumes exactly the cache representations that the auth
     // card can hydrate. Other plugin rows remain persisted but cannot displace
     // a valid inspection snapshot for the same file.
@@ -101,8 +102,13 @@ export const selectPreferredQuotaCacheEntries = (
 export const normalizePersistedQuotaState = (
   provider: string,
   data: unknown,
-  cachedAt: number
+  cachedAt: number,
+  identityFingerprint?: string
 ): unknown => {
+  if (provider === 'xai' && isRecord(data)) {
+    // The persisted row identifies the observation; never rebind it to auth-list data.
+    return { ...data, quotaIdentityFingerprint: identityFingerprint?.trim() || undefined };
+  }
   if (provider !== 'gemini-cli' || !isRecord(data)) return data;
   if (data.status !== undefined || !Array.isArray(data.items)) return data;
 

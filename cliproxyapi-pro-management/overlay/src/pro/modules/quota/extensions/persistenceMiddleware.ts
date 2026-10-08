@@ -26,6 +26,7 @@ interface QuotaStatusState {
   status: 'idle' | 'loading' | 'success' | 'error';
   cachedAt?: number;
   quotaProviderSnapshot?: boolean;
+  quotaIdentityFingerprint?: string;
 }
 
 type QuotaStoreState = ReturnType<typeof useQuotaStore.getState>;
@@ -131,6 +132,7 @@ class QuotaPersistenceMiddleware {
       activeKeys.add(key);
       if (state.status !== 'success') return;
       if (provider === 'gemini-cli' && state.quotaProviderSnapshot) return;
+      if (provider === 'xai' && !state.quotaIdentityFingerprint) return;
 
       const version = this.getSyncVersion(state);
       if (this.syncedVersions.get(key) === version) return;
@@ -180,6 +182,7 @@ class QuotaPersistenceMiddleware {
 
         if (quotaState?.status !== 'success') continue;
         if (provider === 'gemini-cli' && quotaState.quotaProviderSnapshot) continue;
+        if (provider === 'xai' && !quotaState.quotaIdentityFingerprint) continue;
 
         const version = this.getSyncVersion(quotaState);
         if (this.syncedVersions.get(key) === version) continue;
@@ -191,6 +194,22 @@ class QuotaPersistenceMiddleware {
           cachedAt
         );
         if (epoch !== this.epoch) return;
+        if (synced === 'stale') {
+          const setter = useQuotaStore.getState()[getQuotaProviderSetterName(provider)] as unknown as (
+            updater: QuotaMapUpdater
+          ) => void;
+          setter((previous) => {
+            const latest = previous[fileName];
+            // A later observation may already occupy the same queue key.
+            if (!latest || this.getSyncVersion(latest) !== version) return previous;
+            const next = { ...previous };
+            delete next[fileName];
+            this.syncQueue.delete(key);
+            this.syncedVersions.delete(key);
+            return next;
+          });
+          continue;
+        }
         if (synced) {
           this.syncedVersions.set(key, version);
           this.retryDelayMs = 1_000;
@@ -299,7 +318,9 @@ class QuotaPersistenceMiddleware {
           changed = true;
         });
         cached.forEach((entry, fileName) => {
-          const data = normalizePersistedQuotaState(provider, entry.data, entry.cachedAt);
+          const data = normalizePersistedQuotaState(
+            provider, entry.data, entry.cachedAt, entry.identityFingerprint
+          );
           if (!isAuthCardQuotaCacheDataCompatible(provider, data)) return;
           const quotaState = data as QuotaStatusState;
           const current = next[fileName];

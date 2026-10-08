@@ -21,6 +21,7 @@ import {
 } from './xaiQuota';
 
 const REQUEST_TIMEOUT_MS = 15_000;
+type XaiQuotaObservation = XaiBillingSummary & { quotaIdentityFingerprint?: string };
 
 async function requestXaiFreeQuota(authIndex: string, t: TFunction) {
   const result = await apiCallApi.request(
@@ -53,33 +54,46 @@ async function requestXaiFreeQuota(authIndex: string, t: TFunction) {
   throw new Error(t('xai_quota.empty_data'));
 }
 
-async function fetchProXaiQuota(file: AuthFileItem, t: TFunction): Promise<XaiBillingSummary> {
+async function fetchProXaiQuota(file: AuthFileItem, t: TFunction): Promise<XaiQuotaObservation> {
+  // Bind before any request: auth-file data may change while requests are pending.
+  const quotaIdentityFingerprint = typeof file.quota_identity_fingerprint === 'string'
+    ? file.quota_identity_fingerprint.trim() || undefined
+    : undefined;
+  const cached = useQuotaStore.getState().xaiQuota[file.name];
+  const previous = quotaIdentityFingerprint && cached?.quotaIdentityFingerprint === quotaIdentityFingerprint
+    ? cached.billing
+    : undefined;
+  const observed = (billing: XaiBillingSummary): XaiQuotaObservation => ({
+    ...billing,
+    quotaIdentityFingerprint,
+  });
   const authIndex = normalizeAuthIndex(file.auth_index ?? file.authIndex);
   if (authIndex && isXaiUsingOfficialAPI(file)) {
     const billing = await requestXaiPaidHealth(authIndex);
-    const previous = useQuotaStore.getState().xaiQuota[file.name]?.billing;
-    return mergeXaiBillingRuntimeState({ ...billing, planType: 'paid' }, previous);
+    return observed(mergeXaiBillingRuntimeState({ ...billing, planType: 'paid' }, previous));
   }
 
   const billing = await XAI_CONFIG.fetchQuota(file, t);
-  const previous = useQuotaStore.getState().xaiQuota[file.name]?.billing;
   if (billing.mode === 'paid-health') {
-    return mergeXaiBillingRuntimeState({ ...billing, planType: 'paid' }, previous);
+    return observed(mergeXaiBillingRuntimeState({ ...billing, planType: 'paid' }, previous));
   }
 
   const planType =
     normalizeXaiPlanType(file.plan_type ?? file.planType) ??
     resolveXaiPlanType(billing.monthlyLimitCents, isXaiMonthlyBillingKnown(billing));
   const merged = mergeXaiBillingRuntimeState({ ...billing, planType }, previous);
-  if (planType !== 'free') return merged;
+  if (planType !== 'free') return observed(merged);
 
-  if (!authIndex) return merged;
+  if (!authIndex) return observed(merged);
   const freeQuota = await requestXaiFreeQuota(authIndex, t);
-  return { ...merged, freeQuota };
+  return observed({ ...merged, freeQuota });
 }
 
-export const PRO_XAI_CONFIG: QuotaProviderData<XaiQuotaState, XaiBillingSummary> = {
+export const PRO_XAI_CONFIG: QuotaProviderData<XaiQuotaState, XaiQuotaObservation> = {
   ...XAI_CONFIG,
   fetchQuota: fetchProXaiQuota,
-  buildSuccessState: (billing) => ({ status: 'success', billing }),
+  buildSuccessState: (observation) => {
+    const { quotaIdentityFingerprint, ...billing } = observation;
+    return { status: 'success', billing, quotaIdentityFingerprint };
+  },
 };

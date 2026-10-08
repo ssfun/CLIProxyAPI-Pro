@@ -47,8 +47,15 @@ func isAuthCardQuotaSnapshotCompatible(provider string, raw []byte) bool {
 			}
 		}
 		return true
-	case "claude", "codex":
+	case "claude", "codex", "devin":
 		_, ok = payload["windows"].([]any)
+		return ok
+	case "meta":
+		data, valid := payload["data"].(map[string]any)
+		if !valid {
+			return false
+		}
+		_, ok = data["windows"].([]any)
 		return ok
 	case "gemini-cli":
 		_, ok = payload["buckets"].([]any)
