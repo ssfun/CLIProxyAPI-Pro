@@ -19,6 +19,8 @@ export const isAuthCardQuotaCacheDataCompatible = (provider: string, data: unkno
   if (status !== 'success') return true;
 
   switch (provider) {
+    case 'plugin':
+      return Array.isArray(data.summary) && isAuthCardQuotaCacheDataCompatible('antigravity', data);
     case 'antigravity':
       return (
         Array.isArray(data.groups) &&

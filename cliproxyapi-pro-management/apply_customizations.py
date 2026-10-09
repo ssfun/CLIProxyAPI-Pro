@@ -1965,7 +1965,19 @@ def patch_quota_page_latest(target: Path) -> None:
     insert_once(path, "import { readQuotaUiState, writeQuotaUiState } from './uiState';\n", "import { readQuotaUiState, writeQuotaUiState } from './uiState';\nimport { buildQuotaSearchValues, matchesQuotaSearch } from '@/pro/modules/quota';\n", 'matchesQuotaSearch')
     replace_once(path, '  const codexQuota = useQuotaStore((state) => state.codexQuota);\n', '  const codexQuota = useQuotaStore((state) => state.codexQuota);\n  const geminiCliQuota = useQuotaStore((state) => state.geminiCliQuota);\n')
     replace_once(path, "        codex: codexQuota,\n", "        codex: codexQuota,\n        'gemini-cli': geminiCliQuota,\n")
-    replace_once(path, '[antigravityQuota, claudeQuota, codexQuota, devinQuota,', '[antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, devinQuota,')
+    dependencies = list(re.finditer(
+        r'\[\s*antigravityQuota,\s*claudeQuota,\s*codexQuota,(\s*)(?:geminiCliQuota,\s*)?devinQuota,',
+        read(path),
+    ))
+    if len(dependencies) != 1:
+        raise RuntimeError(f'Expected one quota dependency array in {path}, found {len(dependencies)}')
+    dependency_prefix = dependencies[0].group(0)
+    if 'geminiCliQuota,' not in dependency_prefix:
+        replace_once(
+            path,
+            dependency_prefix,
+            dependency_prefix.replace('codexQuota,', f'codexQuota,{dependencies[0].group(1)}geminiCliQuota,', 1),
+        )
     marker = "  const getQuota = useCallback(\n"
     search_state = "  const quotaSearchStore = useMemo(\n    () => ({ antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota }),\n    [antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota]\n  );\n\n"
     if 'const [search, setSearch]' not in read(path):

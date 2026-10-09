@@ -19,6 +19,7 @@ const QUOTA_PROVIDER_METADATA = {
   'gemini-cli': { quotaMapName: 'geminiCliQuota', setterName: 'setGeminiCliQuota' },
   kimi: { quotaMapName: 'kimiQuota', setterName: 'setKimiQuota' },
   meta: { quotaMapName: 'metaQuota', setterName: 'setMetaQuota' },
+  plugin: { quotaMapName: 'pluginQuota', setterName: 'setPluginQuota' },
   xai: { quotaMapName: 'xaiQuota', setterName: 'setXaiQuota' },
 } satisfies Record<QuotaProviderType, QuotaProviderMetadata>;
 

@@ -34,6 +34,19 @@ const fixture = {
     cachedAt: 1_790_741_234_567,
   },
 };
+const pluginFixture = {
+  provider: 'plugin',
+  fileName: 'pro-route-contract-plugin.json',
+  cachedAt: fixture.cachedAt,
+  data: {
+    status: 'success',
+    groups: [{ id: 'requests', label: 'Requests', buckets: [] }],
+    subscription: { plan: 'Synthetic Plugin', tierName: null, tierId: null },
+    summary: [{ key: 'balance', label: 'Balance', value: 12.5, format: 'currency', currency: 'USD' }],
+    cachedAt: fixture.cachedAt,
+  },
+};
+const invalidPluginFile = 'pro-route-contract-plugin-missing-summary.json';
 const receipt: Record<string, unknown> = { phase, passed: false, checks: [] };
 const checks = receipt.checks as string[];
 let middleware: { stop(): void } | undefined;
@@ -94,11 +107,29 @@ try {
       'Actual SQLite client write must succeed'
     );
     checks.push('pro-quota-write');
+
+    const { useQuotaStore } = await load('stores/useQuotaStore.ts');
+    const { quotaPersistenceMiddleware } = await load('pro/modules/quota/extensions/persistenceMiddleware.ts');
+    middleware = quotaPersistenceMiddleware;
+    quotaPersistenceMiddleware.start();
+    await quotaPersistenceMiddleware.ensureFresh();
+    useQuotaStore.getState().setPluginQuota({ [pluginFixture.fileName]: pluginFixture.data });
+    const deadline = Date.now() + 5_000;
+    while (!(await sqliteQuotaCache.getAll()).some((row: { fileName: string }) => row.fileName === pluginFixture.fileName)) {
+      assert(Date.now() < deadline, 'Plugin store update did not reach SQLite through persistence');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    middleware.stop();
+    assert.equal(await sqliteQuotaCache.set('plugin', invalidPluginFile, {
+      status: 'success', groups: [], cachedAt: fixture.cachedAt,
+    }, fixture.cachedAt), true);
+    checks.push('plugin-store-persists-through-real-http');
   }
 
   const rows = await sqliteQuotaCache.getAll();
-  assert.equal(rows.length, 1);
-  const row = rows[0];
+  assert.equal(rows.length, 3);
+  const row = rows.find((item: { provider: string }) => item.provider === fixture.provider);
+  assert(row, 'Codex cache row is missing');
   assert.equal(row.provider, fixture.provider);
   assert.equal(row.fileName, fixture.fileName);
   assert.deepEqual(row.data, fixture.data);
@@ -106,9 +137,17 @@ try {
   assert.equal(row.observedAt, fixture.cachedAt);
   assert(row.revision > 0);
   const stats = await sqliteQuotaCache.getStats();
-  assert.equal(stats.totalEntries, 1);
+  assert.equal(stats.totalEntries, 3);
   assert(stats.generation > 0);
   receipt.quota = { revision: row.revision, generation: stats.generation, data: row.data };
+  const pluginRow = rows.find((item: { fileName: string }) => item.fileName === pluginFixture.fileName);
+  assert(pluginRow, 'Plugin cache row is missing');
+  assert.equal(pluginRow.provider, pluginFixture.provider);
+  assert.deepEqual(pluginRow.data, pluginFixture.data);
+  assert.equal(pluginRow.cachedAt, pluginFixture.cachedAt);
+  assert.equal(pluginRow.observedAt, pluginFixture.cachedAt);
+  assert(pluginRow.revision > 0);
+  receipt.pluginQuota = { revision: pluginRow.revision, data: pluginRow.data };
   checks.push('pro-quota-read-and-stats');
 
   if (phase === 'hydrate') {
@@ -117,6 +156,7 @@ try {
       'pro/modules/quota/extensions/persistenceMiddleware.ts'
     );
     middleware = quotaPersistenceMiddleware;
+    assert.deepEqual(useQuotaStore.getState().pluginQuota, {}, 'Fresh plugin map must be empty');
     assert.deepEqual(
       useQuotaStore.getState().codexQuota,
       {},
@@ -130,6 +170,14 @@ try {
       'Restarted Core must hydrate a fresh real frontend store from SQLite'
     );
     checks.push('restart-hydrates-fresh-zustand-store');
+    assert.deepEqual(
+      useQuotaStore.getState().pluginQuota[pluginFixture.fileName],
+      pluginFixture.data,
+      'Plugin quota must survive Core restart and hydrate the upstream store'
+    );
+    assert.equal(useQuotaStore.getState().pluginQuota[invalidPluginFile], undefined,
+      'Malformed plugin state without summary must not hydrate');
+    checks.push('restart-hydrates-plugin-and-rejects-malformed-state');
   }
 
   assert(versions.length > 0, 'Shared client must still dispatch server version events');

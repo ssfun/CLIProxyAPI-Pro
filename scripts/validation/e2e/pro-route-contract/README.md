@@ -34,6 +34,9 @@ The frontend is always required to use the declared namespaces without fallback.
 - Bare, explicit `/v8/management/`, and old `/v0/management/` connection bases
   normalize correctly while native operations always stay on v8
 - A synthetic Codex quota is written by the real SQLite adapter and read back
+- A synthetic plugin quota travels from the upstream store through the real middleware,
+  HTTP and SQLite; its groups, subscription, summary and timestamps survive restart
+- A persisted plugin row missing its required summary is ignored during hydration
 - Core terminates gracefully and restarts with the same isolated SQLite database
 - A new Bun process starts with an empty real Zustand store and hydrates it via
   the actual persistence middleware; data, revision and generation survive restart

@@ -283,13 +283,17 @@ def main():
                                              "v0-base-read", "read", PRO_PREFIX + "/"))
         core.stop()
         require((root / "usage.sqlite").is_file(), "Core did not create isolated SQLite database")
-        with sqlite3.connect(f"file:{root / 'usage.sqlite'}?mode=ro", uri=True) as database:
+        # Core is stopped: inspect its database without requiring
+        # SQLite to create WAL sidecars for a read-only connection.
+        with sqlite3.connect(f"file:{root / 'usage.sqlite'}?mode=ro&immutable=1", uri=True) as database:
             require(database.execute("PRAGMA quick_check").fetchone()[0] == "ok", "SQLite check failed")
         core.start()
         receipt["phases"].append(run_frontend(bun, frontend, root, proxy,
                                              "restart-hydrate", "hydrate", NATIVE_PREFIX + "/"))
         before, after = receipt["phases"][0]["quota"], receipt["phases"][-1]["quota"]
         require(before == after, f"Quota data/revision/generation changed over restart: {before}, {after}")
+        require(receipt["phases"][0]["pluginQuota"] == receipt["phases"][-1]["pluginQuota"],
+                "Plugin quota data/revision changed over restart")
         require(not any(row["method"] == "PUT" and row["phase"] == "restart-hydrate"
                         for row in proxy.transcript), "Hydration must not mirror data back to Core")
         receipt["passed"] = True
