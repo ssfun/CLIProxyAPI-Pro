@@ -337,28 +337,35 @@ Release workflows derive `SOURCE_DATE_EPOCH` from the newest immutable Core, mod
 - `USAGE_QUEUE_MAX_ITEMS` — maximum persistence-ingestion queue events, default `100000`.
 - `USAGE_QUEUE_MAX_BYTES` — maximum persistence-ingestion queue bytes, default `268435456` (256 MiB).
 
+### Backup restore size limit
+
+- `PRO_BACKUP_MAX_BYTES` — maximum backup size in bytes, default `268435456` (256 MiB). Applies to startup restore, uploaded and WebDAV backups, and both current and legacy preview/import endpoints. Encrypted uploads count the complete encrypted file, including its envelope.
+- Set a positive decimal integer and restart the service; for example, `PRO_BACKUP_MAX_BYTES=536870912` allows 512 MiB. Unset, empty, non-positive, nonnumeric, or platform-integer-overflow values fall back to 256 MiB; `0` never disables the limit.
+- Oversized requests return HTTP 413 with the effective byte limit and configuration hint. The existing 64 MiB per-JSONL-record parsing limit is unchanged. Preview and upload paths still buffer complete files and may allocate additional parsing/decryption memory, so choose the limit for available container memory.
+
 ### Account inspection
 
 - `ACCOUNT_INSPECTION_SCHEDULE_PATH` — optional schedule JSON path. Defaults to `USAGE_DATA_DIR/account-inspection-schedule.json`.
 - `ACCOUNT_INSPECTION_SNAPSHOT_PATH` — optional latest inspection-result snapshot JSON path. Defaults to `USAGE_DATA_DIR/account-inspection-snapshot.json`.
 
-### WebDAV usage restore
+### WebDAV Pro data restore
 
-When all variables below are configured, `entrypoint.sh` waits for the local API to become ready, downloads the latest backup from WebDAV, and imports it into `/v0/management/usage/import`:
+When all variables below are configured, `entrypoint.sh` waits for the local API to become ready, downloads the latest backup from WebDAV, and imports it into `/v0/management/data/backups/restore`:
 
-- `WEBDAV_URL`
-- `WEBDAV_USERNAME`
-- `WEBDAV_PASSWORD`
+- `CLIPROXY_BACKUP_WEBDAV_URL` (legacy alias: `WEBDAV_URL`)
+- `CLIPROXY_BACKUP_WEBDAV_USERNAME` (legacy alias: `WEBDAV_USERNAME`)
+- `CLIPROXY_BACKUP_WEBDAV_PASSWORD` (legacy alias: `WEBDAV_PASSWORD`)
 - `MANAGEMENT_PASSWORD`
 
-Restore lookup supports both backup names:
+Restore lookup prefers Pro backups and falls back to legacy usage backups only when no Pro backup exists:
 
 ```text
+cliproxy-pro-backup-YYYYMMDD_HHMMSS_NNNNNNNNN.jsonl
 usage-export-YYYYMMDD_HHMMSS.json
 usage-export-YYYYMMDD_HHMMSS.jsonl
 ```
 
-During the compatibility transition, Docker WebDAV restore always calls `/usage/import?allow_legacy=1`. Manifest-backed backups are still verified strictly; manifest-free legacy backups are imported with an explicit warning that integrity cannot be verified. Normal management API imports still reject manifest-free files by default.
+During the compatibility transition, Docker WebDAV restore adds `allow_legacy=1` only when the first nonempty line is not a backup manifest. Manifest-backed backups are still verified strictly; manifest-free legacy backups are imported with an explicit warning that integrity cannot be verified. Normal management API imports still reject manifest-free files by default.
 
 The service's scheduled WebDAV upload, directory listing, and retention deletion requests have a two-minute total timeout, preventing an unhealthy endpoint from permanently holding the backup lifecycle or the usage-import pause barrier.
 

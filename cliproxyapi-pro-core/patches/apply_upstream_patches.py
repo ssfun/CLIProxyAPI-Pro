@@ -7491,6 +7491,7 @@ format_go_writes([
     'internal/pro/observability/module.go',
     'internal/pro/observability/module_test.go',
 	'internal/pro/observability/backup_crypto.go',
+    'internal/pro/observability/backup_limits.go',
     'internal/pro/observability/config.go',
 	'internal/pro/observability/config_test.go',
 	'internal/pro/observability/data_management.go',

@@ -271,14 +271,7 @@ func (s *Server) fetchWebDAVBackup(ctx context.Context, fileName string) ([]byte
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, fmt.Errorf("webdav download failed with status %d", response.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, 64*1024*1024+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > 64*1024*1024 {
-		return nil, fmt.Errorf("WebDAV backup exceeds 64 MiB restore limit")
-	}
-	return data, nil
+	return s.readBackup(response.Body, response.ContentLength)
 }
 
 func webDAVImportFileName(c *gin.Context) (string, error) {
@@ -299,10 +292,11 @@ func (s *Server) handleWebDAVImportPreview(c *gin.Context) {
 	}
 	data, err := s.fetchWebDAVBackup(c.Request.Context(), fileName)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		writeBackupReadError(c, err, http.StatusBadGateway)
 		return
 	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(data))
+	c.Request.ContentLength = int64(len(data))
 	s.handleUsageImportPreview(c)
 }
 
@@ -314,21 +308,18 @@ func (s *Server) handleWebDAVImport(c *gin.Context) {
 	}
 	data, err := s.fetchWebDAVBackup(c.Request.Context(), fileName)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		writeBackupReadError(c, err, http.StatusBadGateway)
 		return
 	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(data))
+	c.Request.ContentLength = int64(len(data))
 	s.handleUsageImport(c)
 }
 
 func (s *Server) handleUsageImportPreview(c *gin.Context) {
-	data, err := io.ReadAll(io.LimitReader(c.Request.Body, 64*1024*1024+1))
+	data, err := s.readBackup(c.Request.Body, c.Request.ContentLength)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	if len(data) > 64*1024*1024 {
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "backup exceeds 64 MiB preview limit"})
+		writeBackupReadError(c, err, http.StatusBadRequest)
 		return
 	}
 	preview, err := s.previewBackupData(c.Request.Context(), data, allowLegacyUsageImport(c), false, nil)
@@ -936,6 +927,11 @@ func (s *Server) handleUsageExport(c *gin.Context) {
 }
 
 func (s *Server) handleUsageImport(c *gin.Context) {
+	body, err := s.backupReader(c.Request.Body, c.Request.ContentLength)
+	if err != nil {
+		writeBackupReadError(c, err, http.StatusBadRequest)
+		return
+	}
 	eventStage, err := os.CreateTemp("", "cliproxy-usage-import-*.jsonl")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -946,7 +942,7 @@ func (s *Server) handleUsageImport(c *gin.Context) {
 		_ = eventStage.Close()
 		_ = os.Remove(eventStagePath)
 	}()
-	reader := bufio.NewScanner(c.Request.Body)
+	reader := bufio.NewScanner(body)
 	reader.Buffer(make([]byte, 64*1024), 64*1024*1024)
 	totalEvents := 0
 	var modelPrices map[string]ModelPrice
@@ -1125,7 +1121,7 @@ func (s *Server) handleUsageImport(c *gin.Context) {
 		totalEvents++
 	}
 	if err := reader.Err(); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBackupReadError(c, err, http.StatusBadRequest)
 		return
 	}
 	if manifest == nil && !allowLegacyUsageImport(c) {

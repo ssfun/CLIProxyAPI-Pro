@@ -17,6 +17,7 @@ type Config struct {
 	PersistenceQueueRetentionSeconds int
 	PersistenceQueueMaxItems         int
 	PersistenceQueueMaxBytes         int64
+	BackupMaxBytes                   int64
 }
 
 const usageEventsPageLimit = 5000
@@ -54,6 +55,7 @@ func LoadConfigForPath(configFilePath string) Config {
 		PersistenceQueueRetentionSeconds: envInt("USAGE_QUEUE_RETENTION_SECONDS", 3600),
 		PersistenceQueueMaxItems:         envInt("USAGE_QUEUE_MAX_ITEMS", 100000),
 		PersistenceQueueMaxBytes:         int64(envInt("USAGE_QUEUE_MAX_BYTES", 256*1024*1024)),
+		BackupMaxBytes:                   int64(envInt("PRO_BACKUP_MAX_BYTES", defaultBackupMaxBytes)),
 	}
 }
 

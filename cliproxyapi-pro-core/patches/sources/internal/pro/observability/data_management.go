@@ -936,13 +936,10 @@ func (s *Server) previewBackupData(ctx context.Context, data []byte, allowLegacy
 	}, nil
 }
 
-func readDataManagementBackup(c *gin.Context) ([]byte, bool, []string, error) {
-	data, err := io.ReadAll(io.LimitReader(c.Request.Body, 96*1024*1024+1))
+func (s *Server) readDataManagementBackup(c *gin.Context) ([]byte, bool, []string, error) {
+	data, err := s.readBackup(c.Request.Body, c.Request.ContentLength)
 	if err != nil {
 		return nil, false, nil, err
-	}
-	if len(data) > 96*1024*1024 {
-		return nil, false, nil, fmt.Errorf("backup exceeds 96 MiB encrypted restore limit")
 	}
 	return decryptBackup(data, c.GetHeader("X-CLIProxy-Backup-Passphrase"))
 }
@@ -1109,9 +1106,9 @@ func (s *Server) handleDataManagementEncryptedBackupExport(c *gin.Context) {
 }
 
 func (s *Server) handleDataManagementBackupPreview(c *gin.Context) {
-	data, encrypted, encryptedSecrets, err := readDataManagementBackup(c)
+	data, encrypted, encryptedSecrets, err := s.readDataManagementBackup(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBackupReadError(c, err, http.StatusBadRequest)
 		return
 	}
 	preview, err := s.previewBackupData(c.Request.Context(), data, allowLegacyUsageImport(c), encrypted, encryptedSecrets)
@@ -1123,9 +1120,9 @@ func (s *Server) handleDataManagementBackupPreview(c *gin.Context) {
 }
 
 func (s *Server) handleDataManagementBackupRestore(c *gin.Context) {
-	data, encrypted, encryptedSecrets, err := readDataManagementBackup(c)
+	data, encrypted, encryptedSecrets, err := s.readDataManagementBackup(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBackupReadError(c, err, http.StatusBadRequest)
 		return
 	}
 	s.restoreDataManagementBackup(c, data, encrypted, encryptedSecrets, "upload", "", allowLegacyUsageImport(c))
@@ -1145,6 +1142,7 @@ func (s *Server) restoreDataManagementBackup(c *gin.Context, data []byte, encryp
 	}
 	operation.ID, _ = s.store.StartDataOperation(c.Request.Context(), operation)
 	c.Request.Body = io.NopCloser(bytes.NewReader(data))
+	c.Request.ContentLength = int64(len(data))
 	query := c.Request.URL.Query()
 	if allowLegacy {
 		query.Set("allow_legacy", "1")
@@ -1189,7 +1187,7 @@ func (s *Server) handleDataManagementWebDAVBackupPreview(c *gin.Context) {
 	}
 	data, err := s.fetchWebDAVBackup(c.Request.Context(), request.FileName)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		writeBackupReadError(c, err, http.StatusBadGateway)
 		return
 	}
 	preview, err := s.previewBackupData(c.Request.Context(), data, true, false, nil)
@@ -1217,7 +1215,7 @@ func (s *Server) handleDataManagementWebDAVBackupRestore(c *gin.Context) {
 	}
 	data, err := s.fetchWebDAVBackup(c.Request.Context(), request.FileName)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		writeBackupReadError(c, err, http.StatusBadGateway)
 		return
 	}
 	actualSHA256 := fmt.Sprintf("%x", sha256.Sum256(data))

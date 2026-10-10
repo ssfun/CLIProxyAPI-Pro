@@ -346,28 +346,35 @@ Release workflow 会从 Core、models 和定制层三个不可变提交中取最
 - `USAGE_QUEUE_MAX_ITEMS` — 持久化采集队列最大事件数，默认 `100000`。
 - `USAGE_QUEUE_MAX_BYTES` — 持久化采集队列最大字节数，默认 `268435456`（256 MiB）。
 
+### 备份恢复大小限制
+
+- `PRO_BACKUP_MAX_BYTES` — 单个备份的字节数上限，默认 `268435456`（256 MiB）。统一作用于启动恢复、上传及 WebDAV 备份，以及新旧预览/导入接口；加密上传按包含加密封装的完整文件大小计算。
+- 设置正十进制整数并重启服务，例如 `PRO_BACKUP_MAX_BYTES=536870912` 允许 512 MiB。未设置、空值、非正数、非数字或超出平台整数范围时回退到 256 MiB；`0` 不表示无限制。
+- 超限返回 HTTP 413，包含实际字节上限和配置提示。现有单条 JSONL 记录的 64 MiB 解析限制保持不变。预览和上传路径仍会整份读取文件，解析/解密还会额外占用内存，请根据容器可用内存调整。
+
 ### 账号巡检
 
 - `ACCOUNT_INSPECTION_SCHEDULE_PATH` — 可选调度 JSON 路径。默认 `USAGE_DATA_DIR/account-inspection-schedule.json`。
 - `ACCOUNT_INSPECTION_SNAPSHOT_PATH` — 可选最近一次巡检结果快照 JSON 路径。默认 `USAGE_DATA_DIR/account-inspection-snapshot.json`。
 
-### WebDAV usage 恢复
+### WebDAV Pro 数据恢复
 
-当以下变量全部配置时，`entrypoint.sh` 会等待本地 API 就绪，从 WebDAV 下载最新备份，并导入到 `/v0/management/usage/import`：
+当以下变量全部配置时，`entrypoint.sh` 会等待本地 API 就绪，从 WebDAV 下载最新备份，并导入到 `/v0/management/data/backups/restore`：
 
-- `WEBDAV_URL`
-- `WEBDAV_USERNAME`
-- `WEBDAV_PASSWORD`
+- `CLIPROXY_BACKUP_WEBDAV_URL`（兼容旧变量 `WEBDAV_URL`）
+- `CLIPROXY_BACKUP_WEBDAV_USERNAME`（兼容旧变量 `WEBDAV_USERNAME`）
+- `CLIPROXY_BACKUP_WEBDAV_PASSWORD`（兼容旧变量 `WEBDAV_PASSWORD`）
 - `MANAGEMENT_PASSWORD`
 
-恢复文件查找同时支持：
+恢复优先选择 Pro 备份；仅在没有 Pro 备份时回退旧 usage 备份：
 
 ```text
+cliproxy-pro-backup-YYYYMMDD_HHMMSS_NNNNNNNNN.jsonl
 usage-export-YYYYMMDD_HHMMSS.json
 usage-export-YYYYMMDD_HHMMSS.jsonl
 ```
 
-Docker WebDAV 自动恢复在过渡阶段固定调用 `/usage/import?allow_legacy=1`。带 manifest 的新备份仍会严格校验完整性；无 manifest 的旧版备份会强制导入，并在日志中明确记录正在使用未经完整性校验的兼容路径。管理 API 的普通导入仍默认拒绝无 manifest 文件。
+Docker WebDAV 自动恢复在过渡阶段仅当首个非空行不是 backup manifest 时附加 `allow_legacy=1`。带 manifest 的新备份仍会严格校验完整性；无 manifest 的旧版备份会强制导入，并在日志中明确记录正在使用未经完整性校验的兼容路径。管理 API 的普通导入仍默认拒绝无 manifest 文件。
 
 服务内置的 WebDAV 定时备份、目录读取和旧文件删除请求均有 2 分钟总超时，异常端点不会永久占用备份生命周期或阻塞 usage 导入暂停屏障。
 
