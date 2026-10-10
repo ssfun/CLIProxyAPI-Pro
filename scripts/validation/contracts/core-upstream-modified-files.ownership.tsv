@@ -70,8 +70,11 @@ sdk/api/handlers/handlers_interceptors.go	upstream-generic-fix	stream-cancellati
 sdk/api/handlers/handlers_routing.go	must-remain-host-patch	api-key-policy	retain-model-mapping-provider-filter-and-error-contract
 sdk/api/handlers/handlers_stream.go	must-remain-host-patch	api-key-policy	retain-stream-provider-enforcement
 sdk/api/handlers/openai/openai_handlers.go	must-remain-host-patch	final-model-response	retain-final-openai-model-filtering
+sdk/api/handlers/openai/openai_responses_interrupt_test.go	upstream-generic-fix	stream-cancellation	upstream-executor-cancellation-acknowledgement
 sdk/api/handlers/openai/openai_responses_websocket.go	must-remain-host-patch	api-key-policy	retain-websocket-turn-quota-admission
 sdk/api/handlers/openai/openai_responses_websocket_forward.go	upstream-generic-fix	websocket-terminal-order	consume-queued-terminal-error-before-data-channel-eof
+sdk/api/handlers/openai/openai_responses_websocket_input.go	upstream-generic-fix	stream-cancellation	upstream-response-scoped-interrupt-lifecycle
+sdk/api/handlers/stream_forwarder.go	upstream-generic-fix	stream-cancellation	upstream-canceled-eof-classification
 sdk/auth/codex_device.go	upstream-generic-fix	auth-identity	upstream-stable-codex-account-identity
 sdk/auth/filestore.go	upstream-generic-fix	auth-identity	upstream-provider-identity-preserving-reauth
 sdk/cliproxy/auth/conductor.go	generic-host-hook	account-policy	upstream-execution-auth-overlay-resolver

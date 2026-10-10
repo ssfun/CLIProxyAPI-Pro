@@ -67,8 +67,11 @@ sdk/api/handlers/handlers_interceptors.go
 sdk/api/handlers/handlers_routing.go
 sdk/api/handlers/handlers_stream.go
 sdk/api/handlers/openai/openai_handlers.go
+sdk/api/handlers/openai/openai_responses_interrupt_test.go
 sdk/api/handlers/openai/openai_responses_websocket.go
 sdk/api/handlers/openai/openai_responses_websocket_forward.go
+sdk/api/handlers/openai/openai_responses_websocket_input.go
+sdk/api/handlers/stream_forwarder.go
 sdk/auth/codex_device.go
 sdk/auth/filestore.go
 sdk/cliproxy/auth/conductor.go

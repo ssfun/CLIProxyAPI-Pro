@@ -2382,6 +2382,66 @@ replace_once(
     'apikeypolicy.AdmitQuotaTurn(executionParent)',
 )
 
+# A canceled request can race upstream data EOF. Preserve actual queued errors,
+# but do not turn cancellation into a synthesized missing-terminal error.
+replace_once(
+    ROOT / 'sdk/api/handlers/stream_forwarder.go',
+    '\t\t\t\tif terminalErr == nil && opts.CloseError != nil {',
+    '\t\t\t\tif terminalErr == nil {\n'
+    '\t\t\t\t\tif errCanceled := c.Request.Context().Err(); errCanceled != nil {\n'
+    '\t\t\t\t\t\tcancel(errCanceled)\n'
+    '\t\t\t\t\t\treturn\n'
+    '\t\t\t\t\t}\n'
+    '\t\t\t\t}\n'
+    '\t\t\t\tif terminalErr == nil && opts.CloseError != nil {',
+    'if errCanceled := c.Request.Context().Err(); errCanceled != nil {',
+)
+
+responses_websocket_input = ROOT / 'sdk/api/handlers/openai/openai_responses_websocket_input.go'
+replace_once(responses_websocket_input,
+    '\tactive bool\n',
+    '\tactive bool\n\tactiveIDs map[string]struct{}\n\tterminalIDs map[string]struct{}\n')
+replace_once(responses_websocket_input,
+    '\ts.active = false\n', '\ts.active = false\n\ts.activeIDs = nil\n')
+replace_once(responses_websocket_input,
+    '\tif !s.active {\n',
+    '\t_, activeID := s.activeIDs[gjson.GetBytes(payload, "response_id").String()]\n\tif !s.active || !activeID {\n')
+replace_once(responses_websocket_input,
+    '\t\t\t\terrInterrupt := interrupt(payload)\n',
+    '\t\t\t\tactive, terminal := local.classify(payload)\n'
+    '\t\t\t\tvar errInterrupt error\n'
+    '\t\t\t\tswitch {\n'
+    '\t\t\t\tcase terminal:\n'
+    '\t\t\t\t\t// Completed IDs remain harmless for this socket lifetime.\n'
+    '\t\t\t\tcase !active:\n'
+    '\t\t\t\t\terrInterrupt = fmt.Errorf("response.interrupt requires an active response_id")\n'
+    '\t\t\t\tdefault:\n'
+    '\t\t\t\t\terrInterrupt = interrupt(payload)\n'
+    '\t\t\t\t}\n')
+replace_once(ROOT / 'sdk/api/handlers/openai/openai_responses_websocket_forward.go',
+    '\t\tcase interruptPayload := <-localFrames:\n',
+    '\t\tcase interruptPayload := <-localFrames:\n'
+    '\t\t\tif active, _ := opts.localInterrupt.classify(interruptPayload); !active {\n'
+    '\t\t\t\tcontinue\n'
+    '\t\t\t}\n'
+    '\t\t\topts.localInterrupt.completeInterrupt(interruptPayload)\n')
+replace_once(ROOT / 'sdk/api/handlers/openai/openai_responses_websocket_forward.go',
+    '\t\t\tfor i := range payloads {\n',
+    '\t\t\tfor i := range payloads {\n\t\t\t\topts.localInterrupt.observe(payloads[i])\n')
+queue_go_source('sdk/api/handlers/openai/responses_interrupt_lifecycle.go')
+
+responses_interrupt_test = ROOT / 'sdk/api/handlers/openai/openai_responses_interrupt_test.go'
+replace_once(responses_interrupt_test,
+    '\tcanceled atomic.Bool\n', '\tcanceled chan struct{}\n')
+replace_once(responses_interrupt_test,
+    '\t\te.canceled.Store(true)\n', '\t\tclose(e.canceled)\n')
+replace_once(responses_interrupt_test,
+    'executor := &blockingHTTPInterruptExecutor{}',
+    'executor := &blockingHTTPInterruptExecutor{canceled: make(chan struct{})}')
+replace_once(responses_interrupt_test,
+    '\tif !executor.canceled.Load() {\n\t\tt.Fatal("http upstream was not canceled")\n\t}',
+    '\tselect {\n\tcase <-executor.canceled:\n\tcase <-time.After(5 * time.Second):\n\t\tt.Fatal("http upstream was not canceled")\n\t}')
+
 responses_websocket_forward = ROOT / 'sdk/api/handlers/openai/openai_responses_websocket_forward.go'
 replace_once(
     responses_websocket_forward,
@@ -2483,6 +2543,7 @@ replace_once(
 ''',
 )
 queue_go_source('sdk/api/handlers/openai/responses_websocket_terminal_order_test.go')
+queue_go_source('sdk/api/handlers/openai/responses_interrupt_lifecycle_test.go')
 
 realtime_websocket_source = ROOT / 'internal/client/codex/live/websocket.go'
 add_go_import(realtime_websocket_source, '\t"encoding/json"\n', '\t"errors"\n')
