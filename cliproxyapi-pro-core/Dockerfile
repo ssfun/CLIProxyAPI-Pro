@@ -1,6 +1,6 @@
 ARG GITHUB_TOKEN=""
 
-FROM debian:bookworm@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26 AS management
+FROM debian:bookworm@sha256:2c037a04925515fdd6ea85ea14a682d0e79931f5e9f5d07b6dbfc6ba12f9e858 AS management
 
 RUN set -eux; \
     apt-get update; \
@@ -88,7 +88,7 @@ RUN set -eux; \
       -ldflags="-s -w -X 'main.Version=${CLIPROXY_BUILD_VERSION}' -X 'main.Commit=release-${CLIPROXY_SOURCE_VERSION}' -X 'main.BuildDate=${BUILD_DATE}'" \
       -o /out/CLIProxyAPI ./cmd/server/
 
-FROM debian:bookworm@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26
+FROM debian:bookworm@sha256:2c037a04925515fdd6ea85ea14a682d0e79931f5e9f5d07b6dbfc6ba12f9e858
 
 ARG TARGETARCH
 
