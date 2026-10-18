@@ -53,8 +53,6 @@ import { hasDataBackupManifest, isEncryptedDataBackup } from './backup';
 
 type DataManagementView = 'overview' | 'backups' | 'retention' | 'domains' | 'operations';
 
-const formatCount = (value: number) => new Intl.NumberFormat().format(Math.max(0, Number(value) || 0));
-
 const formatBytes = (value: number) => {
   const bytes = Math.max(0, Number(value) || 0);
   if (bytes < 1024) return `${bytes} B`;
@@ -66,13 +64,6 @@ const formatBytes = (value: number) => {
     unit = units[index];
   }
   return `${current >= 10 ? current.toFixed(1) : current.toFixed(2)} ${unit}`;
-};
-
-const formatDateTime = (value?: number) => {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString();
 };
 
 const downloadBlob = (blob: Blob, fileName: string) => {
@@ -93,7 +84,17 @@ const operationTone = (operation: DataOperation) => {
 };
 
 export function DataManagementPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const language = i18n.resolvedLanguage ?? i18n.language;
+  const formatCount = useCallback(
+    (value: number) => new Intl.NumberFormat(language).format(Math.max(0, Number(value) || 0)),
+    [language]
+  );
+  const formatDateTime = (value?: number) => {
+    if (!value) return '—';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(language);
+  };
   const pageTransitionLayer = usePageTransitionLayer();
   const isCurrentLayer = pageTransitionLayer ? pageTransitionLayer.isCurrentLayer : true;
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
@@ -524,7 +525,7 @@ export function DataManagementPage() {
         }
       },
     });
-  }, [cleanupPreview, loadCore, showConfirmation, showNotification, t]);
+  }, [cleanupPreview, loadCore, showConfirmation, showNotification, t, formatCount]);
 
   const resetStatistics = useCallback(() => {
     showConfirmation({
@@ -553,7 +554,7 @@ export function DataManagementPage() {
         }
       },
     });
-  }, [loadCore, overview?.events, showConfirmation, showNotification, t]);
+  }, [loadCore, overview?.events, showConfirmation, showNotification, t, formatCount]);
 
   const toggleCleanupDomain = (id: string) => {
     setCleanupPreview(null);

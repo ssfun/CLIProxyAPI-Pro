@@ -22,6 +22,12 @@
     margin: 0;
   }
 }
+.headerActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
 .eyebrow {
   font-size: 12px;
   letter-spacing: 2px;

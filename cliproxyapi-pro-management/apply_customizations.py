@@ -1706,8 +1706,16 @@ def patch_locales(target: Path) -> None:
         '    "cloud_session_credits": "Tín dụng phiên đám mây",\n',
     )
     monitoring = json.loads(LOCALES_FILE.read_text())
+    # Complete bundles override legacy additions without replacing nested resources.
+    def merge_resources(destination: dict, source: dict) -> None:
+        for key, value in source.items():
+            if isinstance(value, dict):
+                merge_resources(destination.setdefault(key, {}), value)
+            else:
+                destination[key] = value
+
     generated = {}
-    for locale_name in ('en.json', 'ru.json', 'zh-CN.json', 'zh-TW.json'):
+    for locale_name in ('en.json', 'ru.json', 'zh-CN.json', 'zh-TW.json', 'vi.json', 'ko.json'):
         additions = json.loads(json.dumps(monitoring.get(locale_name, {})))
         data = additions
         data.setdefault('login', {})['self_usage_link'] = {
@@ -1715,6 +1723,8 @@ def patch_locales(target: Path) -> None:
             'ru.json': 'Использование API-ключа',
             'zh-CN.json': '密钥用量查询',
             'zh-TW.json': '金鑰用量查詢',
+            'vi.json': 'Mức sử dụng khóa API',
+            'ko.json': 'API 키 사용량',
         }[locale_name]
         proxy_pool_nav = PROXY_POOL_NAV_LOCALE_KEYS.get(
             locale_name,
@@ -1797,6 +1807,7 @@ def patch_locales(target: Path) -> None:
                 MANAGEMENT_UPDATE_LOCALE_KEYS['en.json'],
             )
         )
+        merge_resources(data, monitoring[locale_name])
         generated[locale_name.removesuffix('.json')] = data
     write(
         target / 'src/pro/locales.generated.json',

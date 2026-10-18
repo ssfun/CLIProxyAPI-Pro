@@ -99,7 +99,7 @@ describe('data-management destructive-operation fencing', () => {
   test('provides enabled and disabled common labels in every locale', () => {
     const locales = JSON.parse(readFileSync(resolve(import.meta.dir, '../src/pro/locales.generated.json'), 'utf8')) as Record<string, { common?: Record<string, string>; data_management?: Record<string, string> }>;
 
-    for (const locale of ['en', 'ru', 'zh-CN', 'zh-TW']) {
+    for (const locale of ['en', 'ru', 'zh-CN', 'zh-TW', 'vi', 'ko']) {
       expect(locales[locale]?.common?.enabled).toBeTruthy();
       expect(locales[locale]?.common?.disabled).toBeTruthy();
       expect(locales[locale]?.data_management?.restore_from_webdav).toBeTruthy();
