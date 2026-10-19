@@ -6916,10 +6916,15 @@ replace_once(
 ''',
     'queueAuthRuntimeStats(authSnapshot, authStatsObservedAt)',
 )
+# Preserve upstream's credential-wide refresh after an unauthorized response.
+# Older releases pass CredentialScope directly; v8.0.34 also includes refreshes.
+result_credential_scope = 'result.CredentialScope'
+if '\t\tm.scheduler.upsertAuthResult(authSnapshot, targetModels, credentialScopedResult)\n' in read(auth_conductor):
+    result_credential_scope = 'credentialScopedResult'
 replace_once(
     auth_conductor,
-    '\t\tm.scheduler.upsertAuthResult(authSnapshot, targetModels, result.CredentialScope)\n',
-    '\t\tm.scheduler.upsertAuthResult(m.applyAccountPolicy(authSnapshot), targetModels, result.CredentialScope)\n',
+    f'\t\tm.scheduler.upsertAuthResult(authSnapshot, targetModels, {result_credential_scope})\n',
+    f'\t\tm.scheduler.upsertAuthResult(m.applyAccountPolicy(authSnapshot), targetModels, {result_credential_scope})\n',
     'm.scheduler.upsertAuthResult(m.applyAccountPolicy(authSnapshot),',
 )
 replace_once(
@@ -7030,9 +7035,31 @@ if policy_candidate_append not in auth_conductor_text:
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_refresh.go'
 # Preserve v8.0.17 rejected-token and canceled-refresh state changes, but keep
 # scheduler snapshots policy-aware and acquire them only after releasing m.mu.
-replace_once(
-    auth_conductor,
-    '''\t\t\tcurrent.RejectedAccessToken = failedAccessToken
+if '\t\tcurrent.RejectedAccessToken = failedAccessToken' in read(auth_conductor).splitlines():
+    replace_once(
+        auth_conductor,
+        '''\t\tcurrent.RejectedAccessToken = failedAccessToken
+\t\tm.auths[id] = current
+\t\tif m.scheduler != nil {
+\t\t\tm.scheduler.upsertAuth(current.Clone())
+\t\t}
+\t}
+\tm.mu.Unlock()
+}''',
+        '''\t\tcurrent.RejectedAccessToken = failedAccessToken
+\t\tm.auths[id] = current
+\t\tm.mu.Unlock()
+\t\treleaseMutation()
+\t\tm.RefreshSchedulerEntry(id)
+\t\treturn
+\t}
+\tm.mu.Unlock()
+}''',
+    )
+else:
+    replace_once(
+        auth_conductor,
+        '''\t\t\tcurrent.RejectedAccessToken = failedAccessToken
 \t\t\tm.auths[id] = current
 \t\t\tif m.scheduler != nil {
 \t\t\t\tm.scheduler.upsertAuth(current.Clone())
@@ -7041,7 +7068,7 @@ replace_once(
 \t}
 \tm.mu.Unlock()
 }''',
-    '''\t\t\tcurrent.RejectedAccessToken = failedAccessToken
+        '''\t\t\tcurrent.RejectedAccessToken = failedAccessToken
 \t\t\tm.auths[id] = current
 \t\t\tm.mu.Unlock()
 \t\t\treleaseMutation()
@@ -7051,7 +7078,7 @@ replace_once(
 \t}
 \tm.mu.Unlock()
 }''',
-)
+    )
 replace_once(
     auth_conductor,
     '''\t\t\tm.auths[id] = current
