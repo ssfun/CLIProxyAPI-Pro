@@ -1,0 +1,75 @@
+diff --git a/internal/api/handlers/management/auth_files_patch_fields_test.go b/internal/api/handlers/management/auth_files_patch_fields_test.go
+--- a/internal/api/handlers/management/auth_files_patch_fields_test.go
++++ b/internal/api/handlers/management/auth_files_patch_fields_test.go
+@@ -857,7 +857,7 @@
+ 		synctest.Test(t, func(t *testing.T) {
+ 			store := &blockingPatchAuthStore{}
+ 			manager := coreauth.NewManager(store, nil, nil)
+-			h.authManager = manager
++			h.SetAuthManager(manager)
+ 			base, errRegister := manager.Register(context.Background(), &coreauth.Auth{
+ 				ID:       "cred.json",
+ 				FileName: "cred.json",
+@@ -937,7 +937,7 @@
+ 		synctest.Test(t, func(t *testing.T) {
+ 			store := &blockingPatchAuthStore{}
+ 			manager := coreauth.NewManager(store, nil, nil)
+-			h.authManager = manager
++			h.SetAuthManager(manager)
+ 			initialStorage := &patchRegressionTokenStorage{AccessToken: "tok-initial", RefreshToken: "rt-initial"}
+ 			base, errRegister := manager.Register(context.Background(), &coreauth.Auth{
+ 				ID:       "cred.json",
+@@ -1026,7 +1026,7 @@
+ 		synctest.Test(t, func(t *testing.T) {
+ 			store := &blockingPatchAuthStore{}
+ 			manager := coreauth.NewManager(store, nil, nil)
+-			h.authManager = manager
++			h.SetAuthManager(manager)
+ 			base, errRegister := manager.Register(context.Background(), &coreauth.Auth{
+ 				ID:       "cred.json",
+ 				FileName: "cred.json",
+@@ -1106,7 +1106,7 @@
+ 		synctest.Test(t, func(t *testing.T) {
+ 			store := &blockingPatchAuthStore{}
+ 			manager := coreauth.NewManager(store, nil, nil)
+-			h.authManager = manager
++			h.SetAuthManager(manager)
+ 			_, errRegister := manager.Register(context.Background(), &coreauth.Auth{
+ 				ID:       "cred.json",
+ 				FileName: "cred.json",
+@@ -1187,7 +1187,7 @@
+ 		synctest.Test(t, func(t *testing.T) {
+ 			store := &blockingPatchAuthStore{}
+ 			manager := coreauth.NewManager(store, nil, nil)
+-			h.authManager = manager
++			h.SetAuthManager(manager)
+ 			_, errRegister := manager.Register(context.Background(), &coreauth.Auth{
+ 				ID:       "cred.json",
+ 				FileName: "cred.json",
+@@ -1265,7 +1265,7 @@
+ 		synctest.Test(t, func(t *testing.T) {
+ 			store := &blockingPatchAuthStore{}
+ 			manager := coreauth.NewManager(store, nil, nil)
+-			h.authManager = manager
++			h.SetAuthManager(manager)
+ 			initialStorage := &patchRegressionTokenStorage{AccessToken: "tok-initial", RefreshToken: "rt-initial"}
+ 			base, errRegister := manager.Register(context.Background(), &coreauth.Auth{
+ 				ID:       "cred.json",
+@@ -1355,7 +1355,7 @@
+ 		synctest.Test(t, func(t *testing.T) {
+ 			store := &blockingPatchAuthStore{}
+ 			manager := coreauth.NewManager(store, nil, nil)
+-			h.authManager = manager
++			h.SetAuthManager(manager)
+ 			base, errRegister := manager.Register(context.Background(), &coreauth.Auth{
+ 				ID:       "cred.json",
+ 				FileName: "cred.json",
+@@ -1432,7 +1432,7 @@
+ 		synctest.Test(t, func(t *testing.T) {
+ 			store := &blockingPatchAuthStore{}
+ 			manager := coreauth.NewManager(store, nil, nil)
+-			h.authManager = manager
++			h.SetAuthManager(manager)
+ 			_, errRegister := manager.Register(context.Background(), &coreauth.Auth{
+ 				ID:       "cred.json",
+ 				FileName: "cred.json",

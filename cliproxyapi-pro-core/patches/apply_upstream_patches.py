@@ -1525,12 +1525,12 @@ service_models = ROOT / 'sdk/cliproxy/service_models.go'
 replace_once(
     service_models,
     '''\tif ctx.Err() != nil {
-\t\treturn
+\t\treturn true
 \t}
 \tmodels = applyOAuthModelAliasForAuth(cfg, provider, authKind, a.Attributes, models)
 ''',
     '''\tif ctx.Err() != nil {
-\t\treturn
+\t\treturn true
 \t}
 \tmodels = s.applyOAuthPolicy(ctx, cfg, a, models)
 \tmodels = applyOAuthModelAliasForAuth(cfg, provider, authKind, a.Attributes, models)
@@ -1660,11 +1660,16 @@ service_executors = ROOT / 'sdk/cliproxy/service_executors.go'
 # gate. Neither layer may adopt a newer publication while an old task finishes.
 insert_before(
     service_executors,
-    'func (s *Service) registerResolvedModelsForAuth(a *coreauth.Auth, providerKey string, models []*ModelInfo) {\n',
-    '''func (s *Service) registerResolvedModelsForCurrentAuth(ctx context.Context, a *coreauth.Auth, fence modelRegistrationFence, providerKey string, models []*ModelInfo) {
-\t_ = s.withCurrentAuthModelCommit(ctx, a, func() {
-\t\ts.registerResolvedModelsForAuthFenced(a, fence, providerKey, models)
+    '// registerResolvedModelsForAuthFenced publishes models only if fence still\n',
+    '''func (s *Service) registerResolvedModelsForCurrentAuth(ctx context.Context, a *coreauth.Auth, fence modelRegistrationFence, providerKey string, models []*ModelInfo) bool {
+\tvar published bool
+\tcurrent := s.withCurrentAuthModelCommit(ctx, a, func() {
+\t\tpublished = s.registerResolvedModelsForAuthFenced(a, fence, providerKey, models)
 \t})
+\tif !current && a != nil {
+\t\tlog.WithFields(log.Fields{"auth_id": a.ID, "provider": providerKey}).Warnf("model registration for auth %s was superseded before publication; discarded the stale queue result", a.ID)
+\t}
+\treturn current && published
 }
 
 ''',
@@ -1777,25 +1782,30 @@ func (s *Service) withCurrentAuthModelCommit(ctx context.Context, auth *coreauth
 \treturn true
 }
 
-func (s *Service) updateAuthForCurrentModelRegistration(ctx context.Context, auth, updated *coreauth.Auth) (*coreauth.Auth, bool) {
+func (s *Service) updateAuthForCurrentModelRegistration(ctx context.Context, auth, updated *coreauth.Auth) (*coreauth.Auth, bool, error) {
 \tif s == nil || s.coreManager == nil || updated == nil {
-\t\treturn nil, false
+\t\treturn nil, false, nil
 \t}
 \tvar result *coreauth.Auth
 \tvar committed bool
 \tvar errUpdate error
 \tif !s.withCurrentAuthModelCommit(ctx, auth, func() {
 \t\tresult, committed, errUpdate = s.coreManager.UpdateIfRegistrationCurrent(ctx, auth, updated)
-\t}) || errUpdate != nil || !committed || result == nil {
-\t\treturn nil, false
+\t}) {
+\t\treturn nil, false, nil
 \t}
-\treturn result, true
+\treturn result, committed, errUpdate
 }
 
-func (s *Service) unregisterModelsForCurrentAuth(ctx context.Context, auth *coreauth.Auth, fence modelRegistrationFence) {
-\t_ = s.withCurrentAuthModelCommit(ctx, auth, func() {
-\t\ts.unregisterModelsForAuthFenced(auth, fence)
+func (s *Service) unregisterModelsForCurrentAuth(ctx context.Context, auth *coreauth.Auth, fence modelRegistrationFence) bool {
+\tvar published bool
+\tcurrent := s.withCurrentAuthModelCommit(ctx, auth, func() {
+\t\tpublished = s.unregisterModelsForAuthFenced(auth, fence)
 \t})
+\tif !current && auth != nil {
+\t\tlog.WithField("auth_id", auth.ID).Warnf("model unregistration for auth %s was superseded before publication; discarded the stale queue result", auth.ID)
+\t}
+\treturn current && published
 }
 
 ''',
@@ -1804,20 +1814,20 @@ func (s *Service) unregisterModelsForCurrentAuth(ctx context.Context, auth *core
 
 replace_once(
     service_models,
-    '''\tfence := newModelRegistrationFence(a)
+    '''\tfence := newModelRegistrationFence(a, cfg)
 \ts.cancelStaleAntigravityProbes(a.ID)
 ''',
     '''\tctx = s.beginAuthModelRegistration(ctx, a.ID)
 \tif !s.isCurrentAuthModelRegistration(ctx, a) {
-\t\treturn
+\t\treturn false
 \t}
-\tfence := newModelRegistrationFence(a)
+\tfence := newModelRegistrationFence(a, cfg)
 \ts.cancelStaleAntigravityProbes(a.ID)
 ''',
     'ctx = s.beginAuthModelRegistration(ctx, a.ID)',
 )
 service_models_text = read(service_models)
-unregister_model_call = '\ts.unregisterModelsForAuthFenced(a, fence)'
+unregister_model_call = 's.unregisterModelsForAuthFenced(a, fence)'
 if service_models_text.count(unregister_model_call) != 5:
     raise SystemExit(
         f'expected five auth model unregister calls in {service_models}, '
@@ -1827,7 +1837,7 @@ write(
     service_models,
     service_models_text.replace(
         unregister_model_call,
-        '\ts.unregisterModelsForCurrentAuth(ctx, a, fence)',
+        's.unregisterModelsForCurrentAuth(ctx, a, fence)',
     ).replace(
         's.registerResolvedModelsForAuthFenced(a, fence,',
         's.registerResolvedModelsForCurrentAuth(ctx, a, fence,',
@@ -1836,16 +1846,16 @@ write(
 
 replace_once(
     service_executors,
-    '\ts.unregisterModelsForAuthFenced(activeAuth, publicationFence)\n\treturn true\n',
-    '\ts.unregisterModelsForCurrentAuth(ctx, activeAuth, publicationFence)\n\treturn true\n',
+    '\treturn true, s.unregisterModelsForAuthFenced(activeAuth, publicationFence)\n',
+    '\treturn true, s.unregisterModelsForCurrentAuth(ctx, activeAuth, publicationFence)\n',
     's.unregisterModelsForCurrentAuth(ctx, activeAuth, publicationFence)',
 )
 
 replace_once(
     service_executors,
-    '''\t\tif updated, committed, errUpdate := s.coreManager.UpdateIfRegistrationCurrent(ctx, a, result.Auth); errUpdate == nil && committed && updated != nil {
+    '''\t\tupdated, committed, errUpdate := s.coreManager.UpdateIfRegistrationCurrent(ctx, a, result.Auth)
 ''',
-    '''\t\tif updated, committed := s.updateAuthForCurrentModelRegistration(ctx, a, result.Auth); committed {
+    '''\t\tupdated, committed, errUpdate := s.updateAuthForCurrentModelRegistration(ctx, a, result.Auth)
 ''',
     's.updateAuthForCurrentModelRegistration(ctx, a, result.Auth)',
 )
@@ -4750,7 +4760,14 @@ stream_text = stream_text.replace(translated_cancellation_block, translated_canc
 native_scanner_outcome = '''				if emitCancellation(scanner.Err()) {
 					return
 				}
-				if errScan := scanner.Err(); errScan != nil {
+				errScan := scanner.Err()
+				if errScan == nil {
+					errScan = upstreamStreamErr
+				}
+				if errScan == nil && ctx.Err() == nil {
+					errScan = statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before message_stop"}
+				}
+				if errScan != nil {
 					errScan = wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, errScan)
 					helps.RecordAPIResponseError(ctx, e.cfg, errScan)
 					streamUsage.PublishFailure(ctx, reporter, errScan)
@@ -4761,7 +4778,14 @@ native_scanner_outcome = '''				if emitCancellation(scanner.Err()) {
 					return
 				}
 '''
-native_scanner_replacement = '''				if terminal.finishScanner(&usageBuffer, scanner.Err()) {
+native_scanner_replacement = '''				errScan := scanner.Err()
+				if errScan == nil {
+					errScan = upstreamStreamErr
+				}
+				if errScan == nil && ctx.Err() == nil {
+					errScan = statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before message_stop"}
+				}
+				if terminal.finishScanner(&usageBuffer, errScan) {
 					return
 				}
 '''
@@ -4771,7 +4795,14 @@ stream_text = stream_text.replace(native_scanner_outcome, native_scanner_replace
 translated_scanner_outcome = '''			if emitCancellation(scanner.Err()) {
 				return
 			}
-			if errScan := scanner.Err(); errScan != nil {
+			errScan := scanner.Err()
+			if errScan == nil {
+				errScan = upstreamStreamErr
+			}
+			if errScan == nil && ctx.Err() == nil {
+				errScan = statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before message_stop"}
+			}
+			if errScan != nil {
 				errScan = wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, errScan)
 				helps.RecordAPIResponseError(ctx, e.cfg, errScan)
 				streamUsage.PublishFailure(ctx, reporter, errScan)
@@ -4782,7 +4813,14 @@ translated_scanner_outcome = '''			if emitCancellation(scanner.Err()) {
 				return
 			}
 '''
-translated_scanner_replacement = '''			if terminal.finishScanner(&usageBuffer, scanner.Err()) {
+translated_scanner_replacement = '''			errScan := scanner.Err()
+			if errScan == nil {
+				errScan = upstreamStreamErr
+			}
+			if errScan == nil && ctx.Err() == nil {
+				errScan = statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before message_stop"}
+			}
+			if terminal.finishScanner(&usageBuffer, errScan) {
 				return
 			}
 '''
@@ -6331,18 +6369,14 @@ handler = ROOT / 'internal/api/handlers/management/handler.go'
 add_go_import(handler, '"net/http"\n', '\t"net/url"\n')
 replace_once(
     handler,
-    '''\tpluginStoreRateLimiter  *pluginstore.GitHubRateLimiter
-\tpluginReleases          pluginReleaseCache
-}
+    '''\tpluginReleases          pluginReleaseCache
 ''',
-    '''\tpluginStoreRateLimiter  *pluginstore.GitHubRateLimiter
-\tpluginReleases          pluginReleaseCache
+    '''\tpluginReleases          pluginReleaseCache
 \tproAuthMutationMu       sync.Mutex
 \tlifecycleContext        context.Context
 \tlifecycleCancel         context.CancelFunc
 \tlifecycleWG             sync.WaitGroup
 \tshutdownOnce            sync.Once
-}
 ''',
     'proAuthMutationMu       sync.Mutex',
 )
@@ -6878,10 +6912,15 @@ replace_once(
 ''',
     'queueAuthRuntimeStats(authSnapshot, authStatsObservedAt)',
 )
+# Preserve upstream's credential-wide refresh after an unauthorized response.
+# Older releases pass CredentialScope directly; v8.0.34 also includes refreshes.
+result_credential_scope = 'result.CredentialScope'
+if '\t\tm.scheduler.upsertAuthResult(authSnapshot, targetModels, credentialScopedResult)\n' in read(auth_conductor):
+    result_credential_scope = 'credentialScopedResult'
 replace_once(
     auth_conductor,
-    '\t\tm.scheduler.upsertAuthResult(authSnapshot, targetModels, result.CredentialScope)\n',
-    '\t\tm.scheduler.upsertAuthResult(m.applyAccountPolicy(authSnapshot), targetModels, result.CredentialScope)\n',
+    f'\t\tm.scheduler.upsertAuthResult(authSnapshot, targetModels, {result_credential_scope})\n',
+    f'\t\tm.scheduler.upsertAuthResult(m.applyAccountPolicy(authSnapshot), targetModels, {result_credential_scope})\n',
     'm.scheduler.upsertAuthResult(m.applyAccountPolicy(authSnapshot),',
 )
 replace_once(
@@ -6992,9 +7031,31 @@ if policy_candidate_append not in auth_conductor_text:
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_refresh.go'
 # Preserve v8.0.17 rejected-token and canceled-refresh state changes, but keep
 # scheduler snapshots policy-aware and acquire them only after releasing m.mu.
-replace_once(
-    auth_conductor,
-    '''\t\t\tcurrent.RejectedAccessToken = failedAccessToken
+if '\t\tcurrent.RejectedAccessToken = failedAccessToken' in read(auth_conductor).splitlines():
+    replace_once(
+        auth_conductor,
+        '''\t\tcurrent.RejectedAccessToken = failedAccessToken
+\t\tm.auths[id] = current
+\t\tif m.scheduler != nil {
+\t\t\tm.scheduler.upsertAuth(current.Clone())
+\t\t}
+\t}
+\tm.mu.Unlock()
+}''',
+        '''\t\tcurrent.RejectedAccessToken = failedAccessToken
+\t\tm.auths[id] = current
+\t\tm.mu.Unlock()
+\t\treleaseMutation()
+\t\tm.RefreshSchedulerEntry(id)
+\t\treturn
+\t}
+\tm.mu.Unlock()
+}''',
+    )
+else:
+    replace_once(
+        auth_conductor,
+        '''\t\t\tcurrent.RejectedAccessToken = failedAccessToken
 \t\t\tm.auths[id] = current
 \t\t\tif m.scheduler != nil {
 \t\t\t\tm.scheduler.upsertAuth(current.Clone())
@@ -7003,7 +7064,7 @@ replace_once(
 \t}
 \tm.mu.Unlock()
 }''',
-    '''\t\t\tcurrent.RejectedAccessToken = failedAccessToken
+        '''\t\t\tcurrent.RejectedAccessToken = failedAccessToken
 \t\t\tm.auths[id] = current
 \t\t\tm.mu.Unlock()
 \t\t\treleaseMutation()
@@ -7013,7 +7074,7 @@ replace_once(
 \t}
 \tm.mu.Unlock()
 }''',
-)
+    )
 replace_once(
     auth_conductor,
     '''\t\t\tm.auths[id] = current
@@ -7471,13 +7532,11 @@ replace_once(
 )
 replace_once(
     ROOT / 'sdk/cliproxy/service_auth.go',
-    '\t\t_, err = s.coreManager.Update(ctx, auth)',
-    '''  var committed *coreauth.Auth
-  committed, err = s.coreManager.UpdateFromSnapshot(ctx, existing, auth)
-  if err == nil { if committed == nil { return nil }; auth = committed }''',
-    '''  var committed *coreauth.Auth
-  committed, err = s.coreManager.UpdateFromSnapshot(ctx, existing, auth)
-  if err == nil { if committed == nil { return nil }; auth = committed }''',
+    '\t\tupdated, err = s.coreManager.Update(ctx, auth)\n',
+    '''\t\tupdated, err = s.coreManager.UpdateFromSnapshot(ctx, existing, auth)
+\t\tif err == nil && updated == nil { return nil }
+''',
+    'updated, err = s.coreManager.UpdateFromSnapshot(ctx, existing, auth)',
 )
 
 
@@ -7527,14 +7586,14 @@ replace_once(
 # Evaluate native and appended plugin catalogs together before aliasing.
 replace_once(
     ROOT / 'sdk/cliproxy/service_executors.go',
-    '''	pluginModels := s.pluginModelsForProvider(providerKey)
+    '''	pluginModels := applyExcludedModels(s.pluginModelsForProvider(providerKey), excluded)
 	if len(pluginModels) == 0 {''',
-    ''' return appendResolvedPluginModels(models, s.pluginModelsForProvider(providerKey))
+    ''' return appendResolvedPluginModels(models, applyExcludedModels(s.pluginModelsForProvider(providerKey), excluded))
 }
 
 func appendResolvedPluginModels(models, pluginModels []*ModelInfo) []*ModelInfo {
 	if len(pluginModels) == 0 {''',
-    ''' return appendResolvedPluginModels(models, s.pluginModelsForProvider(providerKey))
+    ''' return appendResolvedPluginModels(models, applyExcludedModels(s.pluginModelsForProvider(providerKey), excluded))
 }
 
 func appendResolvedPluginModels(models, pluginModels []*ModelInfo) []*ModelInfo {
@@ -7545,10 +7604,8 @@ insert_before(
     'func (s *Service) applyOAuthPolicy(',
     '''// Filter both original catalogs in one evaluation so effective policy counts
 // include plugin contributions. Keep them separate until native aliasing is done.
-func (s *Service) filterOAuthCatalogs(ctx context.Context, cfg *config.Config, auth *coreauth.Auth, provider string, native []*ModelInfo) ([]*ModelInfo, []*ModelInfo) {
+func (s *Service) filterOAuthCatalogs(ctx context.Context, cfg *config.Config, auth *coreauth.Auth, provider string, native []*ModelInfo, excluded []string) ([]*ModelInfo, []*ModelInfo) {
  plugins := s.pluginModelsForProvider(provider)
- excluded := oauthExcludedModelsForConfig(cfg, provider, auth.AuthKind())
- if value := strings.TrimSpace(auth.Attributes["excluded_models"]); value != "" { excluded = strings.Split(value, ",") }
  plugins = applyExcludedModels(plugins, excluded)
  filtered := appendResolvedPluginModels(native, plugins)
  if s.proApp != nil { filtered = s.proApp.FilterModels(ctx, cfg, auth, filtered, s.coreManager) }
@@ -7567,44 +7624,44 @@ replace_once(
     ROOT / 'sdk/cliproxy/service_models.go',
     '''	models = s.applyOAuthPolicy(ctx, cfg, a, models)
 	models = applyOAuthModelAliasForAuth''',
-    '''	models, policyPlugins := s.filterOAuthCatalogs(ctx, cfg, a, provider, models)
+    '''	models, policyPlugins := s.filterOAuthCatalogs(ctx, cfg, a, provider, models, excluded)
 	models = applyOAuthModelAliasForAuth''',
-    '''	models, policyPlugins := s.filterOAuthCatalogs(ctx, cfg, a, provider, models)
+    '''	models, policyPlugins := s.filterOAuthCatalogs(ctx, cfg, a, provider, models, excluded)
 	models = applyOAuthModelAliasForAuth''',
 )
 replace_once(
     ROOT / 'sdk/cliproxy/service_models.go',
-    '\tmodels = s.appendPluginModels(key, models)',
+    '\tmodels = s.appendPluginModels(key, models, excluded)',
     '\tmodels = appendResolvedPluginModels(models, policyPlugins)',
     '\tmodels = appendResolvedPluginModels(models, policyPlugins)',
 )
 replace_all_exact(
     ROOT / 'sdk/cliproxy/service_models.go',
-    'ms = s.appendPluginModels(providerKey, ms)',
-    'ms = s.applyOAuthPolicy(ctx, cfg, a, s.appendPluginModels(providerKey, ms))',
+    'ms = s.appendPluginModels(providerKey, ms, nil)',
+    'ms = s.applyOAuthPolicy(ctx, cfg, a, s.appendPluginModels(providerKey, ms, nil))',
     2,
 )
 replace_all_exact(
     ROOT / 'sdk/cliproxy/service_models.go',
-    'ms = s.appendPluginModels(providerKey, nil)',
-    'ms = s.applyOAuthPolicy(ctx, cfg, a, s.appendPluginModels(providerKey, nil))',
+    'ms = s.appendPluginModels(providerKey, nil, nil)',
+    'ms = s.applyOAuthPolicy(ctx, cfg, a, s.appendPluginModels(providerKey, nil, nil))',
     2,
 )
 replace_all_exact(
     ROOT / 'sdk/cliproxy/service_models.go',
-    'models = s.appendPluginModels(providerKey, nil)',
-    'models = s.applyOAuthPolicy(ctx, cfg, a, s.appendPluginModels(providerKey, nil))',
+    'models = s.appendPluginModels(providerKey, nil, nil)',
+    'models = s.applyOAuthPolicy(ctx, cfg, a, s.appendPluginModels(providerKey, nil, nil))',
     1,
 )
 replace_once(
     ROOT / 'sdk/cliproxy/antigravity_models.go',
     '\tif s.proApp != nil { models = s.proApp.FilterModels(ctx, cfg, auth, models, s.coreManager) }',
-    '\tmodels, policyPlugins := s.filterOAuthCatalogs(ctx, cfg, auth, "antigravity", models)',
-    '\tmodels, policyPlugins := s.filterOAuthCatalogs(ctx, cfg, auth, "antigravity", models)',
+    '\tmodels, policyPlugins := s.filterOAuthCatalogs(ctx, cfg, auth, "antigravity", models, excluded)',
+    '\tmodels, policyPlugins := s.filterOAuthCatalogs(ctx, cfg, auth, "antigravity", models, excluded)',
 )
 replace_once(
     ROOT / 'sdk/cliproxy/antigravity_models.go',
-    '\tmodels = s.appendPluginModels("antigravity", models)',
+    '\tmodels = s.appendPluginModels("antigravity", models, excluded)',
     '\tmodels = appendResolvedPluginModels(models, policyPlugins)',
     '\tmodels = appendResolvedPluginModels(models, policyPlugins)',
 )

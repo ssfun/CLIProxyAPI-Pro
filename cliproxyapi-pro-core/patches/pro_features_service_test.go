@@ -242,7 +242,7 @@ func TestStalePluginAuthUpdateCannotReplaceRecreatedAuth(t *testing.T) {
 	}
 	staleUpdate := stale.Clone()
 	staleUpdate.Label = "stale-plugin-update"
-	if _, committed := service.updateAuthForCurrentModelRegistration(queuedCtx, stale, staleUpdate); committed {
+	if _, committed, _ := service.updateAuthForCurrentModelRegistration(queuedCtx, stale, staleUpdate); committed {
 		t.Fatal("stale plugin auth update committed after the auth ID was recreated")
 	}
 	current, found := manager.GetByID(stale.ID)
@@ -267,7 +267,7 @@ func TestCurrentRegistrationTokenCannotUpdateSupersededAuthInputs(t *testing.T) 
 	}
 	staleUpdate := auth.Clone()
 	staleUpdate.Label = "stale-plugin-update"
-	if _, committed := service.updateAuthForCurrentModelRegistration(registrationCtx, auth, staleUpdate); committed {
+	if _, committed, _ := service.updateAuthForCurrentModelRegistration(registrationCtx, auth, staleUpdate); committed {
 		t.Fatal("current queue token allowed a plugin update from superseded registration inputs")
 	}
 	current, found := manager.GetByID(auth.ID)
@@ -293,7 +293,7 @@ func TestCurrentRegistrationTokenPreservesPublicationFence(t *testing.T) {
 			modelRegistry := GlobalModelRegistry()
 			t.Cleanup(func() { modelRegistry.UnregisterClient(auth.ID) })
 			registrationCtx := service.beginAuthModelRegistration(ctx, auth.ID)
-			fence := newModelRegistrationFence(auth)
+			fence := newModelRegistrationFence(auth, service.currentConfig())
 			modelRegistry.RegisterClient(auth.ID, "claude", []*ModelInfo{{ID: "newer-model"}})
 			if unregister {
 				service.unregisterModelsForCurrentAuth(registrationCtx, auth, fence)
