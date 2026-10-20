@@ -476,3 +476,82 @@ func TestProVirtualConsistencyAtomicWriteFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestProVirtualConsistencyBlankSource(t *testing.T) {
+	for _, scenario := range []string{"empty", "whitespace", "truncate-before-read", "truncate-after-prepare"} {
+		t.Run(scenario, func(t *testing.T) {
+			h, trigger, path, hook := virtualAcceptanceFixture(t, false)
+			snapshot := func() ([]byte, error) {
+				state := make(map[string]*coreauth.Auth)
+				for _, a := range h.authManager.List() {
+					state[a.ID] = a
+				}
+				return json.Marshal(state)
+			}
+			before, e := snapshot()
+			if e != nil {
+				t.Fatal(e)
+			}
+			updates := 0
+			hook.update = func(*coreauth.Auth) { updates++ }
+			var writer *os.File
+			truncate := func() {
+				var err error
+				writer, err = os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = writer.Close() })
+			}
+			initial := ""
+			switch scenario {
+			case "empty", "whitespace":
+				if scenario == "whitespace" {
+					initial = " \n\t\r "
+				}
+				if e = os.WriteFile(path, []byte(initial), 0600); e != nil {
+					t.Fatal(e)
+				}
+			case "truncate-before-read":
+				truncate()
+			}
+			err := h.updateProAuth(context.Background(), trigger.Index, func(a *coreauth.Auth) {
+				setProAuthDisabledState(a, true)
+				if scenario == "truncate-after-prepare" && writer == nil {
+					truncate()
+				}
+			})
+			if writer != nil {
+				initial = `{"type":"gemini-cli","access_token":"refreshed-token","refresh_token":"refresh-secret","custom":"writer-kept","disabled":false,"project_ids":["a","b","c"]}`
+				if _, e = writer.WriteString(initial); e != nil {
+					t.Fatal(e)
+				}
+				if e = writer.Sync(); e != nil {
+					t.Fatal(e)
+				}
+			}
+			virtualAcceptanceRecord(t, h, path, err)
+			if err == nil || !strings.Contains(err.Error(), "source not saved") {
+				t.Errorf("expected source-not-saved rejection, got %v", err)
+			}
+			after, e := snapshot()
+			if e != nil {
+				t.Fatal(e)
+			}
+			if string(before) != string(after) || updates != 0 {
+				t.Errorf("runtime changed on invalid source: updates=%d", updates)
+			}
+			raw, e := os.ReadFile(path)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if string(raw) != initial {
+				t.Errorf("visible source lost external writer or invalid bytes: got %s, want %s", raw, initial)
+			}
+			leftovers, e := filepath.Glob(filepath.Join(filepath.Dir(path), ".pro-auth-*"))
+			if e != nil || len(leftovers) != 0 {
+				t.Errorf("temporary file cleanup: %v %v", leftovers, e)
+			}
+		})
+	}
+}

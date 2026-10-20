@@ -34,11 +34,22 @@ env.setdefault('GOCACHE', '/tmp/cliproxy-go-build-cache')
 with (out / 'events.jsonl').open('w') as f:
     result = subprocess.run(command, cwd=src, env=env, stdout=f, stderr=subprocess.STDOUT)
 failures=[]
+required_tests = {
+    'TestProCreditsRecoveryPublicationOrdering',
+    'TestAntigravityManagerExecuteAndStream_ToppedUpCreditsRecoverDuringQuotaCooldown',
+}
+passed_tests = set()
+skipped_tests = set()
 for line in (out / 'events.jsonl').read_text().splitlines():
     try: event=json.loads(line)
     except ValueError: continue
     if event.get('Action')=='fail': failures.append(event.get('Test', event.get('Package')))
-summary={'exit_code': result.returncode, 'source':str(src), 'source_sha256':hashlib.sha256(code.encode()).hexdigest(), 'fixture_sha256':hashlib.sha256(fixture.read_bytes()).hexdigest(), 'command':command, 'failures':failures}
+    if event.get('Test') in required_tests:
+        if event.get('Action') == 'pass': passed_tests.add(event['Test'])
+        if event.get('Action') == 'skip': skipped_tests.add(event['Test'])
+missing_tests = required_tests - passed_tests
+exit_code = result.returncode or (1 if failures or missing_tests or skipped_tests else 0)
+summary={'exit_code': exit_code, 'process_exit_code': result.returncode, 'source':str(src), 'source_sha256':hashlib.sha256(code.encode()).hexdigest(), 'fixture_sha256':hashlib.sha256(fixture.read_bytes()).hexdigest(), 'command':command, 'failures':failures, 'required_tests': sorted(required_tests), 'passed_required_tests': sorted(passed_tests), 'missing_required_tests': sorted(missing_tests), 'skipped_required_tests': sorted(skipped_tests)}
 (out / 'result.json').write_text(json.dumps(summary,indent=2)+'\n')
 print(json.dumps(summary,indent=2))
-raise SystemExit(result.returncode)
+raise SystemExit(exit_code)

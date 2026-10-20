@@ -14,7 +14,7 @@ CLIProxyAPI Pro 是基于两个 upstream 项目的静态业务模块与定制构
 - 账号巡检结果（配额和账号异常状态）支持持久化到配额管理和认证文件
 - 账号巡检支持自动化启用、禁用、删除、主动刷新令牌
 - 账号巡检针对 Antigravity 软封禁和 xAI 可用性异常提供可选深度检测
-- 调度策略页面统一管理 upstream 路由行为与按 provider 配置的请求状态保护
+- 调度看板展示当前有效限制，支持定向检查和按来源解除限制
 - 二进制内建代理池，把多个 HTTP/SOCKS 节点汇聚为固定的本地 SOCKS5 地址，支持轮询、加权、健康隔离与故障转移
 - 二进制内建 OAuth 账号策略，可按多个提供商的账号套餐配置模型排除、前缀、优先级和调度权重，并同步约束模型列表和账号调度
 
@@ -63,7 +63,7 @@ CLIProxyAPI Pro 是基于两个 upstream 项目的静态业务模块与定制构
 - 内建 OAuth 账号策略，可按 xAI、Codex、Claude、Gemini CLI、Antigravity 和 Kimi OAuth 套餐配置模型排除与账号路由属性。
 - 启动时在内存中强制必要 upstream 配置；仅修改 YAML 中已存在的键，禁止自动新增键。
 - 支持后端账号巡检调度器和执行器，巡检探测前可刷新 token。
-- 支持统一调度策略与请求状态保护 API。
+- 支持调度看板与定向恢复 API。
 - 支持 Komari agent 可选启动。
 - 代理池与 OAuth 账号策略直接编译进所有 Pro 二进制，包括 `_no-plugin` 产物；其配置持久化在 usage SQLite，不写入 `config.yaml` 或认证文件。
 - 将 `/` 跳转到 `/management.html`。
@@ -82,7 +82,7 @@ CLIProxyAPI Pro 是基于两个 upstream 项目的静态业务模块与定制构
 
 - 新增 `/monitoring` 请求监控页面。
 - 新增 `/account-inspection` 账号巡检页面。
-- 新增 `/routing` 调度策略页面。
+- 新增 `/routing` 调度看板，支持定向检查与恢复。
 - 新增 `/proxy-pool` 代理池页面，负责节点配置、连通性测试、运行统计和全局代理接管/恢复。
 - 新增 `/oauth-policy` 可视化配置页，按提供商和 OAuth 套餐编辑模型排除、前缀、优先级、调度权重、自定义套餐和回退策略；旧 `/oauth-model-policy` 自动重定向。
 - 请求量、成功率、延迟、token 和成本统计。

@@ -29,3 +29,10 @@ Run:
 
 The runner only runs its bounded integration scenarios and the existing Manager
 regression. It does not run the full E2E suite.
+
+## Required-test gate failures (recorded before the gate change)
+
+The runner must reject a successful process exit when either required top-level
+test is absent or skipped. Both tests must report pass; a fail event or nonzero
+process exit still fails the run. Verify each missing/skipped test independently
+and keep the actual runner's output receipt for each case.

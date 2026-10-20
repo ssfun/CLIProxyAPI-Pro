@@ -335,6 +335,7 @@ new_customization_paths = (
     'internal/pro/routing/quota_protection_test.go',
     'internal/api/handlers/management/quota_recovery.go',
     'sdk/cliproxy/auth/inspection_refresh_test.go',
+    'internal/runtime/executor/inspection_refresh_compat_test.go',
     'sdk/cliproxy/auth/pinned_execution.go',
     'sdk/cliproxy/pro_features_service_test.go',
 )
@@ -6536,6 +6537,7 @@ queue_go_source('internal/runtime/executor/xai_quota_fence_test.go')
 queue_go_source('internal/api/handlers/management/xai_quota_fence_test.go')
 queue_go_source('internal/api/handlers/management/xai_quota_id_token_http_test.go')
 queue_go_source('sdk/cliproxy/auth/inspection_refresh_test.go')
+queue_go_source('internal/runtime/executor/inspection_refresh_compat_test.go')
 queue_go_source('sdk/cliproxy/auth/pinned_execution.go')
 
 auth_types = ROOT / 'sdk/cliproxy/auth/types.go'
@@ -6644,6 +6646,18 @@ replace_once(
 \t\t}
 ''',
     'mode == updateModeInspectionRefresh && !inspectionRefreshIdentityMatches',
+)
+replace_once(
+    auth_conductor,
+    '\t\tif credChanged || mode == updateModeRefresh {\n',
+    '\t\tif (credChanged || mode == updateModeRefresh) && (mode != updateModeInspectionRefresh || inspectionRefreshRestrictionsMatch(base, existing)) {\n',
+    'if (credChanged || mode == updateModeRefresh) && (mode != updateModeInspectionRefresh',
+)
+replace_once(
+    auth_conductor,
+    '\t\tdevinQuotaRestored := mode == updateModeRefresh && applyDevinQuotaRestoration(auth, existing, time.Now())\n',
+    '\t\tdevinQuotaRestored := (mode == updateModeRefresh || (mode == updateModeInspectionRefresh && inspectionRefreshRestrictionsMatch(base, existing))) && applyDevinQuotaRestoration(auth, existing, time.Now())\n',
+    'devinQuotaRestored := (mode == updateModeRefresh || (mode == updateModeInspectionRefresh',
 )
 replace_once(
     auth_conductor,
@@ -7663,6 +7677,9 @@ queue_go_source('sdk/cliproxy/auth/antigravity_credits_recovery_pro.go')
 queue_go_source('sdk/cliproxy/auth/antigravity_credits_recovery_pro_test.go')
 
 format_go_writes([
+    'sdk/cliproxy/auth/inspection_refresh.go',
+    'sdk/cliproxy/auth/inspection_refresh_test.go',
+    'internal/runtime/executor/inspection_refresh_compat_test.go',
     'internal/runtime/executor/antigravity_executor_credits.go',
     'sdk/cliproxy/auth/antigravity_credits_recovery_pro.go',
     'sdk/cliproxy/auth/antigravity_credits_recovery_pro_test.go',

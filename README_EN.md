@@ -15,7 +15,7 @@ This project does not maintain a full fork of either upstream project. Instead, 
 - A real-model connection test pinned to the selected auth-file `auth_index`, with output, latency, and upstream error details.
 - Optional automatic enable, disable, delete, and token-refresh actions.
 - Optional deep probes for Antigravity soft bans and xAI availability anomalies.
-- A routing-policy page for upstream routing behavior and provider-scoped request-state protection.
+- A scheduling board showing effective restrictions, with directed checks and releases by source.
 - A statically linked proxy pool that aggregates HTTP/SOCKS nodes behind one fixed loopback SOCKS5 endpoint with rotation, health isolation, and failover.
 - A statically linked OAuth account policy that controls model exclusions, prefixes, priorities, and scheduler weights per provider and account plan.
 
@@ -64,7 +64,7 @@ Main capabilities:
 - Includes an OAuth account policy for xAI, Codex, Claude, Gemini CLI, Antigravity, and Kimi account plans.
 - Forces required upstream startup config: `usage-statistics-enabled=true` and the Pro management panel repository.
 - Adds a backend account-inspection scheduler and executor with token refresh before probing.
-- Adds unified routing-policy and request-state-protection APIs.
+- Adds scheduling-board and directed-recovery APIs.
 - Optionally starts the Komari agent.
 - Links the proxy pool and OAuth account policy into every Pro binary, including `_no-plugin` assets; settings live in usage SQLite and are never written to `config.yaml` or auth files.
 - Redirects `/` to `/management.html`.
@@ -83,7 +83,7 @@ Main capabilities:
 
 - Adds the `/monitoring` request monitoring page.
 - Adds the `/account-inspection` account inspection page.
-- Adds the `/routing` routing-policy page.
+- Adds the `/routing` scheduling board with directed checks and recovery.
 - Adds the `/proxy-pool` page for node configuration, connectivity tests, runtime statistics, and global-proxy takeover/restoration.
 - Adds the `/oauth-policy` visual editor for provider-specific OAuth account rules covering model exclusions, prefixes, priorities, weights, custom plans, fallbacks, and effective runtime previews; the legacy route redirects.
 - Shows request count, success rate, latency, token, and cost metrics.

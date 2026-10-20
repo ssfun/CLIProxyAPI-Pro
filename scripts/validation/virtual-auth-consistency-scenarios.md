@@ -69,3 +69,19 @@ development.
 The two additional boundaries are reproduced through the real Handler/Manager
 and local files in `/tmp/pro-virtual-consistency/reviewer_boundary_e2e_test.go`
 before their fixes. Keep red/green JSON and receipts alongside the initial evidence.
+
+## Blank source rejection (P1, recorded before correction)
+
+- An existing empty or whitespace-only source is invalid input, never an empty
+  metadata object. The real Handler/Manager mutation must fail before publishing
+  any runtime changes, preserving the exact source bytes.
+- An external writer opens the source with O_TRUNC before the first source read,
+  keeps that descriptor open through the Pro mutation, then finishes writing
+  refreshed credentials. Pro must reject the transient empty source; the visible
+  path must still refer to the writer's file and contain all refreshed fields.
+- Repeat that interleaving inside the preparation mutation callback, after the
+  initial source read but before the second read. Reject before rename/runtime
+  publication, and preserve the external writer's eventual visible credentials.
+- Compare serialized real Manager snapshots before/after and emit source/runtime
+  receipts. This covers observed blank reads, not arbitrary external writes after
+  the final check and before rename (which remains a documented boundary).

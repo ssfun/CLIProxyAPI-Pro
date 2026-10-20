@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	prorouting "github.com/router-for-me/CLIProxyAPI/v7/internal/pro/routing"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -312,5 +314,206 @@ func TestInspectionRefreshUsesDecisionInstant(t *testing.T) {
 	a := &Auth{Provider: "inspection-clock", Metadata: map[string]any{"expired": now.Add(-time.Hour).Format(time.RFC3339)}}
 	if !m.shouldRefreshForInspection(a, now) {
 		t.Fatal("decision used wall clock instead of supplied now")
+	}
+}
+
+type inspectionRefreshContextExecutor struct {
+	ProviderExecutor
+	refresh func(context.Context, *Auth) (*Auth, error)
+}
+
+func (e inspectionRefreshContextExecutor) Identifier() string { return "codex" }
+func (e inspectionRefreshContextExecutor) Refresh(ctx context.Context, a *Auth) (*Auth, error) {
+	return e.refresh(ctx, a)
+}
+
+func TestInspectionRefreshForceContext(t *testing.T) {
+	type contextKey struct{}
+	for _, force := range []bool{false, true} {
+		t.Run(fmt.Sprint(force), func(t *testing.T) {
+			m := NewManager(nil, nil, nil)
+			ctx := context.WithValue(context.Background(), contextKey{}, "caller")
+			a, err := m.Register(ctx, &Auth{ID: "force-context", Provider: "codex", Status: StatusActive, Runtime: inspectionRefreshDue{}, Metadata: map[string]any{"access_token": "old", "refresh_token": "refresh"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			m.RegisterExecutor(inspectionRefreshContextExecutor{refresh: func(got context.Context, candidate *Auth) (*Auth, error) {
+				if IsForceRefreshContext(got) != force {
+					t.Errorf("native force marker = %v, want %v", IsForceRefreshContext(got), force)
+				}
+				if got.Value(contextKey{}) != "caller" {
+					t.Error("caller context lost")
+				}
+				return candidate, nil
+			}})
+			if force {
+				_, _, err = m.ForceRefreshForInspection(ctx, a.ID)
+			} else {
+				_, _, err = m.RefreshIfDueForInspection(ctx, a.ID)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestInspectionRefreshDevinRecoveryCompatibility(t *testing.T) {
+	withQuotaCooldownEnabled(t)
+	for _, scenario := range []string{"restored", "exhausted", "partial", "stale", "future", "missing-time", "disabled", "disable-during", "new-error", "new-unauthorized", "new-model-unauthorized", "new-quota", "new-model", "replacement", "note", "independent-model", "pro-protection"} {
+		t.Run(scenario, func(t *testing.T) {
+			for _, inspection := range []bool{false, true} {
+				t.Run(fmt.Sprintf("inspection=%v", inspection), func(t *testing.T) {
+					m, a, model, sibling := devinRefreshAuthFixture(t, "inspection-devin-"+scenario+fmt.Sprint(inspection))
+					deadline := time.Now().Add(72 * time.Hour)
+					base := devinExhaustedAuth(t, m, a.ID, model, sibling, deadline)
+					if scenario == "independent-model" {
+						base.ModelStates["independent"] = &ModelState{Status: StatusError, Unavailable: true, NextRetryAfter: deadline, LastError: &Error{HTTPStatus: 503, Message: "independent"}}
+						if _, err := m.Update(context.Background(), base); err != nil {
+							t.Fatal(err)
+						}
+						base, _ = m.GetByID(a.ID)
+					}
+					if scenario == "disabled" {
+						base.Disabled = true
+						base.Status = StatusDisabled
+						if _, err := m.Update(context.Background(), base); err != nil {
+							t.Fatal(err)
+						}
+						base, _ = m.GetByID(a.ID)
+					}
+					current := base.Clone()
+					switch scenario {
+					case "disable-during":
+						current.Disabled = true
+						current.Status = StatusDisabled
+					case "new-error":
+						current.LastError = &Error{HTTPStatus: 503, Message: "new failure"}
+						current.StatusMessage = "new failure"
+					case "new-unauthorized":
+						current.LastError = &Error{HTTPStatus: 401, Message: "new unauthorized"}
+						current.StatusMessage = "new unauthorized"
+					case "new-model-unauthorized":
+						current.ModelStates[sibling].LastError = &Error{HTTPStatus: 401, Message: "new model unauthorized"}
+						current.ModelStates[sibling].StatusMessage = "new model unauthorized"
+					case "new-quota":
+						current.Quota.NextRecoverAt = deadline.Add(time.Hour)
+						current.Quota.ObservedAt = time.Now()
+						current.NextRetryAfter = current.Quota.NextRecoverAt
+					case "new-model":
+						current.ModelStates[sibling].Quota.NextRecoverAt = deadline.Add(time.Hour)
+						current.ModelStates[sibling].NextRetryAfter = deadline.Add(time.Hour)
+					case "replacement":
+						current.Metadata = map[string]any{"access_token": "replacement"}
+					case "note":
+						if current.Metadata == nil {
+							current.Metadata = map[string]any{}
+						}
+						current.Metadata["note"] = "keep note"
+					case "pro-protection":
+						m.mu.Lock()
+						setQuotaProtections(m.auths[a.ID], map[string]prorouting.QuotaProtection{"inspection": {Source: "inspection", RetryAt: deadline.Unix()}})
+						m.mu.Unlock()
+					}
+					if scenario == "disable-during" || scenario == "new-error" || scenario == "new-unauthorized" || scenario == "new-model-unauthorized" || scenario == "new-quota" || scenario == "new-model" || scenario == "replacement" || scenario == "note" || scenario == "pro-protection" {
+						if _, err := m.Update(context.Background(), current); err != nil {
+							t.Fatal(err)
+						}
+					}
+					updated := devinRefreshedObservation(base, "80%", "55%", time.Time{}, time.Time{})
+					if scenario == "new-unauthorized" || scenario == "new-model-unauthorized" {
+						if updated.Metadata == nil {
+							updated.Metadata = map[string]any{}
+						}
+						updated.Metadata["access_token"] = "rotated"
+					}
+					switch scenario {
+					case "exhausted":
+						updated.Quota.Signals["daily_quota_remaining_percent"] = "0%"
+						updated.Quota.Signals["weekly_quota_remaining_percent"] = "0%"
+					case "partial":
+						updated.Quota.Signals["weekly_quota_remaining_percent"] = "0%"
+					case "stale":
+						updated.Quota.ObservedAt = base.Quota.ObservedAt.Add(-time.Hour)
+					case "future":
+						updated.Quota.ObservedAt = time.Now().Add(time.Hour)
+					case "missing-time":
+						updated.Quota.ObservedAt = time.Time{}
+					}
+					before, _ := m.GetByID(a.ID)
+					var err error
+					if inspection {
+						_, err = m.CommitInspectionRefresh(context.Background(), base, updated)
+					} else {
+						_, err = m.UpdateRefreshedAuth(context.Background(), base, updated)
+					}
+					stored, _ := m.GetByID(a.ID)
+					if scenario == "replacement" {
+						if inspection && !errors.Is(err, ErrInspectionAuthChanged) {
+							t.Fatalf("replacement error = %v", err)
+						}
+						if !reflect.DeepEqual(before, stored) {
+							t.Fatal("replacement changed")
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					if scenario == "disabled" || scenario == "disable-during" {
+						if !stored.Disabled || stored.Status != StatusDisabled {
+							t.Fatal("manual disable cleared")
+						}
+						return
+					}
+					if scenario == "new-error" || scenario == "new-unauthorized" || scenario == "new-model-unauthorized" || scenario == "new-quota" || scenario == "new-model" {
+						// Native refresh is the recovery baseline, not the inspection concurrency policy.
+						if !inspection {
+							return
+						}
+						if !stored.Quota.Exceeded {
+							t.Fatal("new restriction cleared")
+						}
+						if (scenario == "new-error" || scenario == "new-unauthorized") && !reflect.DeepEqual(stored.LastError, before.LastError) {
+							t.Fatal("new error cleared")
+						}
+						if scenario == "new-quota" && !stored.Quota.NextRecoverAt.Equal(before.Quota.NextRecoverAt) {
+							t.Fatal("new quota deadline cleared")
+						}
+						if (scenario == "new-model" || scenario == "new-model-unauthorized") && !reflect.DeepEqual(stored.ModelStates[sibling], before.ModelStates[sibling]) {
+							t.Fatal("new model restriction cleared")
+						}
+						return
+					}
+					wantRecovery := scenario == "restored" || scenario == "note" || scenario == "independent-model" || scenario == "pro-protection"
+					if stored.Quota.Exceeded == wantRecovery {
+						t.Fatalf("quota exceeded=%v, want recovery=%v", stored.Quota.Exceeded, wantRecovery)
+					}
+					for _, name := range []string{model, sibling} {
+						state := stored.ModelStates[name]
+						if state == nil || state.Quota.Exceeded == wantRecovery || state.Unavailable == wantRecovery {
+							t.Fatalf("model recovery mismatch: %+v", state)
+						}
+						blocked, _, _ := isAuthBlockedForModel(stored, name, time.Now())
+						wantBlocked := !wantRecovery || scenario == "pro-protection"
+						if blocked != wantBlocked {
+							t.Fatalf("scheduler blocked=%v want=%v", blocked, wantBlocked)
+						}
+					}
+					if scenario == "restored" && (stored.Status != StatusActive || stored.Unavailable || !stored.NextRetryAfter.IsZero()) {
+						t.Fatal("account recovery incomplete")
+					}
+					if scenario == "note" && stored.Metadata["note"] != "keep note" {
+						t.Fatal("note lost")
+					}
+					if scenario == "independent-model" && !stored.ModelStates["independent"].NextRetryAfter.Equal(deadline) {
+						t.Fatal("independent cooldown lost")
+					}
+					if scenario == "pro-protection" && !reflect.DeepEqual(proroutingQuotaProtections(stored), proroutingQuotaProtections(before)) {
+						t.Fatal("Pro protection lost")
+					}
+				})
+			}
+		})
 	}
 }

@@ -63,6 +63,19 @@ func reconcileInspectionRefreshStatus(base, current, merged *Auth) {
 	merged.StatusMessage = ""
 }
 
+// inspectionRefreshRestrictionsMatch fences recovery against limitations recorded
+// after the request snapshot. It runs under the manager lock; unrelated metadata
+// edits and Pro protections do not prevent native credential-quota restoration.
+func inspectionRefreshRestrictionsMatch(base, current *Auth) bool {
+	return base != nil && current != nil &&
+		base.Disabled == current.Disabled && base.Status == current.Status &&
+		base.StatusMessage == current.StatusMessage && base.Unavailable == current.Unavailable &&
+		base.NextRetryAfter.Equal(current.NextRetryAfter) &&
+		reflect.DeepEqual(base.LastError, current.LastError) &&
+		reflect.DeepEqual(base.Quota, current.Quota) &&
+		reflect.DeepEqual(base.ModelStates, current.ModelStates)
+}
+
 func inspectionRefreshIdentityMatches(base, current *Auth) bool {
 	if base == nil || current == nil || base.ID != current.ID || base.Index != current.Index ||
 		base.Provider != current.Provider || base.FileName != current.FileName ||
@@ -120,6 +133,9 @@ func (m *Manager) refreshForInspection(ctx context.Context, id string, force boo
 
 	// Executors may mutate their input even on error; keep base immutable.
 	cloned := base.Clone()
+	if force {
+		ctx = WithForceRefresh(ctx)
+	}
 	updated, err := exec.Refresh(ctx, cloned)
 	if err != nil && errors.Is(err, context.Canceled) {
 		return cloned, false, err

@@ -188,7 +188,7 @@ func readProAuthSource(path string) (*proAuthSourceSnapshot, error) {
 func decodeProAuthSourceMetadata(raw []byte) (map[string]any, error) {
 	metadata := make(map[string]any)
 	if len(bytes.TrimSpace(raw)) == 0 {
-		return metadata, nil
+		return nil, fmt.Errorf("plugin virtual auth source is empty or whitespace-only")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
