@@ -202,7 +202,7 @@ Core 内建回环 SOCKS5 代理池以及 xAI、Codex、Claude、Gemini CLI、Ant
 
 巡检设置中的 `workers` 是所有 provider 合计的探测总并发，范围 `1–8`、默认 `4`；`providerWorkers` 是单个 provider 的探测并发，范围 `1–4`、默认 `2`。普通探测、深度探测、xAI 探测和探测前 token refresh 共用这两个限制，不再使用单独的串行闸门。`deleteWorkers` 范围 `1–4`、默认 `4`，同时约束自动操作和管理端手动批量操作。调度设置保存在账号巡检调度 JSON 中，不读取或修改 `config.yaml`。
 
-探测账号前，调度器会在认证记录本来已经进入 upstream 正常刷新窗口时尝试刷新 auth。巡检刷新路径复用 upstream provider 刷新逻辑和持久化逻辑，允许 disabled 账号，跳过 API key 账号、未到刷新窗口的账号，并遵守 `NextRefreshAfter`。刷新成功后使用刷新后的 auth 探测；刷新失败时保留账号，并跳过该账号本次探测。
+探测账号前，调度器会在认证记录本来已经进入 upstream 正常刷新窗口时尝试刷新 auth。巡检刷新路径直接复用 upstream 到期判断和 provider 刷新逻辑，保留巡检身份校验及刷新结果合并。跳过 API key 账号、未到刷新窗口的账号，并遵守 `NextRefreshAfter`；普通 disabled 账号可刷新，但 disabled 且存在 invalid-grant 失败的账号不自动重试，手动强制刷新仍可尝试。刷新成功后使用刷新后的 auth 探测；刷新失败时保留账号，并跳过该账号本次探测。
 
 Docker 镜像中的调度文件默认位置：
 
@@ -213,6 +213,8 @@ Docker 镜像中的调度文件默认位置：
 原生二进制未设置 `USAGE_DATA_DIR` 时，调度文件和结果快照默认写入 `config.yaml` 同目录下的 `usage/`。如需自定义，可设置 `ACCOUNT_INSPECTION_SCHEDULE_PATH`。
 
 最近一次已结束的巡检结果会单独持久化到同一数据目录下的 `account-inspection-snapshot.json`，文件权限为 `0600`。进程重启或 usage 导入恢复后，该快照会标记为只读；下一次完整巡检结束时覆盖。可通过 `ACCOUNT_INSPECTION_SNAPSHOT_PATH` 自定义路径。
+
+共享源文件的虚拟账号启停先保存源文件，再同步各运行态身份。文件保存失败时不修改运行态；若保存成功但部分身份同步失败，操作会报告未完全同步，已保存状态和已完成更新不会回滚，可以重新操作以重试。该过程不保证多个身份同时切换，也不会新增后台自动重试。单个虚拟身份的巡检错误仍仅更新该身份，不写入共享源文件。
 
 ### 调度看板
 

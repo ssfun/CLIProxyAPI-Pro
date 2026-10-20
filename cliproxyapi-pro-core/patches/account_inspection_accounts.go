@@ -564,6 +564,9 @@ func accountInspectionObservationMatchesAuth(authID, authIndex, provider, fileNa
 }
 
 func accountInspectionAccountMatchesAuth(account accountInspectionAccount, auth *coreauth.Auth) bool {
+	if account.Auth != nil && account.Auth.RegistrationEpoch != 0 && (auth == nil || account.Auth.RegistrationEpoch != auth.RegistrationEpoch) {
+		return false
+	}
 	return accountInspectionObservationMatchesAuth(
 		account.AuthID,
 		account.AuthIndex,
@@ -622,7 +625,12 @@ func (s *accountInspectionScheduler) clearInspectionAuthError(ctx context.Contex
 	if !isInspectionAuthErrorCode(authInspectionLastErrorCode(auth)) {
 		return
 	}
-	err := s.h.updateProErrorAuth(ctx, account.AuthIndex, func(auth *coreauth.Auth) {
+	err := s.h.updateProErrorAuthObserved(ctx, auth, func(current *coreauth.Auth) error {
+		if !accountInspectionAccountMatchesAuth(account, current) || !isInspectionAuthErrorCode(authInspectionLastErrorCode(current)) {
+			return errAccountInspectionResultStale
+		}
+		return nil
+	}, func(auth *coreauth.Auth) {
 		if auth.Disabled {
 			auth.Status = coreauth.StatusDisabled
 		} else {
@@ -984,7 +992,17 @@ func (s *accountInspectionScheduler) executeAction(ctx context.Context, result a
 				return fmt.Errorf("account has an inspection quota protection; use the versioned routing release action")
 			}
 		}
-		return s.h.updateProAuth(ctx, result.AuthIndex, func(auth *coreauth.Auth) {
+		return s.h.updateProAuthObserved(ctx, auth, func(current *coreauth.Auth) error {
+			if !accountInspectionResultMatchesAuth(result, current) {
+				return errAccountInspectionResultStale
+			}
+			if action == accountInspectionActionEnable && !current.Disabled {
+				if _, ok := prorouting.QuotaProtections(current.Metadata)[inspectionQuotaSource]; ok {
+					return fmt.Errorf("account has an inspection quota protection; use the versioned routing release action")
+				}
+			}
+			return nil
+		}, func(auth *coreauth.Auth) {
 			setProAuthDisabledState(auth, action == accountInspectionActionDisable)
 		})
 	case accountInspectionActionDelete:

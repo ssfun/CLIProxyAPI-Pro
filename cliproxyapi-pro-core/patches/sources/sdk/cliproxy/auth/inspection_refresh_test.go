@@ -218,3 +218,99 @@ func TestInspectionRefreshRecoversObservedError(t *testing.T) {
 		}
 	}
 }
+
+func TestInspectionRefreshNativePolicy(t *testing.T) {
+	for _, scenario := range []string{"siwc-due", "outer-due", "siwc-fresh", "devin-due", "devin-wait", "disabled", "invalid-grant", "forced-invalid-grant", "backoff", "evaluator-deny", "evaluator-allow", "ineffective"} {
+		t.Run(scenario, func(t *testing.T) {
+			now := time.Now()
+			a := &Auth{ID: scenario, Provider: "codex", Status: StatusActive, Metadata: map[string]any{"access_token": "outer", "refresh_token": "refresh", "expired": now.Add(168 * time.Hour).Format(time.RFC3339)}}
+			want := true
+			switch scenario {
+			case "siwc-due", "outer-due", "siwc-fresh":
+				expiry := now.Add(168 * time.Hour)
+				if scenario == "siwc-due" {
+					expiry = now.Add(-time.Hour)
+				}
+				a.Metadata["siwc"] = map[string]any{"access_token": "inner", "refresh_token": "inner-refresh", "client_id": "client", "expired": expiry.Format(time.RFC3339)}
+				a.Metadata["use_siwc"] = true
+				if scenario == "outer-due" {
+					a.Metadata["expired"] = now.Add(-time.Hour).Format(time.RFC3339)
+				}
+				want = scenario != "siwc-fresh"
+			case "devin-due", "devin-wait":
+				a.Provider = "devin"
+				a.LastRefreshedAt = now.Add(-2 * time.Hour)
+				if scenario == "devin-wait" {
+					a.LastRefreshedAt = now
+					want = false
+				}
+				a.Quota = QuotaState{Exceeded: true, Reason: "credential_quota", NextRecoverAt: now.Add(24 * time.Hour), ObservedAt: a.LastRefreshedAt}
+			case "disabled", "invalid-grant", "forced-invalid-grant":
+				a.Disabled = true
+				a.Status = StatusDisabled
+				a.Runtime = inspectionRefreshDue{}
+				if scenario != "disabled" {
+					a.LastError = &Error{HTTPStatus: 400, Message: "invalid_grant"}
+				}
+				want = scenario != "invalid-grant"
+			case "backoff":
+				a.Runtime = inspectionRefreshDue{}
+				a.NextRefreshAfter = now.Add(time.Hour)
+				want = false
+			case "evaluator-deny":
+				a.Runtime = inspectionRefreshNever{}
+				a.Metadata["expired"] = now.Add(-time.Hour).Format(time.RFC3339)
+				want = false
+			case "evaluator-allow", "ineffective":
+				a.Runtime = inspectionRefreshDue{}
+			}
+			m := NewManager(nil, nil, nil)
+			registered, err := m.Register(context.Background(), a)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			m.RegisterExecutor(inspectionRefreshExecutor{provider: a.Provider, refresh: func(candidate *Auth) (*Auth, error) {
+				calls++
+				candidate.Metadata["access_token"] = "renewed"
+				return candidate, nil
+			}})
+			var refreshed bool
+			if scenario == "forced-invalid-grant" {
+				_, refreshed, err = m.ForceRefreshForInspection(context.Background(), registered.ID)
+			} else {
+				_, refreshed, err = m.RefreshIfDueForInspection(context.Background(), registered.ID)
+			}
+			if err != nil || refreshed != want || (calls == 1) != want {
+				t.Fatalf("refresh=%v calls=%d err=%v want=%v", refreshed, calls, err, want)
+			}
+			current, _ := m.GetByID(registered.ID)
+			if want && current.Metadata["access_token"] != "renewed" {
+				t.Fatal("executor result not committed")
+			}
+			if !want && current.Metadata["access_token"] != "outer" {
+				t.Fatal("skipped credential mutated")
+			}
+			if a.Disabled && (!current.Disabled || current.Status != StatusDisabled) {
+				t.Fatal("disabled state lost")
+			}
+			if scenario == "ineffective" && !current.NextRefreshAfter.After(now) {
+				t.Fatal("ineffective refresh missing backoff")
+			}
+		})
+	}
+}
+
+type inspectionRefreshNever struct{}
+
+func (inspectionRefreshNever) ShouldRefresh(time.Time, *Auth) bool { return false }
+
+func TestInspectionRefreshUsesDecisionInstant(t *testing.T) {
+	now := time.Now().Add(24 * time.Hour)
+	m := NewManager(nil, nil, nil)
+	RegisterRefreshLeadProvider("inspection-clock", func() *time.Duration { lead := time.Minute; return &lead })
+	a := &Auth{Provider: "inspection-clock", Metadata: map[string]any{"expired": now.Add(-time.Hour).Format(time.RFC3339)}}
+	if !m.shouldRefreshForInspection(a, now) {
+		t.Fatal("decision used wall clock instead of supplied now")
+	}
+}

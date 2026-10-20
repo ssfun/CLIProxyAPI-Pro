@@ -193,7 +193,7 @@ It supports provider filtering, two-level probe concurrency, retry/timeout setti
 
 In the inspection settings, `workers` is the global probe concurrency across all providers (`1–8`, default `4`), while `providerWorkers` is the per-provider probe concurrency (`1–4`, default `2`). Regular probes, deep probes, xAI probes, and pre-probe token refreshes share these two limits and have no separate serialization gate. `deleteWorkers` (`1–4`, default `4`) limits both automatic actions and manual bulk actions from the management UI. These settings are stored in the account-inspection schedule JSON; they neither read nor modify `config.yaml`.
 
-Before probing an account, the scheduler can refresh its auth record when it is already in the normal upstream refresh window. This inspection refresh path reuses upstream provider refresh logic and persistence, allows disabled accounts, skips API-key accounts, skips accounts not yet due, and respects `NextRefreshAfter`. If refresh succeeds, probing uses the refreshed auth; if refresh fails, the scheduler keeps the account and skips probing it for that run.
+Before probing an account, the scheduler can refresh its auth record when it is already in the normal upstream refresh window. The inspection path directly reuses upstream due-time decisions and provider refresh logic while retaining inspection identity checks and refresh-result merging. It skips API-key accounts and accounts not yet due, and respects `NextRefreshAfter`. Ordinary disabled accounts can refresh; disabled accounts with an invalid-grant failure are not retried automatically. Manual forced refresh remains available. If refresh succeeds, probing uses the refreshed auth; if refresh fails, the scheduler keeps the account and skips probing it for that run.
 
 In Docker images, the schedule file defaults to:
 
@@ -204,6 +204,8 @@ In Docker images, the schedule file defaults to:
 For native binaries without `USAGE_DATA_DIR`, the schedule and result snapshot default to `usage/` beside `config.yaml`. Override the schedule with `ACCOUNT_INSPECTION_SCHEDULE_PATH` if needed.
 
 The latest finished inspection result is persisted separately as `account-inspection-snapshot.json` in the same data directory with mode `0600`. A snapshot restored after process restart or usage import is read-only and is replaced when the next full inspection finishes. Override its path with `ACCOUNT_INSPECTION_SNAPSHOT_PATH` if needed.
+
+Shared-source virtual credential enable/disable operations save the source file before synchronizing runtime identities. A source-save failure leaves runtime state unchanged. If the source is saved but some identities fail to synchronize, the operation reports incomplete synchronization and preserves the saved state and completed updates; repeat the operation to retry. Identities do not switch atomically, and no new background retry is scheduled. An inspection error for one virtual identity remains local to that identity and is not written to the shared source.
 
 ### Scheduling board
 

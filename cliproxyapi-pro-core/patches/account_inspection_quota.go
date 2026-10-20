@@ -72,7 +72,12 @@ func (s *accountInspectionScheduler) cleanupLegacyQuotaCacheFromAuth(ctx context
 	if _, exists := auth.Metadata["quota_cache"]; !exists {
 		return nil
 	}
-	return s.h.updateProAuth(ctx, account.AuthIndex, func(auth *coreauth.Auth) {
+	return s.h.updateProAuthObserved(ctx, auth, func(current *coreauth.Auth) error {
+		if !accountInspectionAccountMatchesAuth(account, current) {
+			return errAccountInspectionResultStale
+		}
+		return nil
+	}, func(auth *coreauth.Auth) {
 		if auth.Metadata == nil {
 			return
 		}

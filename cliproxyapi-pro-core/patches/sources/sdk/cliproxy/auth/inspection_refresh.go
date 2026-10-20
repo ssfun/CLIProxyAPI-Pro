@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
 	"time"
 )
 
@@ -79,62 +78,11 @@ func inspectionRefreshIdentityMatches(base, current *Auth) bool {
 	return true
 }
 
+// shouldRefreshForInspection shares the native refresh policy, including provider
+// specific scheduling and the caller's decision instant. Manual refresh bypasses
+// this policy at the call site while retaining guarded credential commits.
 func (m *Manager) shouldRefreshForInspection(a *Auth, now time.Time) bool {
-	if a == nil {
-		return false
-	}
-	if hasUnauthorizedAuthFailure(a) {
-		return false
-	}
-	if !a.NextRefreshAfter.IsZero() && now.Before(a.NextRefreshAfter) {
-		return false
-	}
-	if evaluator, ok := a.Runtime.(RefreshEvaluator); ok && evaluator != nil {
-		return evaluator.ShouldRefresh(now, a)
-	}
-
-	lastRefresh := a.LastRefreshedAt
-	if lastRefresh.IsZero() {
-		if ts, ok := authLastRefreshTimestamp(a); ok {
-			lastRefresh = ts
-		}
-	}
-
-	expiry, hasExpiry := a.ExpirationTime()
-
-	if interval := authPreferredInterval(a); interval > 0 {
-		if hasExpiry && !expiry.IsZero() {
-			if !expiry.After(now) {
-				return true
-			}
-			if expiry.Sub(now) <= interval {
-				return true
-			}
-		}
-		if lastRefresh.IsZero() {
-			return true
-		}
-		return now.Sub(lastRefresh) >= interval
-	}
-
-	provider := strings.ToLower(a.Provider)
-	lead := ProviderRefreshLead(provider, a.Runtime)
-	if lead == nil {
-		return false
-	}
-	if *lead <= 0 {
-		if hasExpiry && !expiry.IsZero() {
-			return now.After(expiry)
-		}
-		return false
-	}
-	if hasExpiry && !expiry.IsZero() {
-		return time.Until(expiry) <= *lead
-	}
-	if !lastRefresh.IsZero() {
-		return now.Sub(lastRefresh) >= *lead
-	}
-	return true
+	return m.shouldRefresh(a, now)
 }
 
 func (m *Manager) RefreshIfDueForInspection(ctx context.Context, id string) (*Auth, bool, error) {

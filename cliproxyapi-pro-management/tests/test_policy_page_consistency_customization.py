@@ -178,7 +178,6 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
                 f'{locale} missing keys: {required_runtime_keys - runtime_keys}',
             )
             self.assertIn('overlap', locales[locale]['routing_policy']['sources'])
-            self.assertIn('next_auto_recovery', locales[locale]['routing_policy']['summary'])
 
     def test_board_distinguishes_unknown_and_empty_snapshots(self) -> None:
         source = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()

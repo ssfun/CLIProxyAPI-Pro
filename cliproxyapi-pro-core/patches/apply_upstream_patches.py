@@ -262,6 +262,8 @@ new_customization_paths = (
     'internal/api/handlers/management/pro_plugin_quota.go',
     'internal/api/handlers/management/pro_plugin_quota_test.go',
     'internal/api/handlers/management/pro_auth_mutation.go',
+    'internal/api/handlers/management/pro_auth_mutation_integration_test.go',
+    'internal/api/handlers/management/pro_virtual_auth_consistency_integration_test.go',
     'internal/api/handlers/management/pro_features.go',
     'internal/api/handlers/management/pro_management_runtime.go',
     'internal/api/handlers/management/routing_policy.go',
@@ -2014,6 +2016,8 @@ for source_name, target_name in (
     ('auth_file_connection.go', 'auth_file_connection.go'),
     ('auth_file_connection_test.go', 'auth_file_connection_test.go'),
     ('pro_auth_mutation.go', 'pro_auth_mutation.go'),
+    ('pro_auth_mutation_integration_test.go', 'pro_auth_mutation_integration_test.go'),
+    ('pro_virtual_auth_consistency_integration_test.go', 'pro_virtual_auth_consistency_integration_test.go'),
     ('pro_management_runtime.go', 'pro_management_runtime.go'),
 ):
     write(
@@ -7699,6 +7703,8 @@ format_go_writes([
     'internal/api/handlers/management/pro_plugin_quota.go',
     'internal/api/handlers/management/pro_plugin_quota_test.go',
     'internal/api/handlers/management/pro_auth_mutation.go',
+    'internal/api/handlers/management/pro_auth_mutation_integration_test.go',
+    'internal/api/handlers/management/pro_virtual_auth_consistency_integration_test.go',
     'internal/api/handlers/management/pro_features.go',
     'internal/api/handlers/management/pro_management_runtime.go',
     'internal/api/handlers/management/routing_policy.go',
