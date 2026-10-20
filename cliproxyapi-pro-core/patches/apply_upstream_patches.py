@@ -328,6 +328,8 @@ new_customization_paths = (
 	'sdk/cliproxy/runtime_proxy_override_test.go',
 	'sdk/cliproxy/auth/scheduler_runtime_state.go',
     'sdk/cliproxy/auth/inspection_refresh.go',
+    'sdk/cliproxy/auth/antigravity_credits_recovery_pro.go',
+    'sdk/cliproxy/auth/antigravity_credits_recovery_pro_test.go',
     'sdk/cliproxy/auth/pro_quota_protection.go',
     'internal/pro/routing/quota_protection.go',
     'internal/pro/routing/quota_protection_test.go',
@@ -7650,7 +7652,20 @@ replace_once(
     '\tmodels = appendResolvedPluginModels(models, policyPlugins)',
 )
 
+# Recovery may observe an unavailable hint just before a balance refresh publishes.
+# Invalidate only the observation that justified cleanup, in local and Home modes.
+replace_once(
+    ROOT / 'internal/runtime/executor/antigravity_executor_credits.go',
+    '\t\t\tcliproxyauth.SetAntigravityCreditsHint(authID, cliproxyauth.AntigravityCreditsHint{})',
+    '\t\t\tcliproxyauth.CompareAndSwapAntigravityCreditsHint(authID, hint, cliproxyauth.AntigravityCreditsHint{})',
+)
+queue_go_source('sdk/cliproxy/auth/antigravity_credits_recovery_pro.go')
+queue_go_source('sdk/cliproxy/auth/antigravity_credits_recovery_pro_test.go')
+
 format_go_writes([
+    'internal/runtime/executor/antigravity_executor_credits.go',
+    'sdk/cliproxy/auth/antigravity_credits_recovery_pro.go',
+    'sdk/cliproxy/auth/antigravity_credits_recovery_pro_test.go',
     'sdk/cliproxy/auth/conductor_lifecycle.go',
     'sdk/cliproxy/service_auth.go',
     'internal/cache/runtime_proxy_generation_pro.go',

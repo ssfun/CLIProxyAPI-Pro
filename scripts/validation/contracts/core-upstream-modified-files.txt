@@ -37,6 +37,7 @@ internal/redisqueue/plugin.go
 internal/redisqueue/queue.go
 internal/runtime/executor/aistudio_executor.go
 internal/runtime/executor/antigravity_executor.go
+internal/runtime/executor/antigravity_executor_credits.go
 internal/runtime/executor/claude_executor_auth.go
 internal/runtime/executor/claude_executor_execute.go
 internal/runtime/executor/claude_executor_stream.go

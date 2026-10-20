@@ -408,6 +408,12 @@ else
 fi
 
 run_timed "CGO and non-CGO builds" build_candidate
+credits_e2e_args=(--src "${upstream_root}" --output "${validation_tmp}/antigravity-credits-recovery")
+if [[ "${VALIDATION_RACE:-0}" == "1" ]]; then
+  credits_e2e_args+=(--race)
+fi
+run_timed "Antigravity credits recovery ordering HTTP E2E" \
+  python3 "${repo_root}/scripts/validation/e2e/antigravity-credits-recovery/run.py" "${credits_e2e_args[@]}"
 if [[ "${VALIDATION_RELEASE_HTTP_GATES:-0}" == "1" ]]; then
   run_timed "retain release quota HTTP fixture" build_release_quota_fixture
 fi
