@@ -4,6 +4,8 @@ Customization layer for upstream `router-for-me/Cli-Proxy-API-Management-Center`
 
 This directory does not vendor the upstream application. It keeps overlay files plus a patch script that can be applied to a clean upstream checkout during local development or GitHub Actions release builds.
 
+Pro locale resources match upstream: Simplified Chinese, Traditional Chinese, English, Russian, Vietnamese, and Korean. The public API key usage page also supports language switching.
+
 ## What this customization adds
 
 ### Proxy pool page

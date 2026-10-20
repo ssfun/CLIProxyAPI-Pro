@@ -4,6 +4,8 @@
 
 本目录不保存 upstream 应用完整源码，而是维护 overlay 文件和补丁脚本，在本地开发或 GitHub Actions 发布构建时应用到干净的 upstream checkout 上。
 
+Pro 多语言资源与 upstream 保持一致，覆盖简体中文、繁体中文、英文、俄文、越南语和韩语。公开密钥用量查询页也支持语言切换。
+
 ## 定制内容
 
 ### 代理池页面

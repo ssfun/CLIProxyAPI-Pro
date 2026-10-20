@@ -1,5 +1,5 @@
-export const formatTokenCount = (value: number) =>
-  Math.max(0, Math.round(Number(value) || 0)).toLocaleString();
+export const formatTokenCount = (value: number, language?: string) =>
+  Math.max(0, Math.round(Number(value) || 0)).toLocaleString(language);
 
 export const getCacheHitRate = (
   row: { cacheInputTokens: number; cachedTokens: number }

@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useLanguageStore } from '@/stores';
+import { LANGUAGE_ORDER, LANGUAGE_LABEL_KEYS } from '@/utils/constants';
 import styles from './SelfUsagePage.module.scss';
-import { formatTokenCount, getCacheHitRate } from './selfUsagePresentation';
+import { formatTokenCount as formatTokens, getCacheHitRate } from './selfUsagePresentation';
 import { startPolling } from '@/pro/shared/polling';
 import { createSelfUsageRefresh, parseSelfUsageNotification } from './selfUsageRefresh';
 
@@ -37,7 +40,12 @@ type Event = {
   estimatedCost?: number;
   failed: boolean;
 };
-type Events = { items: Event[]; hasMore: boolean; snapshotAtMs: number; generation?: number };
+type Events = {
+  items: Event[];
+  hasMore: boolean;
+  snapshotAtMs: number;
+  generation?: number;
+};
 type Quota = {
   enforced: boolean;
   state: string;
@@ -59,17 +67,6 @@ type Quota = {
     };
   };
 };
-const number = (value: number) =>
-  new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value);
-const money = (value: number) => `$${value.toFixed(4)}`;
-const date = (value: number) => new Date(value).toLocaleString();
-const periodUnit = (unit?: string) =>
-  (
-    ({ minute: '分钟', hour: '小时', day: '天', week: '周', month: '月' }) as Record<string, string>
-  )[unit ?? ''] ??
-  unit ??
-  '';
-
 class QueryError extends Error {
   constructor(
     public status: number,
@@ -77,12 +74,12 @@ class QueryError extends Error {
   ) {
     super(
       status === 401
-        ? 'API key 无效或已被移除，请重新输入。'
+        ? 'self_usage.error_invalid_key'
         : status === 404
-          ? '当前服务尚未提供公开查询接口，请更新 Core。'
+          ? 'self_usage.error_update_core'
           : status === 429
-            ? '查询繁忙，请稍后重试。'
-            : '暂时无法读取数据，请稍后重试。'
+            ? 'self_usage.error_busy'
+            : 'self_usage.error_unavailable'
     );
   }
 }
@@ -103,6 +100,24 @@ async function request<T>(key: string, path: string, signal: AbortSignal): Promi
 }
 
 export function SelfUsagePage() {
+  const { t, i18n } = useTranslation();
+  const language = i18n.resolvedLanguage ?? i18n.language;
+  const setLanguage = useLanguageStore((state) => state.setLanguage);
+  const number = (value: number) =>
+    new Intl.NumberFormat(language, { maximumFractionDigits: 2 }).format(value);
+  const money = (value: number) =>
+    new Intl.NumberFormat(language, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 4,
+      maximumFractionDigits: 4,
+    }).format(value);
+  const date = (value: number) => new Date(value).toLocaleString(language);
+  const formatTokenCount = (value: number) => formatTokens(value, language);
+  const periodUnit = (unit?: string) =>
+    ['minute', 'hour', 'day', 'week', 'month'].includes(unit ?? '')
+      ? t(`self_usage.unit_${unit}`)
+      : (unit ?? '');
   const [draft, setDraft] = useState('');
   const [key, setKey] = useState('');
   const [days, setDays] = useState(7);
@@ -122,11 +137,11 @@ export function SelfUsagePage() {
 
   useEffect(() => {
     const previous = document.title;
-    document.title = '密钥用量查询 · CLIProxyAPI Pro';
+    document.title = `${t('self_usage.title')} · CLIProxyAPI Pro`;
     return () => {
       document.title = previous;
     };
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -159,7 +174,7 @@ export function SelfUsagePage() {
         setError(cause.message);
         return;
       }
-      setError(cause instanceof Error ? cause.message : '查询失败');
+      setError(cause instanceof Error ? cause.message : 'self_usage.error_unavailable');
     };
     const queue = createSelfUsageRefresh(
       async (requestSignal, isCurrent) => {
@@ -202,7 +217,7 @@ export function SelfUsagePage() {
             setQuota(nextQuota.value);
             setQuotaError('');
           } else {
-            setQuotaError('配额暂时不可用');
+            setQuotaError('self_usage.quota_unavailable');
             if (nextQuota.reason instanceof QueryError && nextQuota.reason.status === 401)
               handleError(nextQuota.reason);
           }
@@ -267,7 +282,7 @@ export function SelfUsagePage() {
         });
         if (!response.ok) throw new QueryError(response.status);
         if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream'))
-          throw new Error('实时连接不可用');
+          throw new Error('self_usage.error_stream_unavailable');
         if (signal.aborted || current.signal.aborted) return;
         setLive(true);
         const reader = response.body.getReader();
@@ -290,7 +305,7 @@ export function SelfUsagePage() {
               }
               end = pending.indexOf('\n\n');
             }
-            if (pending.length > 65536) throw new Error('实时连接响应异常');
+            if (pending.length > 65536) throw new Error('self_usage.error_stream_response');
           }
         } finally {
           await reader.cancel().catch(() => {});
@@ -375,7 +390,7 @@ export function SelfUsagePage() {
           return;
         }
         if (cause instanceof QueryError && cause.status === 401) setKey('');
-        setError(cause instanceof Error ? cause.message : '查询失败');
+        setError(cause instanceof Error ? cause.message : 'self_usage.error_unavailable');
       }
     } finally {
       if (!controller.signal.aborted && revision.current === current) setLoading(false);
@@ -386,7 +401,7 @@ export function SelfUsagePage() {
   const metrics = budget
     ? [
         {
-          label: '请求次数',
+          label: t('self_usage.requests'),
           used: budget.usage.requestsUsed,
           limit: budget.requests,
           remaining: budget.usage.requestsRemaining,
@@ -400,7 +415,7 @@ export function SelfUsagePage() {
           format: number,
         },
         {
-          label: '费用额度',
+          label: t('self_usage.cost_limit'),
           used: budget.usage.costUsed,
           limit: budget.cost,
           remaining: budget.usage.costRemaining,
@@ -413,25 +428,38 @@ export function SelfUsagePage() {
       <header className={styles.header}>
         <div>
           <span className={styles.eyebrow}>CLIProxyAPI Pro</span>
-          <h1>密钥用量查询</h1>
-          <p>查询自己的配额、使用统计与实时请求记录</p>
+          <h1>{t('self_usage.title')}</h1>
+          <p>{t('self_usage.subtitle')}</p>
         </div>
-        {key && (
-          <button
-            onClick={() => {
-              setKey('');
-              setDraft('');
-              setError('');
-            }}
+        <div className={styles.headerActions}>
+          <select
+            aria-label={t('language.switch')}
+            value={language}
+            onChange={(event) => setLanguage(event.target.value)}
           >
-            退出查询
-          </button>
-        )}
+            {LANGUAGE_ORDER.map((value) => (
+              <option key={value} value={value}>
+                {t(LANGUAGE_LABEL_KEYS[value])}
+              </option>
+            ))}
+          </select>
+          {key && (
+            <button
+              onClick={() => {
+                setKey('');
+                setDraft('');
+                setError('');
+              }}
+            >
+              {t('self_usage.sign_out')}
+            </button>
+          )}
+        </div>
       </header>
       {!key ? (
         <section className={styles.login}>
-          <h2>输入 API key</h2>
-          <p>仅显示此密钥的数据，无需管理权限。</p>
+          <h2>{t('self_usage.enter_key')}</h2>
+          <p>{t('self_usage.key_hint')}</p>
           <form onSubmit={submit}>
             <label htmlFor="query-key">API key</label>
             <input
@@ -439,54 +467,58 @@ export function SelfUsagePage() {
               type="password"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="请输入你的 API key"
+              placeholder={t('self_usage.key_placeholder')}
               autoComplete="off"
               spellCheck={false}
               required
             />
             <button type="submit" disabled={!draft.trim()}>
-              查询用量 →
+              {t('self_usage.query')}
             </button>
           </form>
-          <small>密钥仅用于当前查询，不保存在浏览器中。</small>
+          <small>{t('self_usage.key_privacy')}</small>
         </section>
       ) : (
         <>
           <div className={styles.toolbar}>
             <span className={live ? styles.connected : styles.muted}>
-              {live ? '● 实时已连接' : '○ 实时未连接'}
-              {history ? ' · 正在查看历史页' : ''}
+              {live ? t('self_usage.live_connected') : t('self_usage.live_disconnected')}
+              {history ? t('self_usage.history') : ''}
             </span>
             <div>
-              <label htmlFor="query-days">统计范围</label>
+              <label htmlFor="query-days">{t('self_usage.range')}</label>
               <select
                 id="query-days"
                 value={days}
                 onChange={(e) => setDays(Number(e.target.value))}
               >
-                <option value={1}>最近 24 小时</option>
-                <option value={7}>最近 7 天</option>
-                <option value={30}>最近 30 天</option>
+                <option value={1}>{t('self_usage.range_day')}</option>
+                <option value={7}>{t('self_usage.range_week')}</option>
+                <option value={30}>{t('self_usage.range_month')}</option>
               </select>
               <button disabled={loading} onClick={() => refresh.current()}>
-                {loading ? '更新中…' : history ? '返回最新' : '刷新'}
+                {loading
+                  ? t('self_usage.updating')
+                  : history
+                    ? t('self_usage.latest')
+                    : t('self_usage.refresh')}
               </button>
             </div>
           </div>
           <section className={styles.section}>
             <div className={styles.title}>
-              <h2>配额概览</h2>
+              <h2>{t('self_usage.quota_title')}</h2>
               <span>
-                {quotaError ||
+                {(quotaError ? t(quotaError) : '') ||
                   (!quota
-                    ? '加载中…'
+                    ? t('self_usage.loading')
                     : !active
-                      ? '未启用额度限制'
+                      ? t('self_usage.quota_unlimited')
                       : quota.state === 'exhausted'
-                        ? '额度已耗尽'
+                        ? t('self_usage.quota_exhausted')
                         : quota.state === 'blocked'
-                          ? '结算暂不可用'
-                          : '额度可用')}
+                          ? t('self_usage.quota_blocked')
+                          : t('self_usage.quota_available'))}
               </span>
             </div>
             {active && budget ? (
@@ -496,15 +528,21 @@ export function SelfUsagePage() {
                     <article key={metric.label}>
                       <span>{metric.label}</span>
                       <strong>
-                        {metric.remaining == null ? '未设置上限' : metric.format(metric.remaining)}
+                        {metric.remaining == null
+                          ? t('self_usage.unlimited')
+                          : metric.format(metric.remaining)}
                       </strong>
                       <small>
-                        剩余 · 已用 {metric.format(metric.used)}
+                        {t('self_usage.remaining_used', {
+                          value: metric.format(metric.used),
+                        })}
                         {metric.limit != null ? ` / ${metric.format(metric.limit)}` : ''}
                       </small>
                       {metric.limit != null && (
                         <progress
-                          aria-label={`${metric.label}使用比例`}
+                          aria-label={t('self_usage.usage_ratio', {
+                            metric: metric.label,
+                          })}
                           value={metric.used}
                           max={Math.max(metric.limit, metric.used, 1)}
                         />
@@ -514,52 +552,67 @@ export function SelfUsagePage() {
                 </div>
                 <p className={styles.note}>
                   {budget.period.type === 'all_time'
-                    ? '累计配额'
+                    ? t('self_usage.period_all_time')
                     : budget.period.type === 'past_duration'
-                      ? `滚动窗口：${budget.period.value} ${periodUnit(budget.period.unit)}`
-                      : `日历周期：${budget.period.value} ${periodUnit(budget.period.unit)}${budget.period.timezone ? ` · ${budget.period.timezone}` : ''}`}
+                      ? t('self_usage.period_rolling', {
+                          value: budget.period.value,
+                          unit: periodUnit(budget.period.unit),
+                        })
+                      : `${t('self_usage.period_calendar', { value: budget.period.value, unit: periodUnit(budget.period.unit) })}${budget.period.timezone ? ` · ${budget.period.timezone}` : ''}`}
                   {quota?.nextRecoverAtMs
-                    ? ` · 预计恢复 ${date(quota.nextRecoverAtMs)}`
+                    ? ` · ${t('self_usage.recovers_at', { time: date(quota.nextRecoverAtMs) })}`
                     : budget.period.type === 'calendar_duration' && budget.usage.windowEndsAtMs
-                      ? ` · 周期结束 ${date(budget.usage.windowEndsAtMs)}`
+                      ? ` · ${t('self_usage.period_ends', { time: date(budget.usage.windowEndsAtMs) })}`
                       : ''}
                 </p>
               </>
             ) : (
               <p className={styles.empty}>
                 {quotaError
-                  ? '请稍后刷新配额。'
+                  ? t('self_usage.quota_retry')
                   : quota
-                    ? '该密钥当前没有生效的额度限制。'
-                    : '正在读取配额…'}
+                    ? t('self_usage.quota_none')
+                    : t('self_usage.quota_loading')}
               </p>
             )}
           </section>
           <section className={styles.section}>
             <div className={styles.title}>
-              <h2>使用统计</h2>
-              <small>{stats ? `更新于 ${date(stats.snapshotAtMs)}` : '加载中…'}</small>
+              <h2>{t('self_usage.stats_title')}</h2>
+              <small>
+                {stats
+                  ? t('self_usage.updated_at', {
+                      time: date(stats.snapshotAtMs),
+                    })
+                  : t('self_usage.loading')}
+              </small>
             </div>
             <div className={styles.cards}>
               {[
                 [
-                  '请求次数',
+                  t('self_usage.requests'),
                   stats ? number(stats.total.totalRequests) : '—',
                   stats
-                    ? `成功 ${number(stats.total.successCount)} · 失败 ${number(stats.total.failureCount)}`
+                    ? t('self_usage.request_counts', {
+                        success: number(stats.total.successCount),
+                        failed: number(stats.total.failureCount),
+                      })
                     : '',
                 ],
                 [
-                  '总 Token',
+                  t('self_usage.total_tokens'),
                   stats ? number(stats.total.totalTokens) : '—',
                   stats
-                    ? `输入 ${number(stats.total.inputTokens)} · 输出 ${number(stats.total.outputTokens)}`
+                    ? t('self_usage.token_counts', {
+                        input: number(stats.total.inputTokens),
+                        output: number(stats.total.outputTokens),
+                      })
                     : '',
                 ],
                 [
-                  '估算费用',
+                  t('self_usage.cost'),
                   stats ? money(stats.total.estimatedCost) : '—',
-                  '按已保存的模型定价计算',
+                  t('self_usage.cost_hint'),
                 ],
               ].map(([label, value, detail]) => (
                 <article key={label}>
@@ -569,27 +622,31 @@ export function SelfUsagePage() {
                 </article>
               ))}
             </div>
-            <p className={styles.note}>
-              统计基于所选时间范围内保留的请求记录，可能与配额结算累计值不同。费用为估算值。
-            </p>
+            <p className={styles.note}>{t('self_usage.stats_note')}</p>
           </section>
           <section className={styles.section}>
             <div className={styles.title}>
-              <h2>请求日志</h2>
-              <small>{events ? `更新于 ${date(events.snapshotAtMs)}` : '加载中…'}</small>
+              <h2>{t('self_usage.logs_title')}</h2>
+              <small>
+                {events
+                  ? t('self_usage.updated_at', {
+                      time: date(events.snapshotAtMs),
+                    })
+                  : t('self_usage.loading')}
+              </small>
             </div>
             <div className={styles.table}>
               <table>
                 <thead>
                   <tr>
-                    <th>时间</th>
-                    <th>模型</th>
-                    <th>推理强度</th>
-                    <th>状态</th>
-                    <th>词元</th>
-                    <th>读缓存</th>
-                    <th>耗时 / 首字</th>
-                    <th>估算费用</th>
+                    <th>{t('self_usage.column_time')}</th>
+                    <th>{t('self_usage.column_model')}</th>
+                    <th>{t('self_usage.column_effort')}</th>
+                    <th>{t('self_usage.column_status')}</th>
+                    <th>{t('self_usage.column_tokens')}</th>
+                    <th>{t('self_usage.column_cache')}</th>
+                    <th>{t('self_usage.column_latency')}</th>
+                    <th>{t('self_usage.cost')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -616,7 +673,7 @@ export function SelfUsagePage() {
                         </td>
                         <td>
                           <span className={item.failed ? styles.failed : styles.connected}>
-                            {item.failed ? '失败' : '成功'}
+                            {item.failed ? t('self_usage.failed') : t('self_usage.success')}
                             {item.statusCode ? ` ${item.statusCode}` : ''}
                           </span>
                         </td>
@@ -624,11 +681,17 @@ export function SelfUsagePage() {
                           <div className={styles.tokenUsage}>
                             <strong>{formatTokenCount(item.totalTokens)}</strong>
                             <small>
-                              输入 {formatTokenCount(item.inputTokens)} · 输出{' '}
-                              {formatTokenCount(item.outputTokens)}
+                              {t('self_usage.token_counts', {
+                                input: formatTokenCount(item.inputTokens),
+                                output: formatTokenCount(item.outputTokens),
+                              })}
                             </small>
                             {(item.reasoningTokens ?? 0) > 0 && (
-                              <small>推理 {formatTokenCount(item.reasoningTokens ?? 0)}</small>
+                              <small>
+                                {t('self_usage.reasoning_tokens', {
+                                  value: formatTokenCount(item.reasoningTokens ?? 0),
+                                })}
+                              </small>
                             )}
                           </div>
                         </td>
@@ -636,7 +699,16 @@ export function SelfUsagePage() {
                           <div className={styles.cacheUsage}>
                             <strong>{formatTokenCount(cachedTokens)}</strong>
                             <small>
-                              {hitRate === null ? '--' : `${(hitRate * 100).toFixed(1)}%`} 命中
+                              {t('self_usage.cache_hit', {
+                                value:
+                                  hitRate === null
+                                    ? '--'
+                                    : new Intl.NumberFormat(language, {
+                                        style: 'percent',
+                                        minimumFractionDigits: 1,
+                                        maximumFractionDigits: 1,
+                                      }).format(hitRate),
+                              })}
                             </small>
                           </div>
                         </td>
@@ -653,14 +725,14 @@ export function SelfUsagePage() {
             </div>
             {!events?.items.length && (
               <p className={styles.empty}>
-                {events ? '所选时间范围内暂无请求记录' : '正在读取请求记录…'}
+                {events ? t('self_usage.logs_empty') : t('self_usage.logs_loading')}
               </p>
             )}
             <div className={styles.pager}>
-              <small>请求完成并记录用量后显示，每页最多 50 条。</small>
+              <small>{t('self_usage.logs_note')}</small>
               {events?.hasMore && (
                 <button disabled={loading} onClick={() => void older()}>
-                  更早记录 →
+                  {t('self_usage.older')}
                 </button>
               )}
             </div>
@@ -669,10 +741,10 @@ export function SelfUsagePage() {
       )}
       {error && (
         <p role="alert" className={styles.error}>
-          {error}
+          {t(error, { defaultValue: error })}
         </p>
       )}
-      <footer className={styles.footer}>CLIProxyAPI Pro · 只读查询</footer>
+      <footer className={styles.footer}>CLIProxyAPI Pro · {t('self_usage.read_only')}</footer>
     </main>
   );
 }
