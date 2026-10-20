@@ -2114,16 +2114,6 @@ replace_once(
 )
 replace_once(
     management_handler_source,
-    '''\t\tallowed, statusCode, errMsg := h.AuthenticateManagementKey(clientIP, localClient, provided)
-\t\tif !allowed {
-''',
-    '''\t\tallowed, statusCode, errMsg := h.AuthenticateManagementKey(clientIP, localClient, provided)
-\t\tif !allowed {
-''',
-    'AuthenticateManagementKey(clientIP, localClient, provided)',
-)
-replace_once(
-    management_handler_source,
     '''\t\t\tc.AbortWithStatusJSON(statusCode, gin.H{"error": errMsg})
 \t\t\treturn
 \t\t}
@@ -4605,16 +4595,6 @@ openai_stream_text = (
     + openai_stream_suffix
 )
 write(openai_compat_execute, openai_stream_text)
-replace_once(
-    openai_compat_execute,
-    '''\t\tstreamUsage.Publish(ctx, reporter)
-\t\treporter.EnsurePublished(ctx)
-''',
-    '''\t\tstreamUsage.Publish(ctx, reporter)
-\t\treporter.EnsurePublished(ctx)
-''',
-    'publishStreamFailure := func(errStream error)',
-)
 
 claude_stream = ROOT / 'internal/runtime/executor/claude_executor_stream.go'
 replace_all_exact(

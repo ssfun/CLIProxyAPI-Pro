@@ -37,11 +37,13 @@ Core 验证对 candidate 和 clean baseline 同样应用 `codex_live_media_loopb
 
 ### Management v1.25.0 compatibility
 
-The latest-only baseline is `b87b9487f63e08ad97b1fb4e7c17b4adb811b922`.
+This compatibility change was introduced against v1.25.0
+`b87b9487f63e08ad97b1fb4e7c17b4adb811b922`.
 Retire the legacy visual-layout adapter: upstream now edits v8 paths natively.
 `src/hooks/useVisualConfig.ts` stays byte-for-byte upstream, including recovered
 payload AST lineage and concurrent-list conflict checks. The historical
-`e2e/v8-visual-config` legacy/mixed-layout scenarios are not the current contract;
+`e2e/v8-visual-config` harness has been removed; its legacy/mixed-layout scenarios
+are not the current contract;
 upstream `visualConfigV8`, `visualConfigRebase`, `visualConfigPayloadAst`, and
 `visualConfigConcurrency` tests validate the native behavior. In particular, do
 not promise legacy fallback or byte-identical no-op serialization.
@@ -103,3 +105,9 @@ WebSocket 与 WebRTC sideband 共享同包 `realtime_usage_pro.go` 的终态识�
 Core 发布复用本次 Linux amd64 发布 archive，运行既有配置、流式用量及真实前端路由/SQLite 重启 E2E。配额 provider E2E 使用同一精确 Core、Pro 和 models 输入构建的独立进程 fixture；其哈希与输入另存，不把它当作产品可执行文件。新面板再与冻结的当前已发布 Core 配对；两个二进制哈希相同则只运行一组，没有已发布版本时仅验证候选。Management 单独发布必须与目标 Release 的实际二进制配对，不重编一个新 Core 替代。
 
 配对最多包含候选和当前发布两组，不重建历史 Core、不重复前端完整测试与构建。下载核验 archive checksum 和可用的 GitHub asset digest；GitHub API 错误不能被当作首发。所有 E2E 成功后才上传供发布消费的面板产物，失败回执与日志独立归档。门禁范围是本地真实 HTTP、TypeScript transport 和 SQLite；浏览器渲染、外部供应商及插件 ABI 保留各自验证边界。
+
+### 最新上游重复适配清理（2026-10-20）
+
+当前审查基线为 Core v8.0.35（`ae3ee3be303fb07fb8173279923413005bf32177`）和 Management v1.26.5（`fe2963330f32a933f562282165f62ae52cf57145`）；文件清单与 Core 归属表同步标注该基线。前述各批次版本和文件数量为历史记录。
+
+删除 Core 两处替换前后相同的空操作，以及 Management 已由上游提供的越南语配额文案、搜索状态和搜索控件补齐分支。保留 Pro 配额元数据搜索和流式终态用量修复；删除不再属于当前契约的旧配置编辑 E2E 目录，继续使用上游原生 v8 配置编辑验证。清理前后生成源码逐字节一致，实际原生修改范围仍为 Core 101 个文件、Management 41 个文件。

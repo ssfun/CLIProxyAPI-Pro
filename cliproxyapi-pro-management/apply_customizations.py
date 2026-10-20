@@ -1699,12 +1699,6 @@ def patch_supporting_api_and_types(target: Path) -> None:
 
 
 def patch_locales(target: Path) -> None:
-    replace_once(
-        target / 'src/i18n/locales/vi.json',
-        '    "seven_day_fable": "Fable 5 · 7 ngày",\n',
-        '    "seven_day_fable": "Fable 5 · 7 ngày",\n'
-        '    "cloud_session_credits": "Tín dụng phiên đám mây",\n',
-    )
     monitoring = json.loads(LOCALES_FILE.read_text())
     # Complete bundles override legacy additions without replacing nested resources.
     def merge_resources(destination: dict, source: dict) -> None:
@@ -1977,7 +1971,6 @@ def patch_quota_page_cache_refresh(target: Path) -> None:
 def patch_quota_page_latest(target: Path) -> None:
     path = target / 'src/features/quota/QuotaPage.tsx'
     patch_quota_page_cache_refresh(target)
-    insert_once(path, "import { EmptyState } from '@/components/ui/EmptyState';\n", "import { EmptyState } from '@/components/ui/EmptyState';\nimport { Input } from '@/components/ui/Input';\nimport { IconSearch } from '@/components/ui/icons';\n", 'quota_management.search_label')
     insert_once(path, "import { readQuotaUiState, writeQuotaUiState } from './uiState';\n", "import { readQuotaUiState, writeQuotaUiState } from './uiState';\nimport { buildQuotaSearchValues, matchesQuotaSearch } from '@/pro/modules/quota';\n", 'matchesQuotaSearch')
     replace_once(path, '  const codexQuota = useQuotaStore((state) => state.codexQuota);\n', '  const codexQuota = useQuotaStore((state) => state.codexQuota);\n  const geminiCliQuota = useQuotaStore((state) => state.geminiCliQuota);\n')
     replace_once(path, "        codex: codexQuota,\n", "        codex: codexQuota,\n        'gemini-cli': geminiCliQuota,\n")
@@ -1996,8 +1989,6 @@ def patch_quota_page_latest(target: Path) -> None:
         )
     marker = "  const getQuota = useCallback(\n"
     search_state = "  const quotaSearchStore = useMemo(\n    () => ({ antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota }),\n    [antigravityQuota, claudeQuota, codexQuota, geminiCliQuota, kimiQuota, xaiQuota]\n  );\n\n"
-    if 'const [search, setSearch]' not in read(path):
-        search_state = "  const [search, setSearch] = useState('');\n" + search_state
     insert_once(path, marker, search_state + marker, 'const quotaSearchStore = useMemo(')
     entries_marker = "  const entries = useMemo(() => classifyQuotaFiles(files), [files]);\n"
     searched_entries = entries_marker + "  const searchedEntries = useMemo(\n    () => entries.filter(({ file }) => matchesQuotaSearch(buildQuotaSearchValues(file, quotaSearchStore, t), search)),\n    [entries, quotaSearchStore, search, t]\n  );\n"
@@ -2025,8 +2016,6 @@ def patch_quota_page_latest(target: Path) -> None:
         '  const filteredEntries = useMemo(() => filterEntriesByTab(entries, tab), [entries, tab]);',
         '  const filteredEntries = useMemo(() => filterEntriesByTab(searchedEntries, tab), [searchedEntries, tab]);',
     )
-    if 'type="search"' not in read(path):
-        insert_once(path, "        {error && (\n", "        <Input\n          type=\"search\"\n          value={search}\n          onChange={(event) => { setSearch(event.target.value); setPage(1); }}\n          placeholder={t('quota_management.search_placeholder')}\n          aria-label={t('quota_management.search_label')}\n          rightElement={<IconSearch size={18} />}\n        />\n\n        {error && (\n", 'rightElement={<IconSearch')
 
 
 def patch_quota_cards_latest(target: Path) -> None:
