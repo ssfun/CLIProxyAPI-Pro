@@ -6369,18 +6369,14 @@ handler = ROOT / 'internal/api/handlers/management/handler.go'
 add_go_import(handler, '"net/http"\n', '\t"net/url"\n')
 replace_once(
     handler,
-    '''\tpluginStoreRateLimiter  *pluginstore.GitHubRateLimiter
-\tpluginReleases          pluginReleaseCache
-}
+    '''\tpluginReleases          pluginReleaseCache
 ''',
-    '''\tpluginStoreRateLimiter  *pluginstore.GitHubRateLimiter
-\tpluginReleases          pluginReleaseCache
+    '''\tpluginReleases          pluginReleaseCache
 \tproAuthMutationMu       sync.Mutex
 \tlifecycleContext        context.Context
 \tlifecycleCancel         context.CancelFunc
 \tlifecycleWG             sync.WaitGroup
 \tshutdownOnce            sync.Once
-}
 ''',
     'proAuthMutationMu       sync.Mutex',
 )
