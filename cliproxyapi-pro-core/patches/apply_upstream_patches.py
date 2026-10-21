@@ -6827,33 +6827,38 @@ replace_once(
     '\tm.updateSessionAffinity(result)\n\treturn authSnapshot != nil\n}\n\nfunc (m *Manager) updateSessionAffinity',
     'return authSnapshot != nil',
 )
+# Keep upstream stale-result bookkeeping intact; only add the pinned identity
+# fence before mutation and adapt the stale branch to markResult's bool result.
 replace_once(
     auth_conductor,
-    '''\tm.mu.Lock()
-\tif auth, ok := m.auths[result.AuthID]; ok && auth != nil {
-\t\tif isStaleExecutionResult(result, auth) {
-\t\t\tm.mu.Unlock()
-\t\t\treleaseMutation()
-\t\t\tm.hook.OnResult(ctx, result)
-\t\t\tm.publishErrorEvent(result, nil)
-\t\t\treturn
-\t\t}
-\t\tif modelKey == ""''',
-    '''\tm.mu.Lock()
+    '''\tnow := time.Now()
+
+\treleaseMutation := m.lockAuthMutation(result.AuthID)
+\tdefer releaseMutation()
+\tm.mu.Lock()
+''',
+    '''\tnow := time.Now()
+
+\treleaseMutation := m.lockAuthMutation(result.AuthID)
+\tdefer releaseMutation()
+\tm.mu.Lock()
 \tif !pinnedResultIdentityMatches(result, m.auths[result.AuthID]) {
 \t\tm.mu.Unlock()
 \t\treturn false
 \t}
-\tif auth, ok := m.auths[result.AuthID]; ok && auth != nil {
-\t\tif isStaleExecutionResult(result, auth) {
-\t\t\tm.mu.Unlock()
-\t\t\treleaseMutation()
-\t\t\tm.hook.OnResult(ctx, result)
-\t\t\tm.publishErrorEvent(result, nil)
+''',
+    'pinnedResultIdentityMatches(result, m.auths[result.AuthID])',
+)
+replace_once(
+    auth_conductor,
+    '''\t\t\tm.publishErrorEvent(result, nil)
+\t\t\treturn
+\t\t}
+\t\tif modelKey == ""''',
+    '''\t\t\tm.publishErrorEvent(result, nil)
 \t\t\treturn false
 \t\t}
 \t\tif modelKey == ""''',
-    'pinnedResultIdentityMatches(result, m.auths[result.AuthID])',
 )
 if '\t\twasTerminalUnauthorized := hasUnauthorizedAuthFailure(auth)\n' in read(auth_conductor):
     replace_once(
@@ -7031,7 +7036,30 @@ if policy_candidate_append not in auth_conductor_text:
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_refresh.go'
 # Preserve v8.0.17 rejected-token and canceled-refresh state changes, but keep
 # scheduler snapshots policy-aware and acquire them only after releasing m.mu.
-if '\t\tcurrent.RejectedAccessToken = failedAccessToken' in read(auth_conductor).splitlines():
+if 'current != nil && recordRejectedTokenOnAuth(current, failedAccessToken)' in read(auth_conductor):
+    replace_once(
+        auth_conductor,
+        '''\t\tcurrent.Generation++
+\t\tcurrent.UpdatedAt = time.Now()
+\t\tm.auths[id] = current
+\t\tif m.scheduler != nil {
+\t\t\tm.scheduler.upsertAuth(current.Clone())
+\t\t}
+\t}
+\tm.mu.Unlock()
+}''',
+        '''\t\tcurrent.Generation++
+\t\tcurrent.UpdatedAt = time.Now()
+\t\tm.auths[id] = current
+\t\tm.mu.Unlock()
+\t\treleaseMutation()
+\t\tm.RefreshSchedulerEntry(id)
+\t\treturn
+\t}
+\tm.mu.Unlock()
+}''',
+    )
+elif '\t\tcurrent.RejectedAccessToken = failedAccessToken' in read(auth_conductor).splitlines():
     replace_once(
         auth_conductor,
         '''\t\tcurrent.RejectedAccessToken = failedAccessToken
