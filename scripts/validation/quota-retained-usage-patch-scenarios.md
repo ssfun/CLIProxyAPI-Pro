@@ -35,3 +35,31 @@ fixture must include `hasStatusCode: true` for its explicit numeric statuses.
 Keep strict equality and the authenticated route, status, body and error-message
 assertions; do not drop the production metadata or weaken the test to a subset.
 This fixture adaptation adds one reviewed upstream test file to the patch surface.
+
+## v1.26.6 multiline Claude plan regression
+
+Recorded before implementation for upstream
+`603539ab5c5343f32c3945c6e0cdb8333991c493`, Actions `39480689073`.
+
+1. QuotaCard now passes `planItems={claudePlanItems}` and
+   `afterPlan={claudeAfterPlan}` in multiline bodies in both ordinary and retained
+   branches. The retained branch is parenthesized. Exact single-line anchors fail.
+2. Preserve all body properties, guards and intervening loading/error markup;
+   add exactly one timestamp to each branch, with identical reapplication output.
+3. Continue supporting both legacy single-line renderers and the legacy single
+   ordinary branch. Exercise the multiline form for both renderer configurations.
+4. Reject missing/duplicate multiline bodies, changed properties and changed
+   retained guards instead of silently dropping upstream behavior. Do not flush
+   any buffered edits on failure.
+5. Reproduce with the focused Python regression command above before the fix;
+   finish with clean exact-upstream Management validation and retained logs.
+
+### Next v1.26.6 replay failure: translated API client comments
+
+The complete replay reaches connection isolation next and fails because upstream
+translated interceptor JSDoc and the baseURL comment into English. Comments must
+remain intact in either language, while connection cancellation, request-generation
+metadata, stale success/error rejection and idempotence remain unchanged. Match
+executable interceptor boundaries instead of translated prose; reject absent or
+duplicate executable anchors. Add the English fixture regression before changing
+the generator and replay the entire generator on another clean upstream copy.

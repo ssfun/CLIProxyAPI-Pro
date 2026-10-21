@@ -93,6 +93,61 @@ class QuotaCardCustomizationTest(unittest.TestCase):
             for path, source in first_application.items():
                 self.assertEqual(path.read_text(), source)
 
+    def test_multiline_plan_bodies_preserve_properties_guards_and_reapplication(self) -> None:
+        for broken in (None, 'missing', 'duplicate', 'property', 'guard'):
+            with self.subTest(broken=broken), tempfile.TemporaryDirectory() as temp_dir:
+                CUSTOMIZATIONS._writes.clear()
+                target = Path(temp_dir)
+                originals = {}
+                for relative, source, classes, indent in (
+                    ('src/features/quota/components/QuotaCard.tsx', QUOTA_CARD_SOURCE, 'quotaClasses', '          '),
+                    ('src/features/authFiles/components/AuthFileQuotaSection.tsx', AUTH_FILE_QUOTA_SECTION_SOURCE, 'compactQuotaClasses', '        '),
+                ):
+                    body = ('<adapter.Body\n'
+                            + indent + '  quota={quota}\n'
+                            + indent + f'  classes={{{classes}}}\n'
+                            + indent + '  planItems={claudePlanItems}\n'
+                            + indent + '  afterPlan={claudeAfterPlan}\n'
+                            + indent + '/>')
+                    source = source.replace(') : quota ? (', ') : quota && !retainedClaudeUsage ? (')
+                    source = source.replace(f'<adapter.Body quota={{quota}} classes={{{classes}}} />', body)
+                    retained = indent[:-2] + '{retainedClaudeUsage && quota && (\n' + indent + body + '\n' + indent[:-2] + ')}\n'
+                    loading = indent[:-2] + '{loading && retainedClaudeUsage && <div role="status">Loading</div>}\n'
+                    source = source.replace('    </div>', loading + retained + '    </div>')
+                    if broken == 'missing':
+                        source = source.replace(body, '', 1)
+                    elif broken == 'duplicate':
+                        source = source.replace(body, body + '\n' + indent + body, 1)
+                    elif broken == 'property':
+                        source = source.replace('afterPlan={claudeAfterPlan}', 'afterPlan={unknownPlan}', 1)
+                    elif broken == 'guard':
+                        source = source.replace('{retainedClaudeUsage && quota && (', '{retainedClaudeUsage && (')
+                    path = target / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(source)
+                    originals[path] = source
+                if broken:
+                    with self.assertRaises(RuntimeError):
+                        CUSTOMIZATIONS.patch_quota_cards_latest(target)
+                    for path, source in originals.items():
+                        self.assertEqual(path.read_text(), source)
+                    continue
+                CUSTOMIZATIONS.patch_quota_cards_latest(target)
+                CUSTOMIZATIONS.flush_writes()
+                first = {path: path.read_text() for path in originals}
+                for source in first.values():
+                    self.assertEqual(source.count('planItems={claudePlanItems}'), 2)
+                    self.assertEqual(source.count('afterPlan={claudeAfterPlan}'), 2)
+                    self.assertEqual(source.count('<QuotaCachedTime '), 2)
+                    self.assertEqual(source.count('<adapter.Body'), 2)
+                    self.assertIn(') : quota && !retainedClaudeUsage ? (', source)
+                    self.assertIn('{loading && retainedClaudeUsage && <div role="status">Loading</div>}', source)
+                    self.assertIn('{retainedClaudeUsage && quota && (', source)
+                CUSTOMIZATIONS.patch_quota_cards_latest(target)
+                CUSTOMIZATIONS.flush_writes()
+                for path, source in first.items():
+                    self.assertEqual(path.read_text(), source)
+
     def test_rejects_missing_or_duplicate_body_without_flushing(self) -> None:
         for broken_component in ('card', 'auth'):
             for body_count in (0, 2):

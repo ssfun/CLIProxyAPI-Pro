@@ -21,6 +21,8 @@ class ApiClientConnectionIsolationCustomizationTests(unittest.TestCase):
     def apply_patch(self, root: Path, upstream_client: str) -> tuple[str, str]:
         client = root / 'src/services/api/client.ts'
         client.parent.mkdir(parents=True)
+        if getattr(self, 'english_comments', False):
+            upstream_client = upstream_client.replace('设置请求/响应拦截器', 'Set request/response interceptors').replace('设置 baseURL', 'Set baseURL')
         client.write_text(upstream_client)
         auth_store = root / 'src/stores/useAuthStore.ts'
         auth_store.parent.mkdir(parents=True)
@@ -43,6 +45,9 @@ class ApiClientConnectionIsolationCustomizationTests(unittest.TestCase):
         MODULE.flush_writes()
         self.assertEqual(client.read_text(), first_client)
         self.assertEqual(auth_store.read_text(), first_store)
+        if getattr(self, 'english_comments', False):
+            self.assertIn('Set request/response interceptors', first_client)
+            self.assertIn('// Set baseURL', first_client)
         return first_client, first_store
 
     def test_patches_latest_generation_guard_and_preserves_native_logout_reset(self):
@@ -95,6 +100,10 @@ class ApiClient {
             self.assertIn('__connectionGeneration = this.connectionGeneration;', first_client)
             self.assertIn('this.isStaleConnection(response.config)', first_client)
             self.assertEqual(first_store.count("apiClient.setConfig({ apiBase: '', managementKey: '' });"), 1)
+
+    def test_preserves_translated_interceptor_comments(self):
+        self.english_comments = True
+        self.test_patches_latest_generation_guard_and_preserves_native_logout_reset()
 
     def test_rejects_legacy_runtime_aware_connection_change(self):
         with tempfile.TemporaryDirectory() as tmp:

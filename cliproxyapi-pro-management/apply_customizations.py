@@ -1075,9 +1075,17 @@ def patch_api_client_connection_isolation(target: Path) -> None:
         write(client, text.replace(old, new, 1))
     if 'this.connectionGeneration += 1;' not in read(client):
         raise RuntimeError(f'Pattern not found in {client}: connection change handling')
+    # Preserve upstream documentation while anchoring on executable method shape.
+    interceptor_headers = list(re.finditer(
+        r'  /\*\*\n(?:(?:   \*[^\n]*\n)*)   \*/\n  private setupInterceptors\(\): void \{\n',
+        read(client),
+    ))
+    if len(interceptor_headers) != 1:
+        raise RuntimeError(f'Expected one setupInterceptors declaration in {client}, found {len(interceptor_headers)}')
+    interceptor_header = interceptor_headers[0].group(0)
     insert_once(
         client,
-        "  /**\n   * 设置请求/响应拦截器\n   */\n",
+        interceptor_header,
         "  private combineRequestSignal(requestSignal: AxiosRequestConfig['signal']): AbortSignal {\n"
         "    const connectionSignal = this.connectionAbortController.signal;\n"
         "    if (!requestSignal) return connectionSignal;\n"
@@ -1104,20 +1112,18 @@ def patch_api_client_connection_isolation(target: Path) -> None:
         "  private staleConnectionError(): Error {\n"
         "    return new axios.CanceledError('Connection changed while the request was in flight');\n"
         "  }\n\n"
-        "  /**\n   * 设置请求/响应拦截器\n   */\n",
+        + interceptor_header,
         'private isStaleConnection(config: AxiosRequestConfig | undefined)',
     )
     insert_once(
         client,
-        "      (config) => {\n"
-        "        // 设置 baseURL\n"
-        "        config.baseURL = this.apiBase;\n",
+        "    this.instance.interceptors.request.use(\n"
+        "      (config) => {\n",
+        "    this.instance.interceptors.request.use(\n"
         "      (config) => {\n"
         "        (config as AxiosRequestConfig & { __connectionGeneration?: number })\n"
         "          .__connectionGeneration = this.connectionGeneration;\n"
-        "        config.signal = this.combineRequestSignal(config.signal);\n"
-        "        // 设置 baseURL\n"
-        "        config.baseURL = this.apiBase;\n",
+        "        config.signal = this.combineRequestSignal(config.signal);\n",
         '.__connectionGeneration = this.connectionGeneration;',
     )
     replace_once(
@@ -2033,6 +2039,33 @@ def patch_quota_cards_latest(target: Path) -> None:
         body = f'<adapter.Body quota={{quota}} classes={{{classes}}} />'
         timestamp = f'<QuotaCachedTime quotaStatus={{{status}}} cachedAt={{{cached_at}}} />'
         fragment = f'{indent}<>\n{indent}  {body}\n{indent}  {timestamp}\n{indent}</>\n'
+        # v1.26.6 adds Claude plan content to both QuotaCard bodies. Match the
+        # complete known props and branch boundaries, never reconstruct or drop
+        # arbitrary upstream JSX attributes. Keep legacy renderers below.
+        if '<adapter.Body\n' in read(path):
+            body = ('<adapter.Body\n'
+                    + indent + '  quota={quota}\n'
+                    + indent + f'  classes={{{classes}}}\n'
+                    + indent + '  planItems={claudePlanItems}\n'
+                    + indent + '  afterPlan={claudeAfterPlan}\n'
+                    + indent + '/>')
+            nested_body = body.replace('\n', '\n  ')
+            fragment = f'{indent}<>\n{indent}  {nested_body}\n{indent}  {timestamp}\n{indent}</>\n'
+            retained = 'retainedClaudeUsage' in read(path)
+            branch = ') : quota && !retainedClaudeUsage ? (\n' if retained else ') : quota ? (\n'
+            replace_once(
+                path,
+                branch + indent + body + '\n' + indent[:-2] + ') :',
+                branch + fragment + indent[:-2] + ') :',
+            )
+            if retained:
+                guard = '{retainedClaudeUsage && quota && (\n'
+                replace_once(
+                    path,
+                    guard + indent + body + '\n' + indent[:-2] + ')}',
+                    guard + fragment + indent[:-2] + ')}',
+                )
+            continue
         # Anchor the standalone body, preserving upstream loading/error guards.
         replace_once(path, f'{indent}{body}\n', fragment)
         if 'retainedClaudeUsage' in read(path):
