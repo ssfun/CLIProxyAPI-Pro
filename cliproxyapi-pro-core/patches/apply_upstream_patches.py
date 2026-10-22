@@ -4229,18 +4229,11 @@ replace_once(
     'ModelMatchStatus string',
 )
 usage_helpers = ROOT / 'internal/runtime/executor/helps/usage_helpers.go'
-replace_once(
+insert_before(
     usage_helpers,
-    '''\treasoning           string
-\tserviceTier         string
-\tgenerate            bool
-''',
-    '''\treasoning           string
-\tserviceTier         string
-\tspeed               string
-\tgenerate            bool
-''',
-    '\tspeed           string\n',
+    '\teffectiveServiceTier string\n',
+    '\tspeed string\n',
+    '\tspeed string\n',
 )
 replace_once(
     usage_helpers,
@@ -4255,21 +4248,11 @@ replace_once(
 ''',
     'reporter.speed = usage.SpeedFromContext(ctx)',
 )
-replace_once(
+insert_before(
     usage_helpers,
-    '''\t\tServiceTier:         r.serviceTier,
-\t\tResponseServiceTier: strings.TrimSpace(detail.ResponseServiceTier),
-\t\tResponseModel:       responseModel,
-\t\tGenerate:            usage.GenerateFlag(r.generate),
-''',
-    '''\t\tServiceTier:         r.serviceTier,
-\t\tResponseServiceTier: strings.TrimSpace(detail.ResponseServiceTier),
-\t\tSpeed:               r.speed,
-\t\tResponseSpeed:       strings.TrimSpace(detail.ResponseSpeed),
-\t\tResponseModel:       responseModel,
-\t\tGenerate:            usage.GenerateFlag(r.generate),
-''',
-    'ResponseSpeed:       strings.TrimSpace(detail.ResponseSpeed)',
+    '\t\tEffectiveServiceTier: r.effectiveServiceTier,\n',
+    '\t\tSpeed: r.speed,\n\t\tResponseSpeed: strings.TrimSpace(detail.ResponseSpeed),\n',
+    '\t\tResponseSpeed: strings.TrimSpace(detail.ResponseSpeed),\n',
 )
 replace_once(
     usage_helpers,
@@ -5958,74 +5941,54 @@ replace_once(
 )
 replace_all_exact(
     redisqueue_plugin,
-    '''\t\tAPIKey:              apiKey,
-\t\tIsNativeKey:         isNativeKey,
-\t\tAccessProvider:      accessProvider,
-\t\tRequestID:           requestID,
+    '''\t\tAPIKey:               apiKey,
+\t\tIsNativeKey:          isNativeKey,
+\t\tAccessProvider:       accessProvider,
+\t\tRequestID:            requestID,
 ''',
-    '''\t\tAPIKey:              apiKey,
-\t\tIsNativeKey:         isNativeKey,
-\t\tAccessProvider:      accessProvider,
-\t\tAPIKeyPolicyID:      apiKeyPolicyID,
-\t\tProfileID:           profileID,
-\t\tProfileNameSnapshot: profileNameSnapshot,
-\t\tPolicyMode:          policyMode,
-\t\tRequestedModel:      requestedModel,
-\t\tEffectiveModel:      effectiveModel,
-\t\tRequestID:           requestID,
+    '''\t\tAPIKey:               apiKey,
+\t\tIsNativeKey:          isNativeKey,
+\t\tAccessProvider:       accessProvider,
+\t\tAPIKeyPolicyID:       apiKeyPolicyID,
+\t\tProfileID:            profileID,
+\t\tProfileNameSnapshot:  profileNameSnapshot,
+\t\tPolicyMode:           policyMode,
+\t\tRequestedModel:       requestedModel,
+\t\tEffectiveModel:       effectiveModel,
+\t\tRequestID:            requestID,
 ''',
     expected_count=1,
 )
 replace_all_exact(
     redisqueue_plugin,
-    '''\tAPIKey              string                   `json:"api_key"`
-\tIsNativeKey         bool                     `json:"is_native_key"`
-\tAccessProvider      string                   `json:"access_provider,omitempty"`
-\tRequestID           string                   `json:"request_id"`
+    '''\tAPIKey               string                   `json:"api_key"`
+\tIsNativeKey          bool                     `json:"is_native_key"`
+\tAccessProvider       string                   `json:"access_provider,omitempty"`
+\tRequestID            string                   `json:"request_id"`
 ''',
-    '''\tAPIKey              string                   `json:"api_key"`
-\tIsNativeKey         bool                     `json:"is_native_key"`
-\tAccessProvider      string                   `json:"access_provider,omitempty"`
-\tAPIKeyPolicyID      string                   `json:"api_key_policy_id,omitempty"`
-\tProfileID           string                   `json:"profile_id,omitempty"`
-\tProfileNameSnapshot string                   `json:"profile_name_snapshot,omitempty"`
-\tPolicyMode          string                   `json:"policy_mode,omitempty"`
-\tRequestedModel      string                   `json:"requested_model,omitempty"`
-\tEffectiveModel      string                   `json:"effective_model,omitempty"`
-\tRequestID           string                   `json:"request_id"`
+    '''\tAPIKey               string                   `json:"api_key"`
+\tIsNativeKey          bool                     `json:"is_native_key"`
+\tAccessProvider       string                   `json:"access_provider,omitempty"`
+\tAPIKeyPolicyID       string                   `json:"api_key_policy_id,omitempty"`
+\tProfileID            string                   `json:"profile_id,omitempty"`
+\tProfileNameSnapshot  string                   `json:"profile_name_snapshot,omitempty"`
+\tPolicyMode           string                   `json:"policy_mode,omitempty"`
+\tRequestedModel       string                   `json:"requested_model,omitempty"`
+\tEffectiveModel       string                   `json:"effective_model,omitempty"`
+\tRequestID            string                   `json:"request_id"`
 ''',
     expected_count=1,
 )
-replace_once(
+insert_before(
     redisqueue_plugin,
-    '''\t\tServiceTier:         serviceTier,
-\t\tResponseServiceTier: responseServiceTier,
-\t\tResponseModel:       responseModel,
-\t})
-''',
-    '''\t\tServiceTier:         serviceTier,
-\t\tResponseServiceTier: responseServiceTier,
-\t\tSpeed:               speed,
-\t\tResponseSpeed:       responseSpeed,
-\t\tResponseModel:       responseModel,
-\t})
-''',
-    'ResponseSpeed:       responseSpeed',
+    '\t\tEffectiveServiceTier: effectiveServiceTier,\n',
+    '\t\tSpeed: speed,\n\t\tResponseSpeed: responseSpeed,\n',
+    'ResponseSpeed: responseSpeed',
 )
-replace_once(
+insert_before(
     redisqueue_plugin,
-    '''\tServiceTier         string                   `json:"service_tier"`
-\tResponseServiceTier string                   `json:"response_service_tier,omitempty"`
-\tResponseModel       string                   `json:"response_model,omitempty"`
-}
-''',
-    '''\tServiceTier         string                   `json:"service_tier"`
-\tResponseServiceTier string                   `json:"response_service_tier,omitempty"`
-\tSpeed               string                   `json:"speed,omitempty"`
-\tResponseSpeed       string                   `json:"response_speed,omitempty"`
-\tResponseModel       string                   `json:"response_model,omitempty"`
-}
-''',
+    '\tEffectiveServiceTier string                   `json:"effective_service_tier,omitempty"`\n',
+    '\tSpeed string `json:"speed,omitempty"`\n\tResponseSpeed string `json:"response_speed,omitempty"`\n',
     '`json:"response_speed,omitempty"`',
 )
 # Observe the model only at the final transport/protocol boundary.
@@ -6104,20 +6067,20 @@ if 'reporter.SetUpstreamModel(baseModel)' not in read(aistudio_executor):
     )
 replace_once(
     usage_helpers,
-    '\t\tResponseModel:       responseModel,',
-    '\t\tResponseModel:       responseModel,\n\t\tUpstreamModel:       r.auditUpstreamModel(model),\n\t\tModelMatchStatus:    modelMatchStatus(r.auditUpstreamModel(model), responseModel),',
+    '\t\tResponseModel:        responseModel,',
+    '\t\tResponseModel:        responseModel,\n\t\tUpstreamModel:       r.auditUpstreamModel(model),\n\t\tModelMatchStatus:    modelMatchStatus(r.auditUpstreamModel(model), responseModel),',
     'ModelMatchStatus:    modelMatchStatus',
 )
 replace_once(
     redisqueue_plugin,
-    '\t\tResponseModel:       responseModel,',
-    '\t\tResponseModel:       responseModel,\n\t\tUpstreamModel:       strings.TrimSpace(record.UpstreamModel),\n\t\tModelMatchStatus:    record.ModelMatchStatus,',
+    '\t\tResponseModel:        responseModel,',
+    '\t\tResponseModel:        responseModel,\n\t\tUpstreamModel:       strings.TrimSpace(record.UpstreamModel),\n\t\tModelMatchStatus:    record.ModelMatchStatus,',
     'ModelMatchStatus:    record.ModelMatchStatus',
 )
 replace_once(
     redisqueue_plugin,
-    '\tResponseModel       string                   `json:"response_model,omitempty"`',
-    '\tResponseModel       string                   `json:"response_model,omitempty"`\n\tUpstreamModel string `json:"upstream_model,omitempty"`\n\tModelMatchStatus string `json:"model_match_status,omitempty"`',
+    '\tResponseModel        string                   `json:"response_model,omitempty"`',
+    '\tResponseModel        string                   `json:"response_model,omitempty"`\n\tUpstreamModel string `json:"upstream_model,omitempty"`\n\tModelMatchStatus string `json:"model_match_status,omitempty"`',
     '`json:"model_match_status,omitempty"`',
 )
 # Plugin provider identity is independent of the negotiated wire protocol.
@@ -6831,13 +6794,13 @@ replace_once(
 # fence before mutation and adapt the stale branch to markResult's bool result.
 replace_once(
     auth_conductor,
-    '''\tnow := time.Now()
+    '''\trejectsToken := !result.Success && (result.Error == nil || result.Error.Code != ErrorCodeForceCooldown) && !shouldSkipCredentialCooldown(result.Error) && (statusCodeFromResult(result.Error) == http.StatusUnauthorized || isUnauthorizedError(result.Error))
 
 \treleaseMutation := m.lockAuthMutation(result.AuthID)
 \tdefer releaseMutation()
 \tm.mu.Lock()
 ''',
-    '''\tnow := time.Now()
+    '''\trejectsToken := !result.Success && (result.Error == nil || result.Error.Code != ErrorCodeForceCooldown) && !shouldSkipCredentialCooldown(result.Error) && (statusCodeFromResult(result.Error) == http.StatusUnauthorized || isUnauthorizedError(result.Error))
 
 \treleaseMutation := m.lockAuthMutation(result.AuthID)
 \tdefer releaseMutation()
@@ -7531,6 +7494,13 @@ func (m *Manager) UpdateFromSnapshot(ctx context.Context, base, updated *Auth) (
 
 // Update replaces an existing auth entry and notifies hooks.''',
 )
+# Digest-bearing watcher snapshots still need upstream's disk fence and runtime
+# state merge when Pro adds its persisted-input CAS through updateModeSnapshot.
+replace_once(
+    ROOT / 'sdk/cliproxy/auth/conductor_lifecycle.go',
+    '\tisFileSnapshot := mode == updateModeReplace && auth.HasFileSnapshot()',
+    '\tisFileSnapshot := (mode == updateModeReplace || mode == updateModeSnapshot) && auth.HasFileSnapshot()',
+)
 replace_once(
     ROOT / 'sdk/cliproxy/auth/conductor_lifecycle.go',
     '''	if m.authEpochs == nil {
@@ -7592,7 +7562,7 @@ replace_once(
     '''  // A queued, unversioned file observation may predate a successful PATCH.
   // Capture existing before reading disk: a write during synthesis then loses
   // the snapshot CAS below instead of replaying an old credential.
-  if auth.Generation == 0 && auth.AuthSourceKind() == coreauth.AuthSourceFile {
+  if auth.Generation == 0 && !auth.HasFileSnapshot() && auth.AuthSourceKind() == coreauth.AuthSourceFile {
    if watcher := s.currentWatcher(); watcher != nil {
     path := auth.Attributes[coreauth.AttributePath]
     if path == "" { path = auth.Attributes[coreauth.AttributeSource] }
