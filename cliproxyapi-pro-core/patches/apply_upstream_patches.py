@@ -542,45 +542,40 @@ replace_once(
 
 # Receiving Pong only releases the upload hook; it does not mean the request
 # has arrived. Keep the mock upstream alive until its reader receives it.
-for provider, variants in (
-    ('codex', ('WithSession', 'Sessionless', 'NonstreamSessionless')),
-    ('xai', ('WithSession', 'Sessionless')),
-):
-    websocket_tests = ROOT / f'internal/runtime/executor/{provider}_websockets_executor_test.go'
-    for variant in variants:
-        signature = f'func Test{provider.upper() if provider == "xai" else "Codex"}Websockets_KeepalivePingDuringUpload_{variant}(t *testing.T) {{'
-        text = read(websocket_tests)
-        start = text.find(signature)
-        if start < 0:
-            raise SystemExit(f'function not found in {websocket_tests}: {signature!r}')
-        end = text.find('\nfunc ', start + len(signature))
-        if end < 0:
-            end = len(text)
-        body = text[start:end]
-        reader = '''\t\tgo func() {
+# xAI already provides this synchronization upstream as of v8.0.43.
+for variant in ('WithSession', 'Sessionless', 'NonstreamSessionless'):
+    websocket_tests = codex_websocket_tests
+    signature = f'func TestCodexWebsockets_KeepalivePingDuringUpload_{variant}(t *testing.T) {{'
+    text = read(websocket_tests)
+    start = text.find(signature)
+    if start < 0:
+        raise SystemExit(f'function not found in {websocket_tests}: {signature!r}')
+    end = text.find('\nfunc ', start + len(signature))
+    if end < 0:
+        end = len(text)
+    body = text[start:end]
+    reader = '''\t\tgo func() {
 \t\t\tfor {
-\t\t\t\tif _, _, errReadLoop := conn.ReadMessage(); errReadLoop != nil {
+\t\t\t\tif _, _, errRead := conn.ReadMessage(); errRead != nil {
 \t\t\t\t\treturn
 \t\t\t\t}
 \t\t\t}
 \t\t}()'''
-        if provider == 'codex':
-            reader = reader.replace('errReadLoop', 'errRead')
-            if variant == 'WithSession':
-                reader = reader.replace('\t\t\t\t\treturn', '\t\t\t\t\treadErrCh <- errRead\n\t\t\t\t\treturn')
-        if body.count(reader) != 1:
-            raise SystemExit(f'expected one upload reader in {websocket_tests}: {signature}')
-        # The Codex session test has an unused error channel before its reader.
-        body = body.replace(reader, '''\t\trequestReadCh := make(chan error, 1)
+    if variant == 'WithSession':
+        reader = reader.replace('\t\t\t\t\treturn', '\t\t\t\t\treadErrCh <- errRead\n\t\t\t\t\treturn')
+    if body.count(reader) != 1:
+        raise SystemExit(f'expected one upload reader in {websocket_tests}: {signature}')
+    # The Codex session test has an unused error channel before its reader.
+    body = body.replace(reader, '''\t\trequestReadCh := make(chan error, 1)
 \t\tgo func() {
 \t\t\t_, _, errRead := conn.ReadMessage()
 \t\t\trequestReadCh <- errRead
 \t\t}()''', 1)
-        body = body.replace('\t\treadErrCh := make(chan error, 1)\n', '', 1)
-        marker = '\t\trespPayload := '
-        if body.count(marker) != 1:
-            raise SystemExit(f'expected one terminal response in {websocket_tests}: {signature}')
-        body = body.replace(marker, '''\t\t// Pong unblocks the upload hook; wait for the actual request before closing.
+    body = body.replace('\t\treadErrCh := make(chan error, 1)\n', '', 1)
+    marker = '\t\trespPayload := '
+    if body.count(marker) != 1:
+        raise SystemExit(f'expected one terminal response in {websocket_tests}: {signature}')
+    body = body.replace(marker, '''\t\t// Pong unblocks the upload hook; wait for the actual request before closing.
 \t\tselect {
 \t\tcase errRead := <-requestReadCh:
 \t\t\tif errRead != nil {
@@ -593,7 +588,7 @@ for provider, variants in (
 \t\t}
 
 ''' + marker, 1)
-        write(websocket_tests, text[:start] + body + text[end:])
+    write(websocket_tests, text[:start] + body + text[end:])
 
 home_concurrency = ROOT / 'sdk/cliproxy/auth/home_concurrency.go'
 replace_go_function(
@@ -2523,106 +2518,8 @@ replace_once(responses_interrupt_test,
     '\tif !executor.canceled.Load() {\n\t\tt.Fatal("http upstream was not canceled")\n\t}',
     '\tselect {\n\tcase <-executor.canceled:\n\tcase <-time.After(5 * time.Second):\n\t\tt.Fatal("http upstream was not canceled")\n\t}')
 
-responses_websocket_forward = ROOT / 'sdk/api/handlers/openai/openai_responses_websocket_forward.go'
-replace_once(
-    responses_websocket_forward,
-    '''	for {
-		select {
-''',
-    '''	handleError := func(errMsg *interfaces.ErrorMessage) ([]byte, string, []string, *interfaces.ErrorMessage, error) {
-		if errMsg == nil {
-			cancel(nil)
-			return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), nil, nil
-		}
-
-		h.LoggingAPIResponseError(context.WithValue(context.Background(), "gin", c), errMsg)
-		if opts.suppressError != nil && opts.suppressError(errMsg) {
-			cancel(errMsg.Error)
-			return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, nil
-		}
-		markAPIResponseTimestamp(c)
-		if matched, errClose := writer.closeForUpstreamError(errMsg.Error); matched {
-			cancel(errMsg.Error)
-			if errClose != nil {
-				return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, errClose
-			}
-			return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, websocket.ErrCloseSent
-		}
-
-		errorPayload, wrote, errTerminate := writeResponsesWebsocketTerminalError(writer, wsTimelineLog, errMsg, nil)
-		if wrote {
-			log.Infof(
-				"responses websocket: downstream_out id=%s type=%d event=%s payload=%s",
-				sessionID,
-				websocket.TextMessage,
-				websocketPayloadEventType(errorPayload),
-				websocketPayloadPreview(errorPayload),
-			)
-		}
-		cancel(errMsg.Error)
-		return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, errTerminate
-	}
-
-	for {
-		select {
-''',
-)
-replace_once(
-    responses_websocket_forward,
-    '''			if errMsg == nil {
-				cancel(nil)
-				return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), nil, nil
-			}
-
-			h.LoggingAPIResponseError(context.WithValue(context.Background(), "gin", c), errMsg)
-			if opts.suppressError != nil && opts.suppressError(errMsg) {
-				cancel(errMsg.Error)
-				return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, nil
-			}
-			markAPIResponseTimestamp(c)
-			if matched, errClose := writer.closeForUpstreamError(errMsg.Error); matched {
-				cancel(errMsg.Error)
-				if errClose != nil {
-					return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, errClose
-				}
-				return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, websocket.ErrCloseSent
-			}
-
-			errorPayload, wrote, errTerminate := writeResponsesWebsocketTerminalError(writer, wsTimelineLog, errMsg, nil)
-			if wrote {
-				log.Infof(
-					"responses websocket: downstream_out id=%s type=%d event=%s payload=%s",
-					sessionID,
-					websocket.TextMessage,
-					websocketPayloadEventType(errorPayload),
-					websocketPayloadPreview(errorPayload),
-				)
-			}
-			cancel(errMsg.Error)
-			return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, errTerminate
-''',
-    '''			return handleError(errMsg)
-''',
-)
-replace_once(
-    responses_websocket_forward,
-    '''		case chunk, ok := <-data:
-			if !ok {
-''',
-    '''		case chunk, ok := <-data:
-			if !ok {
-				// The producer queues its terminal error before closing data. Both
-				// channels may be ready, so consume that error before treating EOF
-				// as an incomplete response or closing a duplex connection.
-				select {
-				case errMsg, ok := <-errs:
-					if ok {
-						return handleError(errMsg)
-					}
-				default:
-				}
-''',
-)
+# Upstream v8.0.43 handles queued terminal errors through handleErr and
+# PendingStreamError; retain the regression coverage without duplicating it.
 queue_go_source('sdk/api/handlers/openai/responses_websocket_terminal_order_test.go')
 queue_go_source('sdk/api/handlers/openai/responses_interrupt_lifecycle_test.go')
 
@@ -3359,23 +3256,15 @@ replace_once(
     'ctx, interceptErr = admitAPIKeyQuota(ctx)\n\tif interceptErr != nil {\n\t\tlifecycle.completeError(ctx, interceptErr)\n\t\treturn nil, nil, interceptErr\n\t}\n\tresp, errCount := host.CountPluginExecutor',
 )
 
+# Upstream covers closed channels; Pro also gives cancellation priority over
+# buffered data/errors so a canceled request cannot be reported as failed.
 handlers_interceptors_source = ROOT / 'sdk/api/handlers/handlers_interceptors.go'
 replace_once(
     handlers_interceptors_source,
-    '''\t\tcase chunk, ok = <-chunks:
-\t\t}
-''',
-    '''\t\tcase chunk, ok = <-chunks:
-\t\t\t// Cancellation owns the terminal outcome when the upstream channel
-\t\t\t// becomes ready concurrently with ctx.Done().
-\t\t\tselect {
-\t\t\tcase <-ctx.Done():
-\t\t\t\treturn coreexecutor.StreamChunk{}, false, true
-\t\t\tdefault:
-\t\t\t}
-\t\t}
-''',
-    'Cancellation owns the terminal outcome',
+    '\t\t\tif !ok && ctx.Err() != nil {\n',
+    '\t\t\t// Cancellation also wins over buffered data and terminal errors.\n'
+    '\t\t\tif ctx.Err() != nil {\n',
+    'Cancellation also wins over buffered data and terminal errors.',
 )
 
 handlers_stream_source = ROOT / 'sdk/api/handlers/handlers_stream.go'
@@ -6618,8 +6507,8 @@ replace_once(
 )
 replace_once(
     auth_conductor,
-    '\t\tdevinQuotaRestored := mode == updateModeRefresh && applyDevinQuotaRestoration(auth, existing, time.Now())\n',
-    '\t\tdevinQuotaRestored := (mode == updateModeRefresh || (mode == updateModeInspectionRefresh && inspectionRefreshRestrictionsMatch(base, existing))) && applyDevinQuotaRestoration(auth, existing, time.Now())\n',
+    '\t\tdevinQuotaRestored := mode == updateModeRefresh && applyDevinQuotaRestoration(auth, existing, now)\n',
+    '\t\tdevinQuotaRestored := (mode == updateModeRefresh || (mode == updateModeInspectionRefresh && inspectionRefreshRestrictionsMatch(base, existing))) && applyDevinQuotaRestoration(auth, existing, now)\n',
     'devinQuotaRestored := (mode == updateModeRefresh || (mode == updateModeInspectionRefresh',
 )
 replace_once(
@@ -7790,7 +7679,6 @@ format_go_writes([
     'internal/runtime/executor/codex_websockets_errors.go',
     'internal/runtime/executor/codex_websockets_execute.go',
     'internal/runtime/executor/codex_websockets_executor_test.go',
-    'internal/runtime/executor/xai_websockets_executor_test.go',
     'internal/runtime/executor/codex_websockets_stream.go',
 	'internal/runtime/executor/antigravity_executor.go',
 	'internal/runtime/executor/antigravity_runtime_proxy_test.go',

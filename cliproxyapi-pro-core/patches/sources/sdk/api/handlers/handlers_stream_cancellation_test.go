@@ -12,17 +12,30 @@ import (
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
 
-func TestNextStreamChunkPrefersCancellationOverClosedChannel(t *testing.T) {
-	for i := 0; i < 1000; i++ {
-		ctx, cancel := context.WithCancel(context.Background())
-		chunks := make(chan coreexecutor.StreamChunk)
-		cancel()
-		close(chunks)
-
-		_, ok, canceled := nextStreamChunk(ctx, nil, nil, chunks)
-		if ok || !canceled {
-			t.Fatalf("iteration %d: nextStreamChunk() = (_, %v, %v), want (_, false, true)", i, ok, canceled)
-		}
+func TestNextStreamChunkPrefersCancellationOverReadyChannel(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		chunk *coreexecutor.StreamChunk
+	}{
+		{"closed", nil},
+		{"buffered_data", &coreexecutor.StreamChunk{Payload: []byte("data")}},
+		{"buffered_error", &coreexecutor.StreamChunk{Err: errors.New("upstream failed")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for i := 0; i < 1000; i++ {
+				ctx, cancel := context.WithCancel(context.Background())
+				chunks := make(chan coreexecutor.StreamChunk, 1)
+				if tc.chunk != nil {
+					chunks <- *tc.chunk
+				}
+				cancel()
+				close(chunks)
+				_, ok, canceled := nextStreamChunk(ctx, nil, nil, chunks)
+				if ok || !canceled {
+					t.Fatalf("iteration %d: nextStreamChunk() = (_, %v, %v), want (_, false, true)", i, ok, canceled)
+				}
+			}
+		})
 	}
 }
 

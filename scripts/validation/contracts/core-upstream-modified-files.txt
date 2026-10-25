@@ -58,7 +58,6 @@ internal/runtime/executor/xai_executor.go
 internal/runtime/executor/xai_executor_execute.go
 internal/runtime/executor/xai_executor_stream.go
 internal/runtime/executor/xai_websockets_executor.go
-internal/runtime/executor/xai_websockets_executor_test.go
 sdk/api/handlers/claude/code_handlers.go
 sdk/api/handlers/gemini/gemini_handlers.go
 sdk/api/handlers/handlers.go
