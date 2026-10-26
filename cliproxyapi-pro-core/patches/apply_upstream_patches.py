@@ -5911,16 +5911,17 @@ replace_once(
 )
 # Observe the complete final wire body: the HTTP fallback reads only a bounded
 # prefix and cannot find a model placed after a large conversation input.
-for relative_path, expected_count in (
-    ('internal/runtime/executor/codex_executor_execute.go', 2),
-    ('internal/runtime/executor/codex_executor_stream.go', 1),
+for relative_path, expected_count, response_ready in (
+    ('internal/runtime/executor/codex_executor_execute.go', 2, 'nil'),
+    ('internal/runtime/executor/codex_executor_stream.go', 1, 'responseReady'),
 ):
     target = ROOT / relative_path
+    request_call = f'\thttpResp, err := doCodexRequest(httpClient, httpReq, upstreamBody, prepareHeaders, {response_ready})'
     if 'reporter.ObserveUpstreamRequestModel(upstreamBody)' not in read(target):
         replace_all_exact(
             target,
-            '\thttpResp, err := httpClient.Do(httpReq)',
-            '\treporter.ObserveUpstreamRequestModel(upstreamBody)\n\thttpResp, err := httpClient.Do(httpReq)',
+            request_call,
+            '\treporter.ObserveUpstreamRequestModel(upstreamBody)\n' + request_call,
             expected_count,
         )
 # Compact returns a JSON response object rather than Codex SSE events.
