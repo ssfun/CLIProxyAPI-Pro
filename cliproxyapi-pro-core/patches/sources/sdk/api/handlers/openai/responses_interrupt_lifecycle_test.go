@@ -7,7 +7,7 @@ import "testing"
 // disconnect must reject active delivery. Duplex responses share one forwarder.
 func TestResponsesInterruptLifecycle(t *testing.T) {
 	s := newResponsesLocalInterrupt()
-	s.begin()
+	s.begin(false)
 	created := func(id string) { s.observe([]byte(`{"type":"response.created","response":{"id":"` + id + `"}}`)) }
 	done := func(id string) { s.observe([]byte(`{"type":"response.completed","response":{"id":"` + id + `"}}`)) }
 	payload := func(id string) []byte { return []byte(`{"type":"response.interrupt","response_id":"` + id + `"}`) }
@@ -42,7 +42,7 @@ func TestResponsesInterruptLifecycle(t *testing.T) {
 	if s.deliver(payload("r2")) {
 		t.Fatal("disconnected response accepted")
 	}
-	s.begin()
+	s.begin(false)
 	created("r-http")
 	if active, terminal := s.classify(payload("r1")); active || !terminal {
 		t.Fatal("old websocket terminal ID lost across HTTP switch")

@@ -2406,13 +2406,14 @@ replace_once(
 
 responses_websocket_input = ROOT / 'sdk/api/handlers/openai/openai_responses_websocket_input.go'
 replace_once(responses_websocket_input,
-    '\tactive bool\n',
-    '\tactive bool\n\tactiveIDs map[string]struct{}\n\tterminalIDs map[string]struct{}\n')
+    '\twsTurnActive bool\n',
+    '\twsTurnActive bool\n\tactiveIDs map[string]struct{}\n\tterminalIDs map[string]struct{}\n')
 replace_once(responses_websocket_input,
     '\ts.active = false\n', '\ts.active = false\n\ts.activeIDs = nil\n')
 replace_once(responses_websocket_input,
-    '\tif !s.active {\n',
-    '\t_, activeID := s.activeIDs[gjson.GetBytes(payload, "response_id").String()]\n\tif !s.active || !activeID {\n')
+    '\tif !s.active || s.wsTurnActive {\n',
+    '\t_, activeID := s.activeIDs[gjson.GetBytes(payload, "response_id").String()]\n'
+    '\tif !s.active || s.wsTurnActive || !activeID {\n')
 replace_once(responses_websocket_input,
     '\t\t\t\terrInterrupt := interrupt(payload)\n',
     '\t\t\t\tactive, terminal := local.classify(payload)\n'
@@ -2425,17 +2426,47 @@ replace_once(responses_websocket_input,
     '\t\t\t\tdefault:\n'
     '\t\t\t\t\terrInterrupt = interrupt(payload)\n'
     '\t\t\t\t}\n')
-replace_once(ROOT / 'sdk/api/handlers/openai/openai_responses_websocket_forward.go',
-    '\t\tcase interruptPayload := <-localFrames:\n',
+# v8.0.46 retains every claimed frame and consumes claims in two places.
+# Preserve both upstream rejection paths instead of silently dropping a stale
+# claim, and record local terminal IDs before either acknowledgement is sent.
+responses_websocket_forward = ROOT / 'sdk/api/handlers/openai/openai_responses_websocket_forward.go'
+replace_once(responses_websocket_forward,
+    '\t\tcase interruptPayload := <-localFrames:\n\t\t\tif turnEnded {\n',
     '\t\tcase interruptPayload := <-localFrames:\n'
-    '\t\t\tif active, _ := opts.localInterrupt.classify(interruptPayload); !active {\n'
-    '\t\t\t\tcontinue\n'
-    '\t\t\t}\n'
-    '\t\t\topts.localInterrupt.completeInterrupt(interruptPayload)\n')
+    '\t\t\tactive, _ := opts.localInterrupt.classify(interruptPayload)\n'
+    '\t\t\tif turnEnded || !active {\n')
+replace_once(responses_websocket_forward,
+    '\n\t\t\treturn completeResponsesWebsocketLocalInterrupt(writer,',
+    '\n\t\t\topts.localInterrupt.completeInterrupt(interruptPayload)\n'
+    '\t\t\treturn completeResponsesWebsocketLocalInterrupt(writer,')
+replace_once(responses_websocket_forward,
+    '\t\t\t\t\tif !turnEnded {\n'
+    '\t\t\t\t\t\treturn completeResponsesWebsocketLocalInterrupt(writer,',
+    '\t\t\t\t\tactive, _ := opts.localInterrupt.classify(interruptPayload)\n'
+    '\t\t\t\t\tif !turnEnded && active {\n'
+    '\t\t\t\t\t\topts.localInterrupt.completeInterrupt(interruptPayload)\n'
+    '\t\t\t\t\t\treturn completeResponsesWebsocketLocalInterrupt(writer,')
 replace_once(ROOT / 'sdk/api/handlers/openai/openai_responses_websocket_forward.go',
     '\t\t\tfor i := range payloads {\n',
     '\t\t\tfor i := range payloads {\n\t\t\t\topts.localInterrupt.observe(payloads[i])\n')
 queue_go_source('sdk/api/handlers/openai/responses_interrupt_lifecycle.go')
+
+# Keep upstream claim-queue and ownership regressions meaningful with Pro's
+# response-ID eligibility gate: each intended claim needs an observed ID.
+responses_claimed_test = ROOT / 'sdk/api/handlers/openai/openai_responses_websocket_claimed_interrupt_test.go'
+for claimed_id in ('unknown', 'first', 'r1'):
+    claim_line = ('\tif !local.deliver([]byte(`{"type":"response.interrupt","response_id":"'
+        + claimed_id + '"}`)) {\n')
+    replace_once(responses_claimed_test,
+        '\tlocal.begin(false)\n' + claim_line,
+        '\tlocal.begin(false)\n'
+        '\tfor _, id := range []string{"unknown", "first", "second", "r1"} {\n'
+        '\t\tlocal.observe([]byte(`{"type":"response.created","response":{"id":"` + id + `"}}`))\n'
+        '\t}\n' + claim_line)
+replace_once(responses_claimed_test,
+    '\tlocal.begin(true)\n',
+    '\tlocal.begin(true)\n'
+    '\tlocal.observe([]byte(`{"type":"response.created","response":{"id":"r1"}}`))\n')
 
 responses_interrupt_test = ROOT / 'sdk/api/handlers/openai/openai_responses_interrupt_test.go'
 replace_once(responses_interrupt_test,

@@ -1,4 +1,4 @@
-# Latest-only baseline: CLIProxyAPI v8.0.45 (ad8bdd3f20bef44f0684b8a6096a216b2c76040d).
+# Latest-only baseline: CLIProxyAPI v8.0.46 (9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5).
 # Update this reviewed surface when adapting upstream or reducing native-file patches.
 cmd/server/main.go
 config.example.yaml
@@ -68,6 +68,7 @@ sdk/api/handlers/handlers_stream.go
 sdk/api/handlers/openai/openai_handlers.go
 sdk/api/handlers/openai/openai_responses_interrupt_test.go
 sdk/api/handlers/openai/openai_responses_websocket.go
+sdk/api/handlers/openai/openai_responses_websocket_claimed_interrupt_test.go
 sdk/api/handlers/openai/openai_responses_websocket_forward.go
 sdk/api/handlers/openai/openai_responses_websocket_input.go
 sdk/api/handlers/stream_forwarder.go

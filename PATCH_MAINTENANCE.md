@@ -141,3 +141,7 @@ Core 发布复用本次 Linux amd64 发布 archive，运行既有配置、流式
 认证中间件只修改签名和策略接入，保留上游新加入的未消费请求关闭、认证后 body capture 及 abort 检查。Usage 发布只替换 Pro 字段准备行，保留上游 captured-identity 上下文传播。这两处局部锚点不再要求相邻原生函数或完整发布函数逐字一致。
 
 Safe response header adaptation retains the v8.0.45 native precedence for aggregate retry rounds, trusted retry deadlines, concurrency busy errors, dispatch cooldowns, model/auth cooldowns, and generic safe-header carriers. The Pro layer adds only the legacy `StatusCode()` plus `RetryAfter()` fallback after those native carriers, preserving compatibility for status errors without overriding native deadlines.
+
+### Core v8.0.46 Responses interrupt compatibility
+
+Baseline Core SHA: `9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5`; models SHA: `85c371372888a72292f41b2d6831fec3539313da`. The generator preserves upstream websocket ownership (`begin(websocketOwned)`, `reactivate`, `stopClaims`, and `takeClaimed`) while adding Pro response-ID eligibility. Both queued-claim paths reject stale IDs and record locally completed IDs before acknowledgement. Replay starts from a clean upstream tree; applying over an already customized tree must fail atomically. Existing interrupt and websocket lifecycle integrations are the validation contract.

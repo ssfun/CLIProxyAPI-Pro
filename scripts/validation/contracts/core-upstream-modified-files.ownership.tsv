@@ -1,4 +1,4 @@
-# Latest-only ownership review for Core v8.0.45 (ad8bdd3f20bef44f0684b8a6096a216b2c76040d).
+# Latest-only ownership review for Core v8.0.46 (9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5).
 # Categories describe the whole Pro delta for each modified upstream file.
 # The current roadmap keeps host business-state extensions in host patches;
 # this review does not assume or require a plugin migration.
@@ -71,6 +71,7 @@ sdk/api/handlers/handlers_stream.go	must-remain-host-patch	api-key-policy	retain
 sdk/api/handlers/openai/openai_handlers.go	must-remain-host-patch	final-model-response	retain-final-openai-model-filtering
 sdk/api/handlers/openai/openai_responses_interrupt_test.go	upstream-generic-fix	stream-cancellation	upstream-executor-cancellation-acknowledgement
 sdk/api/handlers/openai/openai_responses_websocket.go	must-remain-host-patch	api-key-policy	retain-websocket-turn-quota-admission
+sdk/api/handlers/openai/openai_responses_websocket_claimed_interrupt_test.go	upstream-generic-fix	websocket-interrupt-lifecycle	seed-active-response-ids-for-claim-queue-and-ownership-regressions
 sdk/api/handlers/openai/openai_responses_websocket_forward.go	upstream-generic-fix	websocket-terminal-order	consume-queued-terminal-error-before-data-channel-eof
 sdk/api/handlers/openai/openai_responses_websocket_input.go	upstream-generic-fix	stream-cancellation	upstream-response-scoped-interrupt-lifecycle
 sdk/api/handlers/stream_forwarder.go	upstream-generic-fix	stream-cancellation	upstream-canceled-eof-classification
