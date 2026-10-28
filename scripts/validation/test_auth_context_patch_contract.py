@@ -18,6 +18,10 @@ UPSTREAM = '''\t\tif err == nil {
 \t\t\t\t\tc.Set("accessMetadata", result.Metadata)
 \t\t\t\t}
 ''' + USAGE + '''\t\t\t}
+\t\t\tmiddleware.CaptureAuthenticatedRequestBody(c)
+\t\t\tif c.IsAborted() {
+\t\t\t\treturn
+\t\t\t}
 \t\t\tc.Next()
 \t\t\treturn
 \t\t}

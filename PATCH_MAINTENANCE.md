@@ -133,3 +133,11 @@ Core 发布复用本次 Linux amd64 发布 archive，运行既有配置、流式
 | 公共弹窗与滚动锁 | 上游具备确认队列、去重、重复提交保护、异步关闭推进及嵌套遮罩锁释放 | 连续确认、双击提交、异步完成、嵌套关闭、卸载和焦点恢复 |
 
 每项退出前固定包含等价实现的上游 tag/SHA，在该版本移除本地补丁并重放相关行为验证；不能仅凭功能名称或发布说明删除。管理端独立发布仍须与冻结的已发布 Core 配对验证。
+
+### Core v8.0.45 漂移适配
+
+本次固定上游 `ad8bdd3f20bef44f0684b8a6096a216b2c76040d`。HTTP、图片和 WebSocket 握手直接复用原生 `newCodexStatusErrWithHeadersAndCooling`，删除重复包装与调用替换；`codex_openai_images.go` 恢复原生并退出修改清单。原生错误体 reset 优先级和 model-level cooling 保持不变，标准头解析遵循上游：零值与过去日期返回零，超出 duration 范围的整数钳制为最大值。Pro 严格头解析仅保留于 WebSocket 错误帧的连接数限制分支，以保留有效头优先于零秒 fallback 的既有行为；上游覆盖该顺序后退出此剩余补丁。
+
+认证中间件只修改签名和策略接入，保留上游新加入的未消费请求关闭、认证后 body capture 及 abort 检查。Usage 发布只替换 Pro 字段准备行，保留上游 captured-identity 上下文传播。这两处局部锚点不再要求相邻原生函数或完整发布函数逐字一致。
+
+Safe response header adaptation retains the v8.0.45 native precedence for aggregate retry rounds, trusted retry deadlines, concurrency busy errors, dispatch cooldowns, model/auth cooldowns, and generic safe-header carriers. The Pro layer adds only the legacy `StatusCode()` plus `RetryAfter()` fallback after those native carriers, preserving compatibility for status errors without overriding native deadlines.

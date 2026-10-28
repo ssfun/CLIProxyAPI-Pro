@@ -52,10 +52,10 @@ func TestCodexRetryAfterExecutePreservesHeader(t *testing.T) {
 
 func TestCodexRetryAfterBodyResetTakesPrecedence(t *testing.T) {
 	body := []byte(`{"error":{"type":"usage_limit_reached","resets_in_seconds":120}}`)
-	err := newCodexStatusErrWithHeaders(
+	err := newCodexStatusErrWithHeadersAndCooling(
 		http.StatusTooManyRequests,
-		body,
 		http.Header{"Retry-After": []string{"37"}},
+		body,
 		false,
 	)
 	if retryAfter := err.RetryAfter(); retryAfter == nil || *retryAfter != 120*time.Second {
@@ -64,10 +64,10 @@ func TestCodexRetryAfterBodyResetTakesPrecedence(t *testing.T) {
 }
 
 func TestCodexRetryAfterUsesStandardHeader(t *testing.T) {
-	err := newCodexStatusErrWithHeaders(
+	err := newCodexStatusErrWithHeadersAndCooling(
 		http.StatusTooManyRequests,
-		[]byte(`{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded"}}`),
 		http.Header{"Retry-After": []string{"37"}},
+		[]byte(`{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded"}}`),
 		false,
 	)
 	if retryAfter := err.RetryAfter(); retryAfter == nil || *retryAfter != 37*time.Second {
@@ -132,10 +132,10 @@ func TestCodexRetryAfterRejectsNonStandardOrMissingValues(t *testing.T) {
 }
 
 func TestCodexRetryAfterIgnoresHeaderForNon429(t *testing.T) {
-	err := newCodexStatusErrWithHeaders(
+	err := newCodexStatusErrWithHeadersAndCooling(
 		http.StatusBadGateway,
-		[]byte(`{"error":{"message":"upstream unavailable"}}`),
 		http.Header{"Retry-After": []string{"37"}},
+		[]byte(`{"error":{"message":"upstream unavailable"}}`),
 		false,
 	)
 	if retryAfter := err.RetryAfter(); retryAfter != nil {

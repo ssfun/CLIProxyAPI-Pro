@@ -421,19 +421,13 @@ for flag, variable in (
         f'\tif claudeauth.ReadMetadataBool(&auth.Metadata, "{flag}") {{\n',
     )
 
+# Native HTTP and WebSocket handshake helpers preserve Retry-After as of v8.0.45.
+# Keep the stricter parser only for the Pro WebSocket connection-limit override.
 codex_terminal = ROOT / 'internal/runtime/executor/codex_executor_terminal.go'
 insert_before(
     codex_terminal,
     'func newCodexStatusErrWithCooling(',
-    '''func newCodexStatusErrWithHeaders(statusCode int, body []byte, responseHeaders http.Header, modelLevelCooling bool) statusErr {
-	err := newCodexStatusErrWithCooling(statusCode, body, modelLevelCooling)
-	if err.retryAfter == nil && err.code == http.StatusTooManyRequests {
-		err.retryAfter = parseCodexRetryAfterHeader(responseHeaders.Get("Retry-After"), time.Now())
-	}
-	return err
-}
-
-func parseCodexRetryAfterHeader(raw string, now time.Time) *time.Duration {
+    '''func parseCodexRetryAfterHeader(raw string, now time.Time) *time.Duration {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
@@ -461,47 +455,7 @@ func parseCodexRetryAfterHeader(raw string, now time.Time) *time.Duration {
 }
 
 ''',
-    'func newCodexStatusErrWithHeaders(',
-)
-
-codex_execute = ROOT / 'internal/runtime/executor/codex_executor_execute.go'
-replace_all_exact(
-    codex_execute,
-    'newCodexStatusErrWithCooling(httpResp.StatusCode, b, e.modelLevelCooling())',
-    'newCodexStatusErrWithHeaders(httpResp.StatusCode, b, httpResp.Header, e.modelLevelCooling())',
-    2,
-)
-
-codex_images = ROOT / 'internal/runtime/executor/codex_openai_images.go'
-replace_all_exact(
-    codex_images,
-    'newCodexStatusErrWithCooling(httpResp.StatusCode, data, e.modelLevelCooling())',
-    'newCodexStatusErrWithHeaders(httpResp.StatusCode, data, httpResp.Header, e.modelLevelCooling())',
-    4,
-)
-
-codex_stream = ROOT / 'internal/runtime/executor/codex_executor_stream.go'
-replace_all_exact(
-    codex_stream,
-    'newCodexStatusErrWithCooling(httpResp.StatusCode, data, e.modelLevelCooling())',
-    'newCodexStatusErrWithHeaders(httpResp.StatusCode, data, httpResp.Header, e.modelLevelCooling())',
-    1,
-)
-
-codex_websocket_execute = ROOT / 'internal/runtime/executor/codex_websockets_execute.go'
-replace_all_exact(
-    codex_websocket_execute,
-    'newCodexStatusErrWithCooling(respHS.StatusCode, bodyErr, e.modelLevelCooling())',
-    'newCodexStatusErrWithHeaders(respHS.StatusCode, bodyErr, respHS.Header, e.modelLevelCooling())',
-    1,
-)
-
-codex_websocket_stream = ROOT / 'internal/runtime/executor/codex_websockets_stream.go'
-replace_all_exact(
-    codex_websocket_stream,
-    'newCodexStatusErrWithCooling(respHS.StatusCode, bodyErr, e.modelLevelCooling())',
-    'newCodexStatusErrWithHeaders(respHS.StatusCode, bodyErr, respHS.Header, e.modelLevelCooling())',
-    1,
+    'func parseCodexRetryAfterHeader(',
 )
 
 codex_websocket_errors = ROOT / 'internal/runtime/executor/codex_websockets_errors.go'
@@ -591,37 +545,23 @@ for variant in ('WithSession', 'Sessionless', 'NonstreamSessionless'):
     write(websocket_tests, text[:start] + body + text[end:])
 
 home_concurrency = ROOT / 'sdk/cliproxy/auth/home_concurrency.go'
-replace_go_function(
+# Preserve native carrier precedence, including aggregate and trusted deadlines;
+# only add the Pro fallback after the generic safe-header provider.
+replace_once(
     home_concurrency,
-    'func SafeResponseHeaders(err error) http.Header',
-    '''func SafeResponseHeaders(err error) http.Header {
-	var busy *HomeConcurrencyBusyError
-	if errors.As(err, &busy) && busy != nil {
-		return busy.SafeResponseHeaders()
-	}
-	var exhausted *homeRetryRoundExhaustedError
-	if errors.As(err, &exhausted) && exhausted != nil {
-		retryAfter := exhausted.RetryAfter()
-		if retryAfter == nil {
-			return nil
+    '''	var safeHeaderProvider interface{ SafeResponseHeaders() http.Header }
+	if errors.As(err, &safeHeaderProvider) && safeHeaderProvider != nil {
+		if value := safeHeaderProvider.SafeResponseHeaders().Get("Retry-After"); value != "" {
+			return http.Header{"Retry-After": []string{value}}
 		}
-		return safeRetryAfterHeader(*retryAfter)
 	}
-	var cooldown *homeDispatchRetryAfterError
-	if errors.As(err, &cooldown) && cooldown != nil {
-		retryAfter := cooldown.RetryAfter()
-		if retryAfter == nil {
-			return nil
+	return nil
+''',
+    '''	var safeHeaderProvider interface{ SafeResponseHeaders() http.Header }
+	if errors.As(err, &safeHeaderProvider) && safeHeaderProvider != nil {
+		if value := safeHeaderProvider.SafeResponseHeaders().Get("Retry-After"); value != "" {
+			return http.Header{"Retry-After": []string{value}}
 		}
-		return safeRetryAfterHeader(*retryAfter)
-	}
-	var modelCooldown *modelCooldownError
-	if errors.As(err, &modelCooldown) && modelCooldown != nil {
-		return modelCooldown.Headers()
-	}
-	var unavailable *authUnavailableError
-	if errors.As(err, &unavailable) && unavailable != nil {
-		return unavailable.Headers()
 	}
 	var statusRetryAfter interface {
 		StatusCode() int
@@ -633,7 +573,6 @@ replace_go_function(
 		}
 	}
 	return nil
-}
 ''',
     'var statusRetryAfter interface',
 )
@@ -2190,30 +2129,14 @@ replace_once(
 
 server_middleware_source = ROOT / 'internal/api/server_middleware.go'
 add_go_import(server_middleware_source, 'codexlive "' + import_path('internal/client/codex/live') + '"\n', '\tapikeypolicy "' + import_path('internal/pro/apikeypolicy') + '"\n')
-replace_once(
-    server_middleware_source,
-    '''func AuthMiddleware(manager *sdkaccess.Manager) gin.HandlerFunc {
-\treturn accessAuthMiddleware(manager, false)
-}
-
-func realtimeStandardAuthMiddleware(manager *sdkaccess.Manager) gin.HandlerFunc {
-\treturn accessAuthMiddleware(manager, true)
-}
-
-func accessAuthMiddleware(manager *sdkaccess.Manager, realtimeError bool) gin.HandlerFunc {
-''',
-    '''func AuthMiddleware(manager *sdkaccess.Manager, policy *apikeypolicy.Service) gin.HandlerFunc {
-\treturn accessAuthMiddleware(manager, policy, false)
-}
-
-func realtimeStandardAuthMiddleware(manager *sdkaccess.Manager, policy *apikeypolicy.Service) gin.HandlerFunc {
-\treturn accessAuthMiddleware(manager, policy, true)
-}
-
-func accessAuthMiddleware(manager *sdkaccess.Manager, policy *apikeypolicy.Service, realtimeError bool) gin.HandlerFunc {
-''',
-    'func AuthMiddleware(manager *sdkaccess.Manager, policy *apikeypolicy.Service)',
-)
+for old, new in (
+    ('func AuthMiddleware(manager *sdkaccess.Manager)', 'func AuthMiddleware(manager *sdkaccess.Manager, policy *apikeypolicy.Service)'),
+    ('accessAuthMiddleware(manager, false)', 'accessAuthMiddleware(manager, policy, false)'),
+    ('func realtimeStandardAuthMiddleware(manager *sdkaccess.Manager)', 'func realtimeStandardAuthMiddleware(manager *sdkaccess.Manager, policy *apikeypolicy.Service)'),
+    ('accessAuthMiddleware(manager, true)', 'accessAuthMiddleware(manager, policy, true)'),
+    ('func accessAuthMiddleware(manager *sdkaccess.Manager, realtimeError bool)', 'func accessAuthMiddleware(manager *sdkaccess.Manager, policy *apikeypolicy.Service, realtimeError bool)'),
+):
+    replace_once(server_middleware_source, old, new)
 replace_all_exact(
     server_middleware_source,
     '''\t\tif err == nil {
@@ -2227,6 +2150,10 @@ replace_all_exact(
 \t\t\t\treqCtx = coreusage.WithAccessProvider(reqCtx, result.Provider)
 \t\t\t\treqCtx = coreusage.WithIsNativeKey(reqCtx, coreusage.IsNativeAccessProvider(result.Provider))
 \t\t\t\tc.Request = c.Request.WithContext(reqCtx)
+\t\t\t}
+\t\t\tmiddleware.CaptureAuthenticatedRequestBody(c)
+\t\t\tif c.IsAborted() {
+\t\t\t\treturn
 \t\t\t}
 \t\t\tc.Next()
 \t\t\treturn
@@ -2258,6 +2185,10 @@ replace_all_exact(
 \t\t\t\t\trequestCtx = apikeypolicy.WithDecision(requestCtx, decision)
 \t\t\t\t\tc.Request = c.Request.WithContext(requestCtx)
 \t\t\t\t}
+\t\t\t}
+\t\t\tmiddleware.CaptureAuthenticatedRequestBody(c)
+\t\t\tif c.IsAborted() {
+\t\t\t\treturn
 \t\t\t}
 \t\t\tc.Next()
 \t\t\treturn
@@ -4687,18 +4618,11 @@ if stream_text.count(translated_scanner_outcome) != 1:
     raise SystemExit('expected translated Claude scanner outcome block')
 stream_text = stream_text.replace(translated_scanner_outcome, translated_scanner_replacement, 1)
 write(claude_stream, stream_text)
+# Preserve upstream captured-identity context while preparing Pro usage fields.
 replace_once(
     usage_helpers,
-    '''func (r *UsageReporter) publishRecord(ctx context.Context, record usage.Record) {
-\trecord.ResponseHeaders = internallogging.GetResponseHeaders(ctx)
-\tusage.PublishRecord(ctx, record)
-}
-''',
-    '''func (r *UsageReporter) publishRecord(ctx context.Context, record usage.Record) {
-\tprepareUsageRecordForPublish(ctx, &record)
-\tusage.PublishRecord(ctx, record)
-}
-''',
+    '\trecord.ResponseHeaders = internallogging.GetResponseHeaders(ctx)\n',
+    '\tprepareUsageRecordForPublish(ctx, &record)\n',
     'prepareUsageRecordForPublish(ctx, &record)',
 )
 config_defaults = ROOT / 'internal/config/config_defaults.go'
@@ -5925,6 +5849,7 @@ for relative_path, expected_count, response_ready in (
             expected_count,
         )
 # Compact returns a JSON response object rather than Codex SSE events.
+codex_execute = ROOT / 'internal/runtime/executor/codex_executor_execute.go'
 replace_once(
     codex_execute,
     '\treporter.Publish(ctx, helps.ParseOpenAIUsage(upstreamData))',
@@ -7675,7 +7600,6 @@ format_go_writes([
     'internal/runtime/executor/codex_executor_execute.go',
     'internal/runtime/executor/codex_executor_stream.go',
     'internal/runtime/executor/codex_executor_terminal.go',
-    'internal/runtime/executor/codex_openai_images.go',
     'internal/runtime/executor/codex_retry_after_test.go',
     'internal/runtime/executor/codex_websockets_errors.go',
     'internal/runtime/executor/codex_websockets_execute.go',
