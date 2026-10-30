@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
@@ -32,16 +33,25 @@ func (t claudeStreamTerminal) publishSuccess(buffer *helps.StreamUsageBuffer) {
 
 func (t claudeStreamTerminal) emitCancellation(buffer *helps.StreamUsageBuffer, cause error) bool {
 	cancelErr := newClaudeOAuthCancellationError(t.ctx, t.oauthCancellation, cause)
-	if cancelErr == nil {
-		return false
+	if cancelErr != nil {
+		helps.RecordAPIResponseError(t.ctx, t.cfg, cancelErr)
+		t.publishFailure(buffer, cancelErr)
+		select {
+		case t.out <- coreexecutor.StreamChunk{Err: cancelErr}:
+		default:
+		}
+		return true
 	}
-	helps.RecordAPIResponseError(t.ctx, t.cfg, cancelErr)
-	t.publishFailure(buffer, cancelErr)
-	select {
-	case t.out <- coreexecutor.StreamChunk{Err: cancelErr}:
-	default:
+	c := cause
+	if t.ctx != nil && t.ctx.Err() != nil {
+		c = t.ctx.Err()
 	}
-	return true
+	if errors.Is(c, context.Canceled) {
+		helps.RecordAPIResponseError(t.ctx, t.cfg, c)
+		t.publishFailure(buffer, c)
+		return true
+	}
+	return false
 }
 
 func (t claudeStreamTerminal) publishCancellation(buffer *helps.StreamUsageBuffer, cause error) {

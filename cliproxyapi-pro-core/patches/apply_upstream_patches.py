@@ -3830,12 +3830,10 @@ replace_once(
     usage_manager,
     '''\tTokenBreakdown      TokenBreakdown
 \tResponseServiceTier string
-}
 ''',
     '''\tTokenBreakdown      TokenBreakdown
 \tResponseServiceTier string
 \tResponseSpeed       string
-}
 ''',
     'ResponseSpeed       string',
 )
@@ -4118,46 +4116,44 @@ replace_once(
 ''',
     'ResponseSpeed:       strings.TrimSpace(usageNode.Get("speed").String())',
 )
+# Extend speed merging locally, retaining upstream structured usage and Gemini observations.
 replace_once(
     usage_helpers,
     '''\tresponseServiceTier := strings.TrimSpace(detail.ResponseServiceTier)
-\tif responseServiceTier == "" || hasNonZeroTokenUsage(detail) {
-\t\tpreservedTier := b.detail.ResponseServiceTier
-\t\tb.detail = detail
-\t\tif b.detail.ResponseServiceTier == "" {
-\t\t\tb.detail.ResponseServiceTier = preservedTier
-\t\t}
-\t} else {
-\t\tb.detail.ResponseServiceTier = responseServiceTier
-\t}
-\tb.ok = true
-}
+\tif responseServiceTier == "" || hasNonZeroTokenUsage(detail) || hasStructuredUsageDetail(detail) {
 ''',
     '''\tresponseServiceTier := strings.TrimSpace(detail.ResponseServiceTier)
 \tresponseSpeed := strings.TrimSpace(detail.ResponseSpeed)
-\tif (responseServiceTier == "" && responseSpeed == "") || hasNonZeroTokenUsage(detail) {
-\t\tpreservedTier := b.detail.ResponseServiceTier
-\t\tpreservedSpeed := b.detail.ResponseSpeed
-\t\tb.detail = detail
-\t\tif b.detail.ResponseServiceTier == "" {
-\t\t\tb.detail.ResponseServiceTier = preservedTier
-\t\t}
-\t\tif b.detail.ResponseSpeed == "" {
+\tif (responseServiceTier == "" && responseSpeed == "") || hasNonZeroTokenUsage(detail) || hasStructuredUsageDetail(detail) {
+''',
+    'responseSpeed := strings.TrimSpace(detail.ResponseSpeed)',
+)
+insert_before(
+    usage_helpers,
+    '\t\tpreservedTier := b.detail.ResponseServiceTier\n',
+    '\t\tpreservedSpeed := b.detail.ResponseSpeed\n',
+    'preservedSpeed := b.detail.ResponseSpeed',
+)
+insert_before(
+    usage_helpers,
+    '\t\tif b.detail.ResponseServiceTier == "" {\n',
+    '''\t\tif b.detail.ResponseSpeed == "" {
 \t\t\tb.detail.ResponseSpeed = preservedSpeed
 \t\t}
-\t} else {
-\t\tif responseServiceTier != "" {
+''',
+    'b.detail.ResponseSpeed = preservedSpeed',
+)
+replace_once(
+    usage_helpers,
+    '\t\tb.detail.ResponseServiceTier = responseServiceTier\n',
+    '''\t\tif responseServiceTier != "" {
 \t\t\tb.detail.ResponseServiceTier = responseServiceTier
 \t\t}
 \t\tif responseSpeed != "" {
 \t\t\tb.detail.ResponseSpeed = responseSpeed
 \t\t}
-\t}
-\tb.ok = true
-}
-
 ''',
-    'responseSpeed := strings.TrimSpace(detail.ResponseSpeed)',
+    'b.detail.ResponseSpeed = responseSpeed',
 )
 
 # Upstream owns nested Claude usage parsing, failure-detail publication and
@@ -4437,7 +4433,22 @@ openai_stream_text = (
 )
 write(openai_compat_execute, openai_stream_text)
 
+replace_all_exact(
+    claude_execute,
+    'streamUsage.ObserveClaudeSSEEvent(',
+    'responseUsageBuffer.ObserveClaudeSSEEvent(',
+    2,
+)
+
 claude_stream = ROOT / 'internal/runtime/executor/claude_executor_stream.go'
+# Cancellation classification lives in the same-package Pro terminal helper.
+replace_once(claude_stream, '\t"errors"\n', '', 'terminal := claudeStreamTerminal{')
+replace_all_exact(
+    claude_stream,
+    'streamUsage.ObserveClaudeSSEEvent(',
+    'usageBuffer.ObserveClaudeSSEEvent(',
+    4,
+)
 replace_all_exact(
     claude_stream,
     'streamUsage.ObserveClaudeStream(line)',
@@ -4482,16 +4493,25 @@ claude_failure_helpers_old = '''\t\tvar streamUsage helps.StreamUsageBuffer
 \t\tdefer streamUsage.Publish(ctx, reporter)
 \t\temitCancellation := func(cause error) bool {
 \t\t\tcancelErr := newClaudeOAuthCancellationError(ctx, fp.OAuthCancellation, cause)
-\t\t\tif cancelErr == nil {
-\t\t\t\treturn false
+\t\t\tif cancelErr != nil {
+\t\t\t\thelps.RecordAPIResponseError(ctx, e.cfg, cancelErr)
+\t\t\t\tstreamUsage.PublishFailure(ctx, reporter, cancelErr)
+\t\t\t\tselect {
+\t\t\t\tcase out <- cliproxyexecutor.StreamChunk{Err: cancelErr}:
+\t\t\t\tdefault:
+\t\t\t\t}
+\t\t\t\treturn true
 \t\t\t}
-\t\t\thelps.RecordAPIResponseError(ctx, e.cfg, cancelErr)
-\t\t\tstreamUsage.PublishFailure(ctx, reporter, cancelErr)
-\t\t\tselect {
-\t\t\tcase out <- cliproxyexecutor.StreamChunk{Err: cancelErr}:
-\t\t\tdefault:
+\t\t\tc := cause
+\t\t\tif ctx != nil && ctx.Err() != nil {
+\t\t\t\tc = ctx.Err()
 \t\t\t}
-\t\t\treturn true
+\t\t\tif errors.Is(c, context.Canceled) {
+\t\t\t\thelps.RecordAPIResponseError(ctx, e.cfg, c)
+\t\t\t\tstreamUsage.PublishFailure(ctx, reporter, c)
+\t\t\t\treturn true
+\t\t\t}
+\t\t\treturn false
 \t\t}
 \t\temitResponseError := func(errResponse error) {
 \t\t\terrResponse = wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, errResponse)
@@ -4567,12 +4587,16 @@ final_flush_replacement = '''			if !flushEvent() {
 if stream_text.count(final_flush_block) != 1:
     raise SystemExit('expected native Claude final flush cancellation block')
 stream_text = stream_text.replace(final_flush_block, final_flush_replacement, 1)
-translated_cancellation_block = '''				case <-ctx.Done():
-					emitCancellation(ctx.Err())
+translated_cancellation_block = '''					if !upstreamCompleted {
+						emitCancellation(ctx.Err())
+					}
 					return
 '''
-translated_cancellation_replacement = '''				case <-ctx.Done():
-					terminal.publishCancellation(&usageBuffer, ctx.Err())
+translated_cancellation_replacement = '''					if !upstreamCompleted {
+						terminal.publishCancellation(&usageBuffer, ctx.Err())
+					} else {
+						terminal.publishSuccess(&usageBuffer)
+					}
 					return
 '''
 if stream_text.count(translated_cancellation_block) != 1:
@@ -5754,7 +5778,13 @@ replace_once(
 \tif speed == "" {
 \t\tspeed = coreusage.SpeedFromContext(ctx)
 \t}
+\tif speed == "" {
+\t\tspeed = strings.TrimSpace(record.Detail.Speed)
+\t}
 \tresponseSpeed := strings.TrimSpace(record.ResponseSpeed)
+\tif responseSpeed == "" {
+\t\tresponseSpeed = strings.TrimSpace(record.Detail.Speed)
+\t}
 \tresponseModel := strings.TrimSpace(record.ResponseModel)
 \tclientRequestMetadata := internallogging.GetClientRequestMetadata(ctx)
 ''',
@@ -5785,56 +5815,57 @@ replace_once(
 )
 replace_all_exact(
     redisqueue_plugin,
-    '''\t\tAPIKey:               apiKey,
-\t\tIsNativeKey:          isNativeKey,
-\t\tAccessProvider:       accessProvider,
-\t\tRequestID:            requestID,
+    '''\t\tAPIKey:                apiKey,
+\t\tIsNativeKey:           isNativeKey,
+\t\tAccessProvider:        accessProvider,
+\t\tRequestID:             requestID,
 ''',
-    '''\t\tAPIKey:               apiKey,
-\t\tIsNativeKey:          isNativeKey,
-\t\tAccessProvider:       accessProvider,
-\t\tAPIKeyPolicyID:       apiKeyPolicyID,
-\t\tProfileID:            profileID,
-\t\tProfileNameSnapshot:  profileNameSnapshot,
-\t\tPolicyMode:           policyMode,
-\t\tRequestedModel:       requestedModel,
-\t\tEffectiveModel:       effectiveModel,
-\t\tRequestID:            requestID,
+    '''\t\tAPIKey:                apiKey,
+\t\tIsNativeKey:           isNativeKey,
+\t\tAccessProvider:        accessProvider,
+\t\tAPIKeyPolicyID:        apiKeyPolicyID,
+\t\tProfileID:             profileID,
+\t\tProfileNameSnapshot:   profileNameSnapshot,
+\t\tPolicyMode:            policyMode,
+\t\tRequestedModel:        requestedModel,
+\t\tEffectiveModel:        effectiveModel,
+\t\tRequestID:             requestID,
 ''',
     expected_count=1,
 )
 replace_all_exact(
     redisqueue_plugin,
-    '''\tAPIKey               string                   `json:"api_key"`
-\tIsNativeKey          bool                     `json:"is_native_key"`
-\tAccessProvider       string                   `json:"access_provider,omitempty"`
-\tRequestID            string                   `json:"request_id"`
+    '''\tAPIKey                string                      `json:"api_key"`
+\tIsNativeKey           bool                        `json:"is_native_key"`
+\tAccessProvider        string                      `json:"access_provider,omitempty"`
+\tRequestID             string                      `json:"request_id"`
 ''',
-    '''\tAPIKey               string                   `json:"api_key"`
-\tIsNativeKey          bool                     `json:"is_native_key"`
-\tAccessProvider       string                   `json:"access_provider,omitempty"`
-\tAPIKeyPolicyID       string                   `json:"api_key_policy_id,omitempty"`
-\tProfileID            string                   `json:"profile_id,omitempty"`
-\tProfileNameSnapshot  string                   `json:"profile_name_snapshot,omitempty"`
-\tPolicyMode           string                   `json:"policy_mode,omitempty"`
-\tRequestedModel       string                   `json:"requested_model,omitempty"`
-\tEffectiveModel       string                   `json:"effective_model,omitempty"`
-\tRequestID            string                   `json:"request_id"`
+    '''\tAPIKey                string                      `json:"api_key"`
+\tIsNativeKey           bool                        `json:"is_native_key"`
+\tAccessProvider        string                      `json:"access_provider,omitempty"`
+\tAPIKeyPolicyID        string                      `json:"api_key_policy_id,omitempty"`
+\tProfileID             string                      `json:"profile_id,omitempty"`
+\tProfileNameSnapshot   string                      `json:"profile_name_snapshot,omitempty"`
+\tPolicyMode            string                      `json:"policy_mode,omitempty"`
+\tRequestedModel        string                      `json:"requested_model,omitempty"`
+\tEffectiveModel        string                      `json:"effective_model,omitempty"`
+\tRequestID             string                      `json:"request_id"`
 ''',
     expected_count=1,
 )
-insert_before(
-    redisqueue_plugin,
-    '\t\tEffectiveServiceTier: effectiveServiceTier,\n',
-    '\t\tSpeed: speed,\n\t\tResponseSpeed: responseSpeed,\n',
-    'ResponseSpeed: responseSpeed',
-)
-insert_before(
-    redisqueue_plugin,
-    '\tEffectiveServiceTier string                   `json:"effective_service_tier,omitempty"`\n',
-    '\tSpeed string `json:"speed,omitempty"`\n\tResponseSpeed string `json:"response_speed,omitempty"`\n',
-    '`json:"response_speed,omitempty"`',
-)
+# Match other native fields independently of gofmt alignment.
+redisqueue_text = read(redisqueue_plugin)
+for pattern, replacement in (
+    (r'(?m)^\t\tResponseModel:\s+responseModel,\n', lambda m: m[0] + '\t\tUpstreamModel: strings.TrimSpace(record.UpstreamModel),\n\t\tModelMatchStatus: record.ModelMatchStatus,\n'),
+    (r'(?m)^\tResponseModel\s+string\s+`json:"response_model,omitempty"`\n', lambda m: m[0] + '\tUpstreamModel string `json:"upstream_model,omitempty"`\n\tModelMatchStatus string `json:"model_match_status,omitempty"`\n'),
+    # Preserve Pro's existing wire contract: speed is requested, response_speed is reported.
+    (r'(?m)^\t\tSpeed:\s+strings.TrimSpace\(usageDetail.Speed\),\n', lambda m: '\t\tSpeed: speed,\n\t\tResponseSpeed: responseSpeed,\n'),
+    (r'(?m)^\tSpeed\s+string\s+`json:"speed,omitempty"`\n', lambda m: m[0] + '\tResponseSpeed string `json:"response_speed,omitempty"`\n'),
+):
+    if len(re.findall(pattern, redisqueue_text)) != 1:
+        raise SystemExit(f'expected one RedisQueue field matching {pattern!r}')
+    redisqueue_text = re.sub(pattern, replacement, redisqueue_text, count=1)
+write(redisqueue_plugin, redisqueue_text)
 # Observe the model only at the final transport/protocol boundary.
 replace_once(
     usage_helpers,
@@ -5916,18 +5947,6 @@ replace_once(
     '\t\tResponseModel:        responseModel,',
     '\t\tResponseModel:        responseModel,\n\t\tUpstreamModel:       r.auditUpstreamModel(model),\n\t\tModelMatchStatus:    modelMatchStatus(r.auditUpstreamModel(model), responseModel),',
     'ModelMatchStatus:    modelMatchStatus',
-)
-replace_once(
-    redisqueue_plugin,
-    '\t\tResponseModel:        responseModel,',
-    '\t\tResponseModel:        responseModel,\n\t\tUpstreamModel:       strings.TrimSpace(record.UpstreamModel),\n\t\tModelMatchStatus:    record.ModelMatchStatus,',
-    'ModelMatchStatus:    record.ModelMatchStatus',
-)
-replace_once(
-    redisqueue_plugin,
-    '\tResponseModel        string                   `json:"response_model,omitempty"`',
-    '\tResponseModel        string                   `json:"response_model,omitempty"`\n\tUpstreamModel string `json:"upstream_model,omitempty"`\n\tModelMatchStatus string `json:"model_match_status,omitempty"`',
-    '`json:"model_match_status,omitempty"`',
 )
 # Plugin provider identity is independent of the negotiated wire protocol.
 plugin_adapter = ROOT / 'internal/pluginhost/adapters_executors.go'
@@ -6931,6 +6950,27 @@ replace_once(
 \t\treturn nil, err
 ''',
 )
+# v8.0.48 expires a previously rejected grant without another upstream refresh.
+# Preserve that transition while refreshing policy-aware state outside m.mu.
+replace_once(
+    auth_conductor,
+    '''\t\t\tm.auths[id] = current
+\t\t\tif m.scheduler != nil {
+\t\t\t\tm.scheduler.upsertAuth(current.Clone())
+\t\t\t}
+\t\t}
+\t\tm.mu.Unlock()
+\t\tm.queueRefreshUnschedule(id)
+\t\tif auth.RefreshError != nil {
+''',
+    '''\t\t\tm.auths[id] = current
+\t\t}
+\t\tm.mu.Unlock()
+\t\tm.RefreshSchedulerEntry(id)
+\t\tm.queueRefreshUnschedule(id)
+\t\tif auth.RefreshError != nil {
+''',
+)
 # v8.0.12 adds an early return for failed refresh of terminal 401 credentials.
 # Keep its terminal state, but refresh the policy-aware scheduler outside m.mu.
 if '\t\t\tif wasTerminalUnauthorized {\n' in read(auth_conductor):
@@ -7287,10 +7327,10 @@ replace_once(
 # Result updates retain upstream model scope and stale-generation handling,
 # applying the cached account policy to an execution-only snapshot.
 auth_package = ROOT / 'sdk/cliproxy/auth'
-auth_go_paths = set(auth_package.glob('*.go'))
+auth_go_paths = {path for path in auth_package.glob('*.go') if not path.name.endswith('_test.go')}
 auth_go_paths.update(
     path for path in _writes
-    if path.parent == auth_package and path.suffix == '.go'
+    if path.parent == auth_package and path.suffix == '.go' and not path.name.endswith('_test.go')
 )
 direct_scheduler_upserts = {
     path.relative_to(ROOT).as_posix(): read(path).count('m.scheduler.upsertAuth(')

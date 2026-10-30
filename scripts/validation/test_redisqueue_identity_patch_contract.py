@@ -5,12 +5,12 @@ from pathlib import Path
 
 PATCHER = Path(__file__).resolve().parents[2] / 'cliproxyapi-pro-core/patches/apply_upstream_patches.py'
 CASES = [
-    ('\t\tAPIKey:               apiKey,\n',
-     '\t\tIsNativeKey:          isNativeKey,\n\t\tAccessProvider:       accessProvider,\n',
-     '\t\tRequestID:            requestID,\n', 'APIKeyPolicyID:       apiKeyPolicyID'),
-    ('\tAPIKey               string                   `json:"api_key"`\n',
-     '\tIsNativeKey          bool                     `json:"is_native_key"`\n\tAccessProvider       string                   `json:"access_provider,omitempty"`\n',
-     '\tRequestID            string                   `json:"request_id"`\n', '`json:"api_key_policy_id,omitempty"`'),
+    ('\t\tAPIKey:                apiKey,\n',
+     '\t\tIsNativeKey:           isNativeKey,\n\t\tAccessProvider:        accessProvider,\n',
+     '\t\tRequestID:             requestID,\n', 'APIKeyPolicyID:        apiKeyPolicyID'),
+    ('\tAPIKey                string                      `json:"api_key"`\n',
+     '\tIsNativeKey           bool                        `json:"is_native_key"`\n\tAccessProvider        string                      `json:"access_provider,omitempty"`\n',
+     '\tRequestID             string                      `json:"request_id"`\n', '`json:"api_key_policy_id,omitempty"`'),
 ]
 
 

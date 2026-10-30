@@ -145,3 +145,11 @@ Safe response header adaptation retains the v8.0.45 native precedence for aggreg
 ### Core v8.0.46 Responses interrupt compatibility
 
 Baseline Core SHA: `9717e325ba6ab2c7483ea93ccb5f2047eb2e7dd5`; models SHA: `85c371372888a72292f41b2d6831fec3539313da`. The generator preserves upstream websocket ownership (`begin(websocketOwned)`, `reactivate`, `stopClaims`, and `takeClaimed`) while adding Pro response-ID eligibility. Both queued-claim paths reject stale IDs and record locally completed IDs before acknowledgement. Replay starts from a clean upstream tree; applying over an already customized tree must fail atomically. Existing interrupt and websocket lifecycle integrations are the validation contract.
+
+### Core v8.0.48 structured usage and cancellation compatibility
+
+Baseline Core SHA: `dbb706215a3afd2f0ea3c96482d4233856466caa`; models SHA: `85c371372888a72292f41b2d6831fec3539313da`. Usage speed extensions now use local anchors, retaining native structured usage merging, upstream service-tier preservation and Gemini observations. RedisQueue reuses the native speed declaration while retaining the existing Pro wire contract (`speed` prefers the explicit request, `response_speed` is reported). Native SDK records containing only `Detail.Speed` use that value as the fallback for both fields; other native structured fields remain intact.
+
+Claude terminal handling retains native plain-context cancellation and full SSE event observations. A completed event observed while output is canceled publishes successful usage; incomplete streams publish failure. The native rejected-refresh-grant expiry transition refreshes the policy-aware scheduler after releasing the manager lock. Production scheduler-upsert guards exclude test fixtures, while continuing to require the centralized production entry point.
+
+These adapters remain in the request/usage and account-policy groups until upstream exposes equivalent Pro speed accounting, terminal settlement and policy-aware scheduler boundaries. Validation replays exact inputs, checks atomic failure/reapplication and the unchanged native-file surface, runs affected packages with race detection, builds CGO/non-CGO binaries, and exercises HTTP usage/cancellation flows.
