@@ -1202,14 +1202,14 @@ def patch_routes(target: Path) -> None:
         "import { Navigate, useNavigate, useLocation } from 'react-router-dom';\n",
         "import { Link, Navigate, useNavigate, useLocation } from 'react-router-dom';\n")
     replace_once(login,
-        "              {error && <div className={styles.errorBox}>{error}</div>}\n",
-        "              {error && <div className={styles.errorBox}>{error}</div>}\n\n"
+        "                onSubmit={handleSubmit}\n              />\n",
+        "                onSubmit={handleSubmit}\n              />\n"
         "              <Link to=\"/usage\" className={styles.selfUsageLink}>\n"
         "                {t('login.self_usage_link')} <span aria-hidden=\"true\">→</span>\n"
         "              </Link>\n")
     replace_once(target / 'src/pages/LoginPage.module.scss',
-        '.errorBox {\n',
-        '.selfUsageLink {\n'
+        '\n.column {\n',
+        '\n.selfUsageLink {\n'
         '  align-self: center;\n'
         '  padding: 4px 8px;\n'
         '  color: var(--text-secondary);\n'
@@ -1225,7 +1225,7 @@ def patch_routes(target: Path) -> None:
         '    outline: 2px solid var(--primary-color);\n'
         '    outline-offset: 2px;\n'
         '  }\n'
-        '}\n\n.errorBox {\n')
+        '}\n\n.column {\n')
     app = target / 'src/App.tsx'
     replace_once(app,
         "import { LoginPage } from '@/pages/LoginPage';\n",
@@ -1679,22 +1679,16 @@ def patch_supporting_api_and_types(target: Path) -> None:
     if 'triggerClassName?: string;' not in read(select_path):
         replace_once(
             select_path,
-            "  placeholder?: string;\n  className?: string;\n  disabled?: boolean;\n",
-            "  placeholder?: string;\n  className?: string;\n  triggerClassName?: string;\n  dropdownClassName?: string;\n  disabled?: boolean;\n",
+            "  className?: string;\n",
+            "  className?: string;\n  triggerClassName?: string;\n",
         )
     if 'triggerClassName,' not in read(select_path):
         replace_once(
             select_path,
-            "  placeholder,\n  className,\n  disabled = false,\n",
-            "  placeholder,\n  className,\n  triggerClassName,\n  dropdownClassName,\n  disabled = false,\n",
+            "  className,\n",
+            "  className,\n  triggerClassName,\n",
         )
-    if 'dropdownClassName].filter(Boolean).join' not in read(select_path):
-        text = read(select_path)
-        old = "        className={styles.dropdown}\n"
-        new = "        className={[styles.dropdown, dropdownClassName].filter(Boolean).join(' ')}\n"
-        if text.count(old) != 1:
-            raise RuntimeError(f'Latest upstream Select dropdown className not found in {select_path}')
-        write(select_path, text.replace(old, new, 1))
+    # Upstream owns dropdownClassName and dropdownMinWidth; only extend the trigger.
     if 'triggerClassName].filter(Boolean).join' not in read(select_path):
         text = read(select_path)
         old = "          className={`${styles.trigger} ${size === 'sm' ? styles.triggerSm : ''}`.trim()}\n"
@@ -1809,6 +1803,13 @@ def patch_locales(target: Path) -> None:
         )
         merge_resources(data, monitoring[locale_name])
         generated[locale_name.removesuffix('.json')] = data
+    # v1.27.0 adds Turkish. Keep Pro copy explicitly available in English until
+    # a reviewed Turkish bundle exists, without changing upstream translations.
+    generated['tr'] = json.loads(json.dumps(generated['en']))
+    upstream_turkish = json.loads(read(target / 'src/i18n/locales/tr.json'))
+    for key in ('show_key', 'hide_key'):
+        generated['tr']['login'][key] = upstream_turkish['login'][key]
+    generated['tr']['login']['self_usage_link'] = 'API anahtarı kullanımı'
     write(
         target / 'src/pro/locales.generated.json',
         json.dumps(generated, ensure_ascii=False, indent=2) + '\n',

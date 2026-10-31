@@ -958,4 +958,5 @@ Object.assign((zhTW as Record<string, unknown>).monitoring ??= {}, {
   profile_filter_deleted: '{{name}}（已刪除）',
 });
 
-export const apiKeyPolicyLocales = { en, ru, 'zh-CN': zhCN, 'zh-TW': zhTW };
+// Turkish uses explicit English Pro copy until a reviewed translation is available.
+export const apiKeyPolicyLocales = { en, ru, 'zh-CN': zhCN, 'zh-TW': zhTW, tr: en };

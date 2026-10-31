@@ -224,7 +224,7 @@ describe('API Key Policy profile drafts', () => {
   test('has complete distinct translations for every supported language', async () => {
     const locales = await import('../src/pro/apiKeyPolicyLocales');
     const bundles = locales.apiKeyPolicyLocales as Record<string, { api_key_policy: Record<string, unknown> }>;
-    expect(Object.keys(bundles).sort()).toEqual(['en', 'ru', 'zh-CN', 'zh-TW']);
+    expect(Object.keys(bundles).sort()).toEqual(['en', 'ru', 'tr', 'zh-CN', 'zh-TW']);
     const flatten = (value: unknown, prefix = ''): Record<string, string> => {
       if (!value || typeof value !== 'object') return {};
       return Object.entries(value as Record<string, unknown>).reduce<Record<string, string>>((out, [key, child]) => {
