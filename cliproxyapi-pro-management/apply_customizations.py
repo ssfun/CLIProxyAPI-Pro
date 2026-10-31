@@ -1805,11 +1805,13 @@ def patch_locales(target: Path) -> None:
         generated[locale_name.removesuffix('.json')] = data
     # v1.27.0 adds Turkish. Keep Pro copy explicitly available in English until
     # a reviewed Turkish bundle exists, without changing upstream translations.
-    generated['tr'] = json.loads(json.dumps(generated['en']))
-    upstream_turkish = json.loads(read(target / 'src/i18n/locales/tr.json'))
-    for key in ('show_key', 'hide_key'):
-        generated['tr']['login'][key] = upstream_turkish['login'][key]
-    generated['tr']['login']['self_usage_link'] = 'API anahtarı kullanımı'
+    turkish_path = target / 'src/i18n/locales/tr.json'
+    if turkish_path.exists():
+        generated['tr'] = json.loads(json.dumps(generated['en']))
+        upstream_turkish = json.loads(read(turkish_path))
+        for key in ('show_key', 'hide_key'):
+            generated['tr']['login'][key] = upstream_turkish['login'][key]
+        generated['tr']['login']['self_usage_link'] = 'API anahtarı kullanımı'
     write(
         target / 'src/pro/locales.generated.json',
         json.dumps(generated, ensure_ascii=False, indent=2) + '\n',
