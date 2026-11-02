@@ -124,19 +124,20 @@ func TestKimiParserNormalizesLimits(t *testing.T) {
 }
 
 func TestKimiMonthlyUsageParticipatesInQuotaRecovery(t *testing.T) {
+	resetAt := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
 	rows, used, err := BuildKimiRows(`{
 		"usage":{"used":20,"limit":100},
-		"usages":{"limit_month_total":{"used_ratio":0.95,"reset_time":"2026-11-01T00:00:00Z"}}
+		"usages":{"limit_month_total":{"used_ratio":0.95,"reset_time":"` + resetAt.Format(time.RFC3339) + `"}}
 	}`)
 	if err != nil || len(rows) != 2 || used == nil || *used != 95 {
 		t.Fatalf("rows/used/error = %+v / %v / %v", rows, used, err)
 	}
 	monthly := rows[1]
-	if monthly["id"] != "monthly" || monthly["labelKey"] != "kimi_quota.monthly_limit" || monthly["used"] != 95 || monthly["limit"] != 100 || monthly["resetAtMs"] != int64(1793491200000) || monthly["periodHours"] != float64(720) {
+	if monthly["id"] != "monthly" || monthly["labelKey"] != "kimi_quota.monthly_limit" || monthly["used"] != 95 || monthly["limit"] != 100 || monthly["resetAtMs"] != resetAt.UnixMilli() || monthly["periodHours"] != float64(720) {
 		t.Fatalf("monthly row = %+v", monthly)
 	}
 	decision := WithQuotaWindows(Decision{UsedPercent: used, IsQuota: true}, rows, 95)
-	if decision.QuotaResetAt != int64(1793491200000) || !decision.QuotaKnown {
+	if decision.QuotaResetAt != resetAt.UnixMilli() || !decision.QuotaKnown {
 		t.Fatalf("monthly quota recovery = %+v", decision)
 	}
 	if scope := QuotaModelScope("kimi", rows, 95); scope != "" {
@@ -190,12 +191,13 @@ func TestKimiMonthlyRatioNormalization(t *testing.T) {
 }
 
 func TestClaudeFableLimitsPreferActiveAndReplaceLegacyAlias(t *testing.T) {
+	resetAt := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
 	windows, _, err := BuildClaudeWindows(`{
 		"five_hour":{"utilization":20},
 		"iguana_necktie":{"utilization":12},
 		"limits":[
 			{"kind":"weekly_scoped","percent":70,"scope":{"model":{"display_name":"Fable"}}},
-			{"kind":" WEEKLY_SCOPED ","percent":"95","is_active":true,"scope":{"model":{"display_name":" FABLE 5 "}},"resets_at":"2026-11-01T00:00:00Z"},
+			{"kind":" WEEKLY_SCOPED ","percent":"95","is_active":true,"scope":{"model":{"display_name":" FABLE 5 "}},"resets_at":"` + resetAt.Format(time.RFC3339) + `"},
 			{"kind":"weekly_scoped","percent":99,"is_active":true,"scope":{"model":{"display_name":"Fable"}}}
 		]
 	}`)
@@ -203,11 +205,11 @@ func TestClaudeFableLimitsPreferActiveAndReplaceLegacyAlias(t *testing.T) {
 		t.Fatalf("windows/error = %+v / %v", windows, err)
 	}
 	fable := windows[1]
-	if fable["id"] != "seven-day-fable" || fable["labelKey"] != "claude_quota.seven_day_fable" || fable["usedPercent"] != float64(95) || fable["resetAtMs"] != int64(1793491200000) || fable["periodHours"] != float64(168) {
+	if fable["id"] != "seven-day-fable" || fable["labelKey"] != "claude_quota.seven_day_fable" || fable["usedPercent"] != float64(95) || fable["resetAtMs"] != resetAt.UnixMilli() || fable["periodHours"] != float64(168) {
 		t.Fatalf("active fable row = %+v", fable)
 	}
 	used := MaxUsedPercentFromWindows(windows)
-	if used == nil || *used != 95 || WithQuotaWindows(Decision{UsedPercent: used}, windows, 95).QuotaResetAt != int64(1793491200000) {
+	if used == nil || *used != 95 || WithQuotaWindows(Decision{UsedPercent: used}, windows, 95).QuotaResetAt != resetAt.UnixMilli() {
 		t.Fatalf("fable did not participate in quota decision: %+v / %v", windows, used)
 	}
 }

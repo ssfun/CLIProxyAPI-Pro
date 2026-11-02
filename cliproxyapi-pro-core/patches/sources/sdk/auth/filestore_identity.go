@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	claudeauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/claude"
+	xaiauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/xai"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
@@ -130,6 +131,20 @@ func (s *FileTokenStore) reuseExistingProviderIdentity(auth *cliproxyauth.Auth) 
 		}
 		if email != "" && (identity.organization != "" || account != "") &&
 			strings.EqualFold(filepath.Base(name), claudeauth.CredentialFileName(email, identity.organization, account)) {
+			return nil
+		}
+	}
+	// Upstream also owns hashed xAI filenames and predecessor cleanup. Never
+	// redirect its canonical destination to the legacy file it will delete.
+	if identity.provider == "xai" {
+		email := authMetadataString(auth.Metadata, "email")
+		subject := authMetadataString(auth.Metadata, "sub")
+		name := strings.TrimSpace(auth.FileName)
+		if name == "" {
+			name = strings.TrimSpace(auth.ID)
+		}
+		if (email != "" || subject != "") &&
+			strings.EqualFold(filepath.Base(name), xaiauth.CredentialFileName(email, subject)) {
 			return nil
 		}
 	}

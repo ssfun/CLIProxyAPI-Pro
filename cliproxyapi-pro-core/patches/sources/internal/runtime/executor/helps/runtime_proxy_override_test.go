@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -100,7 +101,7 @@ func TestHTTPClientsPreserveRequestProxyWithRuntimeTakeover(t *testing.T) {
 				client := build(test.ctx, cfg, test.auth, time.Second)
 				route := client.Transport
 				if fallback, ok := route.(*fallbackRoundTripper); ok {
-					route = fallback.fallback
+					route = fallback.fallbackRoundTripper()
 				}
 				transport, ok := route.(*http.Transport)
 				if !ok || transport.Proxy == nil {
@@ -111,6 +112,77 @@ func TestHTTPClientsPreserveRequestProxyWithRuntimeTakeover(t *testing.T) {
 					t.Fatalf("proxy = %v, err = %v, want %s", got, err, test.want)
 				}
 			}
+		})
+	}
+}
+
+// TestRuntimeProxyPoolHTTP exercises real HTTP connections across runtime takeover
+// changes. Run with go test -v ./internal/runtime/executor/helps -run TestRuntimeProxyPoolHTTP.
+func TestRuntimeProxyPoolHTTP(t *testing.T) {
+	for name, build := range map[string]func(context.Context, *config.Config, *cliproxyauth.Auth, time.Duration) *http.Client{
+		"standard": NewProxyAwareHTTPClient, "utls-fallback": NewUtlsHTTPClient,
+	} {
+		t.Run(name, func(t *testing.T) {
+			proxyutil.ClearRuntimeProxyOverride()
+			ResetProxyTransports()
+			t.Cleanup(proxyutil.ClearRuntimeProxyOverride)
+			t.Cleanup(ResetProxyTransports)
+			serve := func(label string) *httptest.Server {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_, _ = io.WriteString(w, label+"|"+r.RemoteAddr)
+				}))
+				t.Cleanup(server.Close)
+				return server
+			}
+			target, proxyA, proxyB := serve("direct"), serve("A"), serve("B")
+			cfg := &config.Config{}
+			first := &cliproxyauth.Auth{ID: "first", ProxyConnectionPool: &cliproxyauth.ProxyConnectionPoolOverride{}}
+			second := &cliproxyauth.Auth{ID: "second", ProxyConnectionPool: &cliproxyauth.ProxyConnectionPoolOverride{}}
+			request := func(client *http.Client, label string) string {
+				t.Helper()
+				response, err := client.Get(target.URL)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, err := io.ReadAll(response.Body)
+				_ = response.Body.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.HasPrefix(string(body), label+"|") {
+					t.Fatalf("route = %q, want %s", body, label)
+				}
+				return string(body)
+			}
+			client := func(auth *cliproxyauth.Auth) *http.Client {
+				return build(context.Background(), cfg, auth, 2*time.Second)
+			}
+			proxyutil.SetRuntimeProxyOverride("", proxyA.URL)
+			a1 := request(client(first), "A")
+			if a2 := request(client(first), "A"); a1 != a2 {
+				t.Fatalf("pool did not reuse connection: %s != %s", a1, a2)
+			}
+			if other := request(client(second), "A"); other == a1 {
+				t.Fatal("credentials shared a connection")
+			}
+			// Capture A before advancing; the lazy uTLS builder must not resolve again.
+			delayed := client(first)
+			proxyutil.SetRuntimeProxyOverride("", proxyB.URL)
+			b1 := request(client(first), "B")
+			if b2 := request(client(first), "B"); b1 != b2 {
+				t.Fatalf("new pool did not reuse: %s != %s", b1, b2)
+			}
+			request(delayed, "A")
+			proxyutil.SetRuntimeProxyOverride("", proxyA.URL)
+			if fresh := request(client(first), "A"); fresh == a1 {
+				t.Fatal("retired generation reused its idle connection")
+			}
+			proxyutil.ClearRuntimeProxyOverride()
+			direct := request(client(first), "direct")
+			if again := request(client(first), "direct"); direct != again {
+				t.Fatal("empty-proxy fallback did not pool")
+			}
+			t.Logf("verified pooling, credential isolation, A -> B -> A -> direct, captured snapshot (%s)", name)
 		})
 	}
 }

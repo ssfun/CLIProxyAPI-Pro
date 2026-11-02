@@ -671,19 +671,55 @@ replace_once(
 	// Priority: request override, then auth.ProxyURL, then cfg.ProxyURL.
 	proxyURL := effectiveProxyURL(ctx, cfg, auth)
 
-	// If we have a proxy URL configured, set up the transport
+	// Priority 1 & 2: Explicit proxy URL takes precedence over context RoundTripper.
 	if proxyURL != "" {
-		transport := buildProxyTransport(proxyURL)
-		if transport != nil {
+		if transport := pooledProxyTransport(proxyURL, cfg, auth); transport != nil {
 ''',
     '''
 	rawProxyURL := effectiveProxyURL(ctx, cfg, auth)
 	resolution := proxyutil.ResolveEffectiveProxy(rawProxyURL)
 	if resolution.Effective != "" {
-		transport := buildResolvedProxyTransport(resolution)
-		if transport != nil {
+		if transport := pooledProxyTransportResolved(resolution, cfg, auth); transport != nil {
 ''',
 )
+replace_once(
+    proxy_helpers,
+    '\tif transport := pooledProxyTransport("", cfg, auth); transport != nil {\n',
+    '\tif transport := pooledProxyTransportResolved(resolution, cfg, auth); transport != nil {\n',
+)
+replace_once(
+    proxy_helpers,
+    '\tpublisher   uint64\n',
+    '\tpublisher   uint64\n\truntimeGeneration uint64\n',
+)
+replace_once(
+    proxy_helpers,
+    'func pooledProxyTransport(proxyURL string, cfg *config.Config, auth *cliproxyauth.Auth) *http.Transport {\n',
+    'func pooledProxyTransportResolved(resolution proxyutil.RuntimeProxyResolution, cfg *config.Config, auth *cliproxyauth.Auth) *http.Transport {\n',
+)
+replace_once(
+    proxy_helpers,
+    '\ttr, pooled := pooledTransport(proxyPoolKindStandard, proxyURL, cfg, auth, func() (*http.Transport, error) {\n\t\treturn buildPooledBaseTransport(proxyURL)\n',
+    '\ttr, pooled := pooledTransportResolved(proxyPoolKindStandard, resolution, cfg, auth, func() (*http.Transport, error) {\n\t\treturn buildPooledBaseTransportResolved(resolution.Effective)\n',
+)
+replace_once(proxy_helpers, '\treturn buildProxyTransport(proxyURL)\n', '\treturn buildResolvedProxyTransport(resolution)\n')
+replace_once(
+    proxy_helpers,
+    'func pooledTransport(kind proxyPoolKind, proxyURL string, cfg *config.Config, auth *cliproxyauth.Auth, build func() (*http.Transport, error)) (*http.Transport, bool) {\n',
+    'func pooledTransportResolved(kind proxyPoolKind, resolution proxyutil.RuntimeProxyResolution, cfg *config.Config, auth *cliproxyauth.Auth, build func() (*http.Transport, error)) (*http.Transport, bool) {\n\tproxyURL := resolution.Effective\n',
+)
+replace_once(
+    proxy_helpers,
+    '\tcacheProxy, poolLabel := proxyPoolCacheTarget(setting)\n',
+    '\tunlock, current := lockRuntimeProxyPoolGeneration(resolution.Generation)\n\tdefer unlock()\n\tif !current {\n\t\treturn unpooledTransport(build), true\n\t}\n\tcacheProxy, poolLabel := proxyPoolCacheTarget(setting)\n',
+)
+replace_once(proxy_helpers, '\t\tpublisher:   publisher,\n', '\t\tpublisher:   publisher,\n\t\truntimeGeneration: resolution.Generation,\n')
+replace_once(
+    proxy_helpers,
+    'func buildPooledBaseTransport(proxyURL string) (*http.Transport, error) {\n',
+    'func buildPooledBaseTransportResolved(proxyURL string) (*http.Transport, error) {\n',
+)
+replace_once(proxy_helpers, '\ttr, _, errBuild := proxyutil.BuildHTTPTransport(proxyURL)\n', '\ttr, _, errBuild := proxyutil.BuildHTTPTransportWithoutRuntimeOverride(proxyURL)\n')
 replace_once(
     proxy_helpers,
     '''var devinTransportCache = NewTransportCache[string](DefaultTransportCacheCapacity)
@@ -973,27 +1009,95 @@ replace_once(
 replace_once(
     utls_client,
     '''func newClaudeCodeRoundTripper(proxyURL string) http.RoundTripper {
+\treturn newClaudeCodeRoundTripperForDialer(claudeCodeDialer(proxyURL))
 ''',
     '''func newClaudeCodeRoundTripperResolved(effectiveProxyURL string) http.RoundTripper {
+\treturn newClaudeCodeRoundTripperForDialer(claudeCodeDialerResolved(effectiveProxyURL))
 ''',
+)
+replace_once(utls_client, 'func claudeCodeDialer(proxyURL string) proxy.Dialer {\n', 'func claudeCodeDialerResolved(effectiveProxyURL string) proxy.Dialer {\n')
+replace_once(
+    utls_client,
+    'func pooledClaudeCodeTransport(proxyURL string, cfg *config.Config, auth *cliproxyauth.Auth) *http.Transport {\n\ttr, pooled := pooledTransport(proxyPoolKindClaudeCode, proxyURL, cfg, auth, func() (*http.Transport, error) {\n\t\treturn newClaudeCodeRoundTripperForDialer(claudeCodeDialer(proxyURL)), nil\n',
+    'func pooledClaudeCodeTransportResolved(resolution proxyutil.RuntimeProxyResolution, cfg *config.Config, auth *cliproxyauth.Auth) *http.Transport {\n\ttr, pooled := pooledTransportResolved(proxyPoolKindClaudeCode, resolution, cfg, auth, func() (*http.Transport, error) {\n\t\treturn newClaudeCodeRoundTripperForDialer(claudeCodeDialerResolved(resolution.Effective)), nil\n',
 )
 replace_once(
     utls_client,
-    '''
-	var chromeRT http.RoundTripper = newUtlsRoundTripper(proxyURL)
+    '''	var chromeRT http.RoundTripper = newUtlsRoundTripper(proxyURL)
 	var anthropicRT http.RoundTripper = cachedClaudeCodeRoundTripper(proxyURL)
 	var standardTransport http.RoundTripper = http.DefaultTransport
+	var anthropicFn, fallbackFn func() http.RoundTripper
 	if proxyURL != "" {
-		if transport := buildProxyTransport(proxyURL); transport != nil {
-			standardTransport = transport
+		fallbackFn = func() http.RoundTripper {
+			if transport := pooledProxyTransport(proxyURL, cfg, auth); transport != nil {
+				return transport
+			}
+			return standardTransport
+		}
+		// The Anthropic path has its own TLS fingerprint, so it needs its own pool kind.
+		anthropicFn = func() http.RoundTripper {
+			if transport := pooledClaudeCodeTransport(proxyURL, cfg, auth); transport != nil {
+				return transport
+			}
+			return anthropicRT
+		}
+	} else if ctxRoundTripper != nil {
+		chromeRT = ctxRoundTripper
+		anthropicRT = ctxRoundTripper
+		standardTransport = ctxRoundTripper
+	} else {
+		// A credential opt-in applies here too; an injected RoundTripper keeps priority.
+		fallbackFn = func() http.RoundTripper {
+			if transport := pooledProxyTransport("", cfg, auth); transport != nil {
+				return transport
+			}
+			return standardTransport
+		}
+		anthropicFn = func() http.RoundTripper {
+			if transport := pooledClaudeCodeTransport("", cfg, auth); transport != nil {
+				return transport
+			}
+			return anthropicRT
+		}
+	}
 ''',
-    '''
-	var chromeRT http.RoundTripper = newUtlsRoundTripperResolved(resolution.Effective)
+    '''	var chromeRT http.RoundTripper = newUtlsRoundTripperResolved(resolution.Effective)
 	var anthropicRT http.RoundTripper = cachedClaudeCodeRoundTripperResolved(resolution)
 	var standardTransport http.RoundTripper = http.DefaultTransport
+	var anthropicFn, fallbackFn func() http.RoundTripper
 	if resolution.Effective != "" {
-		if transport := buildResolvedProxyTransport(resolution); transport != nil {
-			standardTransport = transport
+		fallbackFn = func() http.RoundTripper {
+			if transport := pooledProxyTransportResolved(resolution, cfg, auth); transport != nil {
+				return transport
+			}
+			return standardTransport
+		}
+		// The Anthropic path has its own TLS fingerprint, so it needs its own pool kind.
+		anthropicFn = func() http.RoundTripper {
+			if transport := pooledClaudeCodeTransportResolved(resolution, cfg, auth); transport != nil {
+				return transport
+			}
+			return anthropicRT
+		}
+	} else if ctxRoundTripper != nil {
+		chromeRT = ctxRoundTripper
+		anthropicRT = ctxRoundTripper
+		standardTransport = ctxRoundTripper
+	} else {
+		// A credential opt-in applies here too; an injected RoundTripper keeps priority.
+		fallbackFn = func() http.RoundTripper {
+			if transport := pooledProxyTransportResolved(resolution, cfg, auth); transport != nil {
+				return transport
+			}
+			return standardTransport
+		}
+		anthropicFn = func() http.RoundTripper {
+			if transport := pooledClaudeCodeTransportResolved(resolution, cfg, auth); transport != nil {
+				return transport
+			}
+			return anthropicRT
+		}
+	}
 ''',
 )
 replace_once(
@@ -1426,7 +1530,7 @@ replace_once(
 )
 
 plugin_snapshot = ROOT / 'internal/pluginhost/snapshot.go'
-replace_once(plugin_snapshot, '\tQuotaProvider string\n', '\tQuotaProvider string\n\tQuotaMode string\n')
+replace_once(plugin_snapshot, '\tQuotaProvider        string\n', '\tQuotaProvider        string\n\tQuotaMode string\n')
 replace_once(
     plugin_snapshot,
     '''\t\tout = append(out, RegisteredPluginInfo{
@@ -1446,11 +1550,11 @@ replace_once(
 ''',
     'quotaMode := ""',
 )
-replace_once(plugin_snapshot, '\t\t\tSupportsQuota: quotaProvider != nil,\n', '\t\t\tSupportsQuota: supportsQuota,\n')
-replace_once(plugin_snapshot, '\t\t\tQuotaProvider: quotaIdentifier,\n', '\t\t\tQuotaProvider: quotaIdentifier,\n\t\t\tQuotaMode: quotaMode,\n')
+replace_once(plugin_snapshot, '\t\t\tSupportsQuota:        quotaProvider != nil,\n', '\t\t\tSupportsQuota: supportsQuota,\n')
+replace_once(plugin_snapshot, '\t\t\tQuotaProvider:        quotaIdentifier,\n', '\t\t\tQuotaProvider: quotaIdentifier,\n\t\t\tQuotaMode: quotaMode,\n')
 
 management_plugins = ROOT / 'internal/api/handlers/management/plugins.go'
-replace_once(management_plugins, '\tQuotaProvider    string                  `json:"quota_provider,omitempty"`\n', '\tQuotaProvider    string                  `json:"quota_provider,omitempty"`\n\tQuotaMode string `json:"quota_mode"`\n')
+replace_once(management_plugins, '\tQuotaProvider        string                         `json:"quota_provider,omitempty"`\n', '\tQuotaProvider        string                         `json:"quota_provider,omitempty"`\n\tQuotaMode string `json:"quota_mode"`\n')
 replace_once(management_plugins, '\t\t\tentry.QuotaProvider = htmlsanitize.String(info.QuotaProvider)\n', '\t\t\tentry.QuotaProvider = htmlsanitize.String(info.QuotaProvider)\n\t\t\tentry.QuotaMode = htmlsanitize.String(info.QuotaMode)\n')
 
 quota_provider_source = Path(__file__).resolve().parent / 'plugin_quota_provider.go'

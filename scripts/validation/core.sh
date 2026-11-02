@@ -254,7 +254,7 @@ apply_validation_fixture_adjustments() {
   local fixture_name
   local fixture_patch
   # Change test setup only, identically for candidate and baseline.
-  for fixture_name in codex_live_media_loopback auth_manager_initialization; do
+  for fixture_name in codex_live_media_loopback auth_manager_initialization home_heartbeat_failover_wait; do
     fixture_patch="${repo_root}/scripts/validation/fixtures/${fixture_name}.patch"
     if git -C "${source_root}" apply --unidiff-zero --reverse --check "${fixture_patch}" >/dev/null 2>&1; then
       continue

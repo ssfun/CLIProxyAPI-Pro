@@ -1,0 +1,12 @@
+diff --git a/sdk/cliproxy/service_executionregistry_test.go b/sdk/cliproxy/service_executionregistry_test.go
+--- a/sdk/cliproxy/service_executionregistry_test.go
++++ b/sdk/cliproxy/service_executionregistry_test.go
+@@ -1450,7 +1450,7 @@
+ 	}
+ 	select {
+ 	case <-secondSubscribe:
+-	case <-time.After(time.Second):
++	case <-time.After(homeSubscriberRetryInitial + time.Second):
+ 		t.Fatal("new subscription did not start while the old scope remained active")
+ 	}
+ 	service.homeMu.Lock()
