@@ -286,7 +286,6 @@ run_upstream_test_groups() {
     ./internal/pluginhost
     ./internal/pluginstore
     ./internal/redisqueue
-    ./internal/requestmeta
     ./internal/runtime/executor/helps
     ./internal/translator/codex/openai/chat-completions
     ./internal/translator/codex/openai/responses
@@ -308,6 +307,7 @@ run_upstream_test_groups() {
   # an injected Pro compatibility/test source. Generic upstream-only packages
   # belong in upstream CI, not in this customization comparison.
   if [[ "${include_pro_packages}" == "1" ]]; then
+    packages+=(./internal/requestmeta)
     packages+=(./internal/pro/... ./internal/embeddedusage/...)
   fi
   run_go_test_group "${source_root}" "${aggregate_log}" patch-and-pro-packages \

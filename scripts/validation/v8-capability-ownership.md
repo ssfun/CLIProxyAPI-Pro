@@ -29,9 +29,9 @@ fallback. Process-level stream receipts verify the persisted outcome separately.
 
 ## Deliberately retained boundaries
 
-- The model-stream cleanup guard is distinct from upstream HTTP-stream cleanup:
-  it still protects failures before model-stream ownership is transferred. Its
-  presence is not evidence that native normal-RPC-return cancellation is broken.
+- Upstream v8.0.52 owns model-stream startup cancellation, instance isolation,
+  and callback-scope cleanup. The retained guard only closes a registered stream
+  if serializing its RPC response fails; successful RPC return leaves it open.
 - Auth model registration still needs a commit-time fence after asynchronous
   discovery; a pre-work generation check is insufficient.
 - Standard Retry-After header fallback and metadata read synchronization still

@@ -2516,7 +2516,7 @@ replace_once(responses_websocket_input,
     '\ts.active = false\n', '\ts.active = false\n\ts.activeIDs = nil\n')
 replace_once(responses_websocket_input,
     '\tif !s.active || s.wsTurnActive {\n',
-    '\t_, activeID := s.activeIDs[gjson.GetBytes(payload, "response_id").String()]\n'
+    '\t_, activeID := s.activeIDs[ojson.GetBytes(payload, "response_id").String()]\n'
     '\tif !s.active || s.wsTurnActive || !activeID {\n')
 replace_once(responses_websocket_input,
     '\t\t\t\terrInterrupt := interrupt(payload)\n',
@@ -3014,7 +3014,7 @@ insert_before(
 \t\tif effectiveModel == modelName || len(rawJSON) == 0 {
 \t\t\treturn ctx, effectiveModel, rawJSON, nil
 \t\t}
-\t\tupdated, errSet := sjson.SetBytes(rawJSON, "model", effectiveModel)
+\t\tupdated, errSet := ojson.SetBytes(rawJSON, "model", effectiveModel)
 \t\tif errSet != nil {
 \t\t\treturn ctx, "", nil, apiKeyPolicyExecutionError(apikeypolicy.ErrUnavailable)
 \t\t}
@@ -3040,7 +3040,7 @@ insert_before(
 \tif effectiveModel == modelName || len(rawJSON) == 0 {
 \t\treturn ctx, effectiveModel, rawJSON, nil
 \t}
-\tupdated, errSet := sjson.SetBytes(rawJSON, "model", effectiveModel)
+\tupdated, errSet := ojson.SetBytes(rawJSON, "model", effectiveModel)
 \tif errSet != nil {
 \t\treturn ctx, "", nil, apiKeyPolicyExecutionError(apikeypolicy.ErrUnavailable)
 \t}
@@ -3065,7 +3065,7 @@ func applyAPIKeyRoutedModelPolicy(ctx context.Context, modelName string, rawJSON
 \tif len(rawJSON) == 0 {
 \t\treturn ctx, modelName, rawJSON, nil
 \t}
-\tupdated, errSet := sjson.SetBytes(rawJSON, "model", effectiveModel)
+\tupdated, errSet := ojson.SetBytes(rawJSON, "model", effectiveModel)
 \tif errSet != nil {
 \t\treturn ctx, "", nil, apiKeyPolicyExecutionError(apikeypolicy.ErrUnavailable)
 \t}
@@ -3120,9 +3120,9 @@ func apiKeyPolicyExecutionError(err error) *interfaces.ErrorMessage {
 \t\terrorType = "permission_error"
 \t}
 \tbody := `{"error":{"message":"","type":"","code":""}}`
-\tbody, _ = sjson.Set(body, "error.message", message)
-\tbody, _ = sjson.Set(body, "error.type", errorType)
-\tbody, _ = sjson.Set(body, "error.code", code)
+\tbody, _ = ojson.Set(body, "error.message", message)
+\tbody, _ = ojson.Set(body, "error.type", errorType)
+\tbody, _ = ojson.Set(body, "error.code", code)
 \treturn &interfaces.ErrorMessage{StatusCode: status, Error: errors.New(body)}
 }
 
@@ -3895,7 +3895,7 @@ replace_once(
 }
 ''',
     '''\tmeta[coreexecutor.ServiceTierMetadataKey] = serviceTier
-\tspeed := strings.TrimSpace(gjson.GetBytes(rawJSON, "speed").String())
+\tspeed := strings.TrimSpace(ojson.GetBytes(rawJSON, "speed").String())
 \tif speed != "" {
 \t\tmeta[coreexecutor.SpeedMetadataKey] = speed
 \t}
@@ -4997,69 +4997,26 @@ replace_once(
 ''',
 )
 
-# Upstream v7.3.16 owns HTTP stream cleanup through host HTTP operations,
-# including startup/marshal failures and plugin-instance cancellation. Keep its
-# lifecycle intact; the model-stream callback still needs the guard below.
+# Upstream v8.0.52 owns model-stream startup cancellation and plugin-instance
+# fencing through begin/abort/complete. Preserve that lifecycle and only close
+# the registered stream if serializing its RPC response fails.
 replace_once(
     ROOT / 'internal/pluginhost/host_model_stream_callbacks.go',
-    '''\tstreamCtx, cancel := newStreamContext(context.WithoutCancel(callbackCtx))
-\tstream, errMsg := executor.ExecuteModelStream(streamCtx, modelExecutionRequestFromPlugin(req.HostModelExecutionRequest, skipPluginID))
-\tif errMsg != nil {
-\t\tcancel()
-\t\treturn nil, modelExecutionError(errMsg)
-\t}
-\tstreamID := ""
-\tif h.modelStreams != nil {
-\t\tstreamID = h.modelStreams.open(req.HostCallbackID, stream.Chunks, cancel)
-\t}
-\tif streamID == "" {
-\t\tcancel()
-\t\treturn nil, fmt.Errorf("host model stream bridge is unavailable")
-\t}
-\tif req.HostCallbackID != "" {
-\t\th.addCallbackCleanup(req.HostCallbackID, func() {
-\t\t\th.modelStreams.close(streamID)
-\t\t})
-\t}
-\treturn marshalRPCResult(pluginapi.HostModelStreamResponse{
+    '''\treturn marshalRPCResult(pluginapi.HostModelStreamResponse{
 \t\tStatusCode: stream.StatusCode,
 \t\tHeaders:    cloneHeader(stream.Headers),
 \t\tStreamID:   streamID,
 \t})
 ''',
-    '''\tstreamCtx, cancel := newStreamContext(context.WithoutCancel(callbackCtx))
-\tcancelOwned := true
-\tdefer func() {
-\t\tif cancelOwned {
-\t\t\tcancel()
-\t\t}
-\t}()
-\tstream, errMsg := executor.ExecuteModelStream(streamCtx, modelExecutionRequestFromPlugin(req.HostModelExecutionRequest, skipPluginID))
-\tif errMsg != nil {
-\t\treturn nil, modelExecutionError(errMsg)
-\t}
-\tstreamID := ""
-\tif h.modelStreams != nil {
-\t\tstreamID = h.modelStreams.open(req.HostCallbackID, stream.Chunks, cancel)
-\t}
-\tif streamID == "" {
-\t\treturn nil, fmt.Errorf("host model stream bridge is unavailable")
-\t}
-\tif req.HostCallbackID != "" {
-\t\th.addCallbackCleanup(req.HostCallbackID, func() {
-\t\t\th.modelStreams.close(streamID)
-\t\t})
-\t}
-\trawResponse, errMarshal := marshalRPCResult(pluginapi.HostModelStreamResponse{
+    '''\trawResponse, errMarshal := marshalRPCResult(pluginapi.HostModelStreamResponse{
 \t\tStatusCode: stream.StatusCode,
 \t\tHeaders:    cloneHeader(stream.Headers),
 \t\tStreamID:   streamID,
 \t})
 \tif errMarshal != nil {
-\t\th.modelStreams.close(streamID)
+\t\th.modelStreams.close(callerPluginID, callerInstance, streamID)
 \t\treturn nil, errMarshal
 \t}
-\tcancelOwned = false
 \treturn rawResponse, nil
 ''',
     'rawResponse, errMarshal := marshalRPCResult(pluginapi.HostModelStreamResponse{',
@@ -5501,24 +5458,24 @@ replace_once(
     '''			fileData["email"] = emailValue
 ''',
     '''			fileData["email"] = emailValue
-				if lastErrorRaw := gjson.GetBytes(data, "last_error"); lastErrorRaw.IsObject() {
+				if lastErrorRaw := ojson.GetBytes(data, "last_error"); lastErrorRaw.IsObject() {
 					var lastError map[string]any
 					if errUnmarshal := json.Unmarshal([]byte(lastErrorRaw.Raw), &lastError); errUnmarshal == nil && len(lastError) > 0 {
 						fileData["last_error"] = lastError
 					}
 				}
 				if strings.EqualFold(strings.TrimSpace(typeValue), "codex") {
-					if claims := extractCodexIDTokenClaimsFromRaw(gjson.GetBytes(data, "id_token").String()); claims != nil {
+					if claims := extractCodexIDTokenClaimsFromRaw(ojson.GetBytes(data, "id_token").String()); claims != nil {
 						fileData["id_token"] = claims
 					}
 				}
 				if strings.EqualFold(strings.TrimSpace(typeValue), "xai") {
-					if plan := xaiAuthFilePlanTypeFromRaw(gjson.GetBytes(data, "access_token").String()); plan != "" {
+					if plan := xaiAuthFilePlanTypeFromRaw(ojson.GetBytes(data, "access_token").String()); plan != "" {
 						fileData["plan_type"] = plan
 					}
 				}
 ''',
-    'if lastErrorRaw := gjson.GetBytes(data, "last_error"); lastErrorRaw.IsObject()',
+    'if lastErrorRaw := ojson.GetBytes(data, "last_error"); lastErrorRaw.IsObject()',
 )
 replace_go_function(
     auth_files,
@@ -5992,7 +5949,7 @@ replace_once(
 \tif format != "" {
 \t\tprovider = format
 \t\t// A partial data line must not finalize a multi-line plugin SSE event.
-\t\tif !gjson.ValidBytes(jsonPayload(payload)) {
+\t\tif !ojson.ValidBytes(jsonPayload(payload)) {
 \t\t\treturn
 \t\t}
 \t}
@@ -6034,8 +5991,8 @@ for relative_path in (
     )
 replace_once(
     ROOT / 'internal/runtime/executor/xai_websockets_executor.go',
-    '\twsReqBody := buildXAIWebsocketRequestBody(prepared.body, prepared.finalizePayload)',
-    '\twsReqBody := buildXAIWebsocketRequestBody(prepared.body, prepared.finalizePayload)\n\treporter.ObserveUpstreamRequestModel(wsReqBody)',
+    '\twsReqBody := buildXAIWebsocketRequestBodyDoc(ctx, doc, prepared.finalizePayload)',
+    '\twsReqBody := buildXAIWebsocketRequestBodyDoc(ctx, doc, prepared.finalizePayload)\n\treporter.ObserveUpstreamRequestModel(wsReqBody)',
     'reporter.ObserveUpstreamRequestModel(wsReqBody)',
 )
 aistudio_executor = ROOT / 'internal/runtime/executor/aistudio_executor.go'
