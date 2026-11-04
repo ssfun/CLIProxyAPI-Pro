@@ -7011,6 +7011,40 @@ replace_once(
 \t\treturn nil, err
 ''',
 )
+# v8.0.53 keeps a usable access token until expiry after its refresh grant was
+# rejected. Preserve its guarded mutation and reschedule/unschedule decisions,
+# but refresh the policy-aware scheduler only after releasing m.mu.
+if '\t\tif !accessTokenRejected && auth.HasValidAccessToken(checkNow) {\n\t\t\tshouldReschedule := false\n' in read(auth_conductor):
+    replace_once(
+        auth_conductor,
+        '''\t\tif !accessTokenRejected && auth.HasValidAccessToken(checkNow) {
+\t\t\tshouldReschedule := false
+''',
+        '''\t\tif !accessTokenRejected && auth.HasValidAccessToken(checkNow) {
+\t\t\tshouldReschedule := false
+\t\t\tshouldRefreshScheduler := false
+''',
+    )
+    replace_once(
+        auth_conductor,
+        '''\t\t\t\tm.auths[id] = current
+\t\t\t\tif m.scheduler != nil {
+\t\t\t\t\tm.scheduler.upsertAuth(current.Clone())
+\t\t\t\t}
+\t\t\t}
+\t\t\tm.mu.Unlock()
+\t\t\tif shouldReschedule {
+''',
+        '''\t\t\t\tm.auths[id] = current
+\t\t\t\tshouldRefreshScheduler = true
+\t\t\t}
+\t\t\tm.mu.Unlock()
+\t\t\tif shouldRefreshScheduler {
+\t\t\t\tm.RefreshSchedulerEntry(id)
+\t\t\t}
+\t\t\tif shouldReschedule {
+''',
+    )
 # v8.0.48 expires a previously rejected grant without another upstream refresh.
 # Preserve that transition while refreshing policy-aware state outside m.mu.
 replace_once(
@@ -7054,9 +7088,8 @@ if '\t\t\tif wasTerminalUnauthorized {\n' in read(auth_conductor):
 # refreshed for terminal failures, after releasing the manager lock.
 replace_once(
     auth_conductor,
-    '\t\tshouldReschedule := false\n',
-    '\t\tshouldReschedule := false\n\t\tshouldRefreshScheduler := false\n',
-    '\t\tshouldRefreshScheduler := false\n',
+    '\t\tinvalidGrant := isInvalidGrantError(err)\n\t\tshouldReschedule := false\n',
+    '\t\tinvalidGrant := isInvalidGrantError(err)\n\t\tshouldReschedule := false\n\t\tshouldRefreshScheduler := false\n',
 )
 legacy_refresh_reschedule = (
     '\t\t\tshouldReschedule = true\n'
