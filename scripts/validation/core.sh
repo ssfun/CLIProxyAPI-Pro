@@ -254,7 +254,7 @@ apply_validation_fixture_adjustments() {
   local fixture_name
   local fixture_patch
   # Change test setup only, identically for candidate and baseline.
-  for fixture_name in codex_live_media_loopback auth_manager_initialization home_heartbeat_failover_wait; do
+  for fixture_name in codex_live_media_loopback auth_manager_initialization home_heartbeat_failover_wait pluginhost_unused_once; do
     fixture_patch="${repo_root}/scripts/validation/fixtures/${fixture_name}.patch"
     if git -C "${source_root}" apply --unidiff-zero --reverse --check "${fixture_patch}" >/dev/null 2>&1; then
       continue
@@ -380,6 +380,8 @@ if [[ "${VALIDATION_STATICCHECK:-0}" == "1" ]]; then
   run_timed "staticcheck SA4011" run_staticcheck_sa4011
   run_timed "staticcheck U1000" run_staticcheck_u1000
 fi
+# Fixture cleanup must precede vet, which also analyzes upstream test files.
+run_timed "validation fixture adjustments" apply_validation_fixture_adjustments "${upstream_root}"
 run_timed "go vet" run_go_vet
 run_timed "reapplication guard" validate_reapplication_guard
 
