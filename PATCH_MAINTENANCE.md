@@ -2,6 +2,10 @@
 
 维护来源是 Core `patches/sources`、独立补丁文件，以及 Management `overlay`。生成后的 upstream 树仅用于验证。静态业务模块保留在当前进程中；不为目录拆分引入新的插件协议。
 
+## 基线与验证证据
+
+当前维护契约见 [`upstream-convergence-contract.md`](scripts/validation/upstream-convergence-contract.md)。分别记录 `last_reviewed_upstream_ref`、`last_validated_upstream_ref` 和 `actual_build_upstream_sha`；清单注释仅表示修改面审查输入，不代表构建或发布状态。以下带版本的小节是历史记录，不覆盖当前契约。只有完成规定验证并保存证据后才推进 validated 字段；构建 SHA 从该次构建输入读取，不能由最新 release 推断。
+
 ## 补丁用途与退出条件
 
 精确文件清单由 `scripts/validation/contracts/*-upstream-modified-files.txt` 维护。以下分组覆盖该清单中的宿主注入职责；同一宿主文件可能承载多个分组。
@@ -108,7 +112,7 @@ Core 发布复用本次 Linux amd64 发布 archive，运行既有配置、流式
 
 ### 最新上游重复适配清理（2026-10-20）
 
-当前审查基线为 Core v8.0.35（`ae3ee3be303fb07fb8173279923413005bf32177`）和 Management v1.26.5（`fe2963330f32a933f562282165f62ae52cf57145`）；文件清单与 Core 归属表同步标注该基线。前述各批次版本和文件数量为历史记录。
+该批次历史审查基线为 Core v8.0.35（`ae3ee3be303fb07fb8173279923413005bf32177`）和 Management v1.26.5（`fe2963330f32a933f562282165f62ae52cf57145`）；文件清单与 Core 归属表同步标注该基线。前述各批次版本和文件数量为历史记录。
 
 删除 Core 两处替换前后相同的空操作，以及 Management 已由上游提供的越南语配额文案、搜索状态和搜索控件补齐分支。保留 Pro 配额元数据搜索和流式终态用量修复；删除不再属于当前契约的旧配置编辑 E2E 目录，继续使用上游原生 v8 配置编辑验证。清理前后生成源码逐字节一致，实际原生修改范围仍为 Core 101 个文件、Management 41 个文件。
 

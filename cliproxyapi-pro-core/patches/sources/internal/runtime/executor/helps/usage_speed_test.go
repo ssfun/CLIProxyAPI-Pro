@@ -48,10 +48,8 @@ func TestUsageReporterBuildRecordIncludesSpeed(t *testing.T) {
 
 func TestStreamUsageBufferPreservesResponseSpeedFromMessageStart(t *testing.T) {
 	var buffer StreamUsageBuffer
-	start, startOK := ParseClaudeStreamUsage([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":10,"speed":"fast"}}}`))
-	final, finalOK := ParseClaudeStreamUsage([]byte(`data: {"type":"message_delta","usage":{"output_tokens":2}}`))
-	buffer.ObserveClaude(start, startOK)
-	buffer.ObserveClaude(final, finalOK)
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":10,"speed":"fast"}}}`))
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"message_delta","usage":{"output_tokens":2}}`))
 	detail, ok := buffer.Detail()
 	if !ok || detail.InputTokens != 10 || detail.OutputTokens != 2 || detail.TotalTokens != 12 || detail.ResponseSpeed != "fast" {
 		t.Fatalf("buffer detail = (%+v, %v), want merged input/output tokens with preserved fast speed", detail, ok)
@@ -60,10 +58,8 @@ func TestStreamUsageBufferPreservesResponseSpeedFromMessageStart(t *testing.T) {
 
 func TestStreamUsageBufferMergesClaudeUsageWithoutResponseSpeed(t *testing.T) {
 	var buffer StreamUsageBuffer
-	start, startOK := ParseClaudeStreamUsage([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":3,"cache_creation_input_tokens":4}}}`))
-	final, finalOK := ParseClaudeStreamUsage([]byte(`data: {"type":"message_delta","usage":{"output_tokens":2}}`))
-	buffer.ObserveClaude(start, startOK)
-	buffer.ObserveClaude(final, finalOK)
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":3,"cache_creation_input_tokens":4}}}`))
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"message_delta","usage":{"output_tokens":2}}`))
 	detail, ok := buffer.Detail()
 	if !ok || detail.InputTokens != 10 || detail.OutputTokens != 2 || detail.CacheReadTokens != 3 ||
 		detail.CacheCreationTokens != 4 || detail.CachedTokens != 3 || detail.TotalTokens != 19 {
@@ -73,10 +69,8 @@ func TestStreamUsageBufferMergesClaudeUsageWithoutResponseSpeed(t *testing.T) {
 
 func TestStreamUsageBufferMergesClaudeCacheCreationWithoutCacheRead(t *testing.T) {
 	var buffer StreamUsageBuffer
-	start, startOK := ParseClaudeStreamUsage([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_creation_input_tokens":4}}}`))
-	final, finalOK := ParseClaudeStreamUsage([]byte(`data: {"type":"message_delta","usage":{"output_tokens":2}}`))
-	buffer.ObserveClaude(start, startOK)
-	buffer.ObserveClaude(final, finalOK)
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_creation_input_tokens":4}}}`))
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"message_delta","usage":{"output_tokens":2}}`))
 	detail, ok := buffer.Detail()
 	if !ok || detail.CacheCreationTokens != 4 || detail.CachedTokens != 4 || detail.TotalTokens != 16 {
 		t.Fatalf("buffer detail = (%+v, %v), want preserved cache creation tokens", detail, ok)
@@ -103,12 +97,7 @@ func TestStreamUsageBufferPublishFailurePreservesObservedUsage(t *testing.T) {
 	reporter := NewUsageReporter(ctx, "claude", "claude-stream-failure-test", nil)
 	var buffer StreamUsageBuffer
 	buffer.ObserveClaudeStream([]byte(`data: {"type":"message_start","message":{"model":"claude-served-model"}}`))
-	buffer.ObserveClaude(usage.Detail{
-		InputTokens:     10,
-		CacheReadTokens: 3,
-		TotalTokens:     13,
-		ResponseSpeed:   "fast",
-	}, true)
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":3,"speed":"fast"}}}`))
 	if !buffer.PublishFailure(ctx, reporter, errors.New("stream canceled")) {
 		t.Fatal("PublishFailure() = false after usage was observed")
 	}

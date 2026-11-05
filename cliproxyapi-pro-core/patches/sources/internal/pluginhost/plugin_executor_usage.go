@@ -1,16 +1,11 @@
 package pluginhost
 
 import (
-	"bytes"
 	"context"
 	"net/http"
-	"strings"
-
-	"github.com/tidwall/gjson"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
-	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
 )
 
@@ -41,70 +36,13 @@ func observePluginExecutorUsage(buffer *helps.StreamUsageBuffer, format sdktrans
 	if buffer == nil || len(payload) == 0 {
 		return
 	}
-	payload = pluginExecutorJSONPayload(payload)
-	if len(payload) == 0 {
+	// Upstream owns protocol parsing, structured usage, and stream merging. Keep
+	// publication in the host so translation and terminal outcome settle first.
+	if stream {
+		helps.ObservePluginExecutorStreamUsage(format.String(), payload, buffer)
 		return
 	}
-	var detail coreusage.Detail
-	var ok bool
-	switch format {
-	case sdktranslator.FormatCodex, sdktranslator.FormatOpenAIResponse:
-		if !stream && gjson.GetBytes(payload, "usage").IsObject() {
-			detail = helps.ParseOpenAIUsage(payload)
-			ok = pluginExecutorUsageDetailPresent(detail)
-		} else {
-			detail, ok = helps.ParseCodexUsage(payload)
-		}
-	case sdktranslator.FormatClaude:
-		if stream {
-			detail, ok = helps.ParseClaudeStreamUsage(payload)
-			buffer.ObserveClaude(detail, ok)
-			return
-		}
-		detail = helps.ParseClaudeUsage(payload)
-		ok = pluginExecutorUsageDetailPresent(detail)
-	case sdktranslator.FormatGemini, sdktranslator.FormatAntigravity:
-		if stream {
-			detail, ok = helps.ParseGeminiStreamUsage(payload)
-		} else {
-			detail = helps.ParseGeminiUsage(payload)
-			ok = pluginExecutorUsageDetailPresent(detail)
-		}
-	case sdktranslator.FormatInteractions:
-		if stream {
-			detail, ok = helps.ParseInteractionsStreamUsage(payload)
-		} else {
-			detail = helps.ParseInteractionsUsage(payload)
-			ok = pluginExecutorUsageDetailPresent(detail)
-		}
-	default:
-		if stream {
-			detail, ok = helps.ParseOpenAIStreamUsage(payload)
-		} else {
-			detail = helps.ParseOpenAIUsage(payload)
-			ok = pluginExecutorUsageDetailPresent(detail)
-		}
-	}
-	buffer.Observe(detail, ok)
-}
-
-func pluginExecutorJSONPayload(payload []byte) []byte {
-	if parsed := helps.JSONPayload(payload); len(parsed) > 0 {
-		return parsed
-	}
-	for _, line := range bytes.Split(payload, []byte("\n")) {
-		if parsed := helps.JSONPayload(line); len(parsed) > 0 {
-			return parsed
-		}
-	}
-	return nil
-}
-
-func pluginExecutorUsageDetailPresent(detail coreusage.Detail) bool {
-	return detail.InputTokens != 0 || detail.OutputTokens != 0 || detail.ReasoningTokens != 0 ||
-		detail.CachedTokens != 0 || detail.CacheReadTokens != 0 || detail.CacheCreationTokens != 0 ||
-		detail.TotalTokens != 0 || detail.TokenBreakdown.TotalTokens != 0 ||
-		strings.TrimSpace(detail.ResponseServiceTier) != "" || strings.TrimSpace(detail.ResponseSpeed) != ""
+	buffer.Observe(helps.ParsePluginExecutorResponseUsage(format.String(), payload), true)
 }
 
 type pluginExecutorEmptyStreamError struct{}

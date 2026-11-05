@@ -91,13 +91,13 @@ class ApiClient {
 }
 """
             first_client, first_store = self.apply_patch(root, upstream_client)
-            self.assertIn('private connectionGeneration: number = 0;', first_client)
+            self.assertNotIn('connectionGeneration', first_client)
             self.assertIn('private connectionAbortController = new AbortController();', first_client)
             self.assertIn('const apiBase = computeApiUrl(config.apiBase);', first_client)
             self.assertIn('this.connectionRevision += 1;', first_client)
             self.assertIn('this.connectionAbortController.abort();', first_client)
             self.assertIn('config.signal = this.combineRequestSignal(config.signal);', first_client)
-            self.assertIn('__connectionGeneration = this.connectionGeneration;', first_client)
+            self.assertIn('__connectionRevision = this.getConnectionRevision();', first_client)
             self.assertIn('this.isStaleConnection(response.config)', first_client)
             self.assertEqual(first_store.count("apiClient.setConfig({ apiBase: '', managementKey: '' });"), 1)
 

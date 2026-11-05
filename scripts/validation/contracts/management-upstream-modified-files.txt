@@ -1,5 +1,5 @@
-# Latest-only baseline: Management v1.27.0 (4e4aeff23f9f82b3ccdbe48b2e774d5dc918234e).
-# Update this reviewed surface when adapting upstream or reducing native-file patches.
+# last_reviewed_upstream_ref: Management v1.27.2 (f154fa9380825c4fe94bc577a9abaa7e505f8875).
+# Surface review only; validation/build evidence: ../upstream-convergence-contract.md.
 src/App.tsx
 src/components/common/ConfirmationModal.tsx
 src/components/layout/MainLayout.tsx

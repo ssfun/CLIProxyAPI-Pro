@@ -1057,23 +1057,21 @@ def patch_api_client_connection_isolation(target: Path) -> None:
         client,
         "  private managementKey: string = '';\n",
         "  private managementKey: string = '';\n"
-        "  private connectionGeneration: number = 0;\n"
         "  private connectionAbortController = new AbortController();\n",
-        "private connectionGeneration: number",
+        "private connectionAbortController =",
     )
     text = read(client)
-    if 'this.connectionGeneration += 1;' not in text:
+    if 'this.connectionAbortController.abort();' not in text:
         old = "      this.connectionRevision += 1;\n"
         new = (
             "      this.connectionRevision += 1;\n"
             "      this.connectionAbortController.abort();\n"
             "      this.connectionAbortController = new AbortController();\n"
-            "      this.connectionGeneration += 1;\n"
         )
         if text.count(old) != 1:
             raise RuntimeError(f'Expected latest connection-change shape in {client}')
         write(client, text.replace(old, new, 1))
-    if 'this.connectionGeneration += 1;' not in read(client):
+    if 'this.connectionAbortController.abort();' not in read(client):
         raise RuntimeError(f'Pattern not found in {client}: connection change handling')
     # Preserve upstream documentation while anchoring on executable method shape.
     interceptor_headers = list(re.finditer(
@@ -1105,9 +1103,9 @@ def patch_api_client_connection_isolation(target: Path) -> None:
         "    return controller.signal;\n"
         "  }\n\n"
         "  private isStaleConnection(config: AxiosRequestConfig | undefined): boolean {\n"
-        "    const generation = (config as AxiosRequestConfig & { __connectionGeneration?: number } | undefined)\n"
-        "      ?.__connectionGeneration;\n"
-        "    return typeof generation === 'number' && generation !== this.connectionGeneration;\n"
+        "    const revision = (config as AxiosRequestConfig & { __connectionRevision?: number } | undefined)\n"
+        "      ?.__connectionRevision;\n"
+        "    return typeof revision === 'number' && revision !== this.getConnectionRevision();\n"
         "  }\n\n"
         "  private staleConnectionError(): Error {\n"
         "    return new axios.CanceledError('Connection changed while the request was in flight');\n"
@@ -1121,10 +1119,10 @@ def patch_api_client_connection_isolation(target: Path) -> None:
         "      (config) => {\n",
         "    this.instance.interceptors.request.use(\n"
         "      (config) => {\n"
-        "        (config as AxiosRequestConfig & { __connectionGeneration?: number })\n"
-        "          .__connectionGeneration = this.connectionGeneration;\n"
+        "        (config as AxiosRequestConfig & { __connectionRevision?: number })\n"
+        "          .__connectionRevision = this.getConnectionRevision();\n"
         "        config.signal = this.combineRequestSignal(config.signal);\n",
-        '.__connectionGeneration = this.connectionGeneration;',
+        '.__connectionRevision = this.getConnectionRevision();',
     )
     replace_once(
         client,

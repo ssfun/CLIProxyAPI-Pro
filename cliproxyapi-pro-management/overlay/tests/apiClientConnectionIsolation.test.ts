@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { apiClient } from '../src/services/api/client';
 
+type CapturedConfig = { headers: Record<string, unknown>; signal?: AbortSignal };
+type CapturedResponse = { config: CapturedConfig; headers: Record<string, string>; data: unknown };
+type InterceptorAccess = {
+  request: { handlers: Array<{ fulfilled: (config: CapturedConfig) => CapturedConfig }> };
+  response: { handlers: Array<{
+    fulfilled: (response: CapturedResponse) => unknown;
+    rejected: (error: { isAxiosError: boolean; config: CapturedConfig; response: { status: number } }) => Promise<never>;
+  }> };
+};
+
 type AxiosAdapter = (config: unknown) => Promise<unknown>;
 
 const internalClient = apiClient as unknown as {
@@ -23,6 +33,38 @@ describe('API client connection isolation', () => {
     apiClient.setConfig({ apiBase: 'https://b.example.com', managementKey: 'key' });
     apiClient.setConfig({ apiBase: 'https://a.example.com', managementKey: 'key' });
     expect(apiClient.getConnectionRevision()).toBe(revision + 2);
+  });
+
+  test('key-only changes advance the same native revision and abort requests', async () => {
+    let requestSignal: AbortSignal | undefined;
+    let complete: (() => void) | undefined;
+    internalClient.instance.defaults.adapter = ((config: unknown) => new Promise((resolve) => {
+      requestSignal = (config as CapturedConfig).signal;
+      complete = () => resolve({ data: {}, status: 200, statusText: 'OK', headers: {}, config });
+    })) as AxiosAdapter;
+    apiClient.setConfig({ apiBase: 'https://same.example.com', managementKey: 'old' });
+    const revision = apiClient.getConnectionRevision();
+    const pending = apiClient.get('/usage');
+    while (!complete) await Promise.resolve();
+    apiClient.setConfig({ apiBase: 'https://same.example.com', managementKey: 'new' });
+    expect(apiClient.getConnectionRevision()).toBe(revision + 1);
+    expect(requestSignal?.aborted).toBe(true);
+    complete();
+    await expect(pending).rejects.toMatchObject({ code: 'ERR_CANCELED' });
+  });
+
+  test('response guards fence stale success and 401 even without adapter cancellation', async () => {
+    const handlers = (internalClient.instance as unknown as { interceptors: InterceptorAccess }).interceptors;
+    apiClient.setConfig({ apiBase: 'https://a.example.com', managementKey: 'key' });
+    const config = handlers.request.handlers[0].fulfilled({ headers: {} });
+    apiClient.setConfig({ apiBase: 'https://b.example.com', managementKey: 'key' });
+    apiClient.setConfig({ apiBase: 'https://a.example.com', managementKey: 'key' });
+    expect(() => handlers.response.handlers[0].fulfilled({
+      config, headers: { 'x-cpa-version': 'stale' }, data: {},
+    })).toThrow('Connection changed');
+    await expect(handlers.response.handlers[0].rejected({
+      isAxiosError: true, config, response: { status: 401 },
+    })).rejects.toMatchObject({ code: 'ERR_CANCELED' });
   });
 
   test('physically aborts an in-flight request when the connection changes', async () => {

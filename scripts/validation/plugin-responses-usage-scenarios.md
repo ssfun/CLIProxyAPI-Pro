@@ -17,12 +17,27 @@ Recorded before changing `plugin_executor_usage.go`.
 - The original parser also accepts nested `response.usage` in nonstream plugin
   payloads. Preserve that compatibility when no top-level usage object exists.
   A top-level `service_tier` alone must not suppress nested token parsing;
-  choosing the helper by nonzero detail would incorrectly do so. A real
-  top-level usage object takes precedence when both locations are present.
-- Empty payloads and responses without usage or service tier must not become
-  observed usage. Preserve the existing payload extraction and presence check.
-- OpenAI Chat Completions, Claude, Gemini, Antigravity and Interactions retain
-  their existing format-specific parsers and publication behavior.
+  choosing the helper by nonzero detail would incorrectly do so. When both
+  locations contain usage, upstream Responses parsing owns their precedence
+  (nested event usage wins when it contains token or structured detail).
+- Empty payloads remain ignored. A nonstream response without usage still
+  publishes exactly one zero-token record through the upstream parser and host
+  buffer; do not maintain a local token-presence list that drops structured-only
+  usage (tool, image, cost, or modality fields).
+- OpenAI Chat Completions, Claude, Gemini, Antigravity and Interactions delegate
+  to upstream plugin protocol dispatch. In particular, Antigravity envelopes
+  must use its own parser rather than the Gemini parser.
+- Multiple SSE lines in one chunk must all be observed. Preserve Claude start
+  input/cache/speed and final output, Interactions snapshot merges, and Responses
+  output-item structured usage; a local first-JSON-line extraction loses these.
+- Translation panic and terminal stream error/cancellation must remain failures,
+  with one usage event. Nonstream publication stays after translation; streaming
+  keeps its existing observer goroutine and terminal publication order. Parsing
+  delegation must not make quota settlement asynchronous. Response headers and
+  raw model observation remain host-owned.
+- Existing Claude merge regressions exercise ObserveClaudeStream directly before
+  removing the now-unused Pro ObserveClaude implementation; keep all token, cache,
+  speed and failure-publication assertions.
 
 ## Repeatable final validation
 

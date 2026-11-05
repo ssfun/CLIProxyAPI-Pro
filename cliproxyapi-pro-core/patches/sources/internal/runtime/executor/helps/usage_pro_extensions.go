@@ -46,45 +46,6 @@ func prepareUsageRecordForPublish(ctx context.Context, record *usage.Record) {
 	}
 }
 
-func (b *StreamUsageBuffer) ObserveClaude(detail usage.Detail, ok bool) {
-	if b == nil || !ok {
-		return
-	}
-	preservedInput := b.detail.InputTokens
-	preservedCacheRead := b.detail.CacheReadTokens
-	preservedCacheCreation := b.detail.CacheCreationTokens
-	b.Observe(detail, true)
-	merged := false
-	if detail.InputTokens == 0 && preservedInput != 0 {
-		b.detail.InputTokens = preservedInput
-		merged = true
-	}
-	if detail.CacheReadTokens == 0 {
-		b.detail.CacheReadTokens = preservedCacheRead
-		merged = merged || preservedCacheRead != 0
-	}
-	if detail.CacheCreationTokens == 0 {
-		b.detail.CacheCreationTokens = preservedCacheCreation
-		merged = merged || preservedCacheCreation != 0
-	}
-	if !merged {
-		return
-	}
-	b.detail.CachedTokens = b.detail.CacheReadTokens
-	if b.detail.CachedTokens == 0 {
-		b.detail.CachedTokens = b.detail.CacheCreationTokens
-	}
-	b.detail.TotalTokens = b.detail.InputTokens + b.detail.OutputTokens + b.detail.CacheReadTokens + b.detail.CacheCreationTokens
-	b.detail.TokenBreakdown = usage.NewIndependentTokenBreakdown(
-		b.detail.InputTokens,
-		b.detail.CacheReadTokens,
-		b.detail.CacheCreationTokens,
-		max(b.detail.OutputTokens-b.detail.ReasoningTokens, 0),
-		b.detail.ReasoningTokens,
-		b.detail.TotalTokens,
-	)
-}
-
 // ObserveUpstreamRequestModel observes a final JSON request/frame, never a
 // pre-normalization payload. It also supports bounded prefixes of replayable HTTP
 // bodies, provided the model string itself is complete.
