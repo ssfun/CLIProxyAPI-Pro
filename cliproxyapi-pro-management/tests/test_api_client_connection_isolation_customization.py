@@ -23,6 +23,69 @@ class ApiClientConnectionIsolationCustomizationTests(unittest.TestCase):
         client.parent.mkdir(parents=True)
         if getattr(self, 'english_comments', False):
             upstream_client = upstream_client.replace('设置请求/响应拦截器', 'Set request/response interceptors').replace('设置 baseURL', 'Set baseURL')
+        # Keep the synthetic upstream fixture aligned with the public request surface.
+        upstream_client = upstream_client.replace("\n}\n", "\n" + """  async get<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.instance.get<T>(url, config);
+    return response.data;
+  }
+
+  /**
+   * POST request
+   */
+  async post<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.instance.post<T>(url, data, config);
+    return response.data;
+  }
+
+  /**
+   * PUT request
+   */
+  async put<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.instance.put<T>(url, data, config);
+    return response.data;
+  }
+
+  /**
+   * PATCH request
+   */
+  async patch<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.instance.patch<T>(url, data, config);
+    return response.data;
+  }
+
+  /**
+   * DELETE request
+   */
+  async delete<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.instance.delete<T>(url, config);
+    return response.data;
+  }
+
+  /**
+   * Get the raw response (for downloads, etc.)
+   */
+  async getRaw(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse> {
+    return this.instance.get(url, config);
+  }
+
+  /**
+   * Send FormData
+   */
+  async postForm<T = unknown>(
+    url: string,
+    formData: FormData,
+    config?: AxiosRequestConfig
+  ): Promise<T> {
+    const response = await this.instance.post<T>(url, formData, {
+      ...config,
+      headers: {
+        ...(config?.headers || {}),
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  }
+""" + "}\n")
         client.write_text(upstream_client)
         auth_store = root / 'src/stores/useAuthStore.ts'
         auth_store.parent.mkdir(parents=True)
@@ -96,7 +159,9 @@ class ApiClient {
             self.assertIn('const apiBase = computeApiUrl(config.apiBase);', first_client)
             self.assertIn('this.connectionRevision += 1;', first_client)
             self.assertIn('this.connectionAbortController.abort();', first_client)
-            self.assertIn('config.signal = this.combineRequestSignal(config.signal);', first_client)
+            self.assertIn('const { signal, cleanup } = this.combineRequestSignal(config.signal);', first_client)
+            self.assertIn('return await this.instance.request<T>({ ...config, signal });', first_client)
+            self.assertIn('} finally {\n      cleanup();', first_client)
             self.assertIn('__connectionRevision = this.getConnectionRevision();', first_client)
             self.assertIn('this.isStaleConnection(response.config)', first_client)
             self.assertEqual(first_store.count("apiClient.setConfig({ apiBase: '', managementKey: '' });"), 1)

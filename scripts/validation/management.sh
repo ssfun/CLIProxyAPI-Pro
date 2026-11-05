@@ -39,6 +39,7 @@ fi
   cd "${upstream_root}"
   bun install --frozen-lockfile
   bun run test
+  bun test --preload ./tests/disableAbortSignalAny.ts tests/apiClientConnectionIsolation.test.ts
   bun run lint
   bun run type-check
   VERSION="${VERSION:-review}" bun run build

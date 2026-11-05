@@ -1084,23 +1084,42 @@ def patch_api_client_connection_isolation(target: Path) -> None:
     insert_once(
         client,
         interceptor_header,
-        "  private combineRequestSignal(requestSignal: AxiosRequestConfig['signal']): AbortSignal {\n"
+        "  private combineRequestSignal(requestSignal: AxiosRequestConfig['signal']): { signal: AbortSignal; cleanup: () => void } {\n"
         "    const connectionSignal = this.connectionAbortController.signal;\n"
-        "    if (!requestSignal) return connectionSignal;\n"
+        "    const unchanged = { signal: connectionSignal, cleanup: () => {} };\n"
+        "    if (!requestSignal) return unchanged;\n"
         "    const callerSignal = requestSignal as AbortSignal;\n"
-        "    if (callerSignal === connectionSignal) return connectionSignal;\n"
+        "    if (callerSignal === connectionSignal) return unchanged;\n"
         "    if (typeof AbortSignal.any === 'function') {\n"
-        "      return AbortSignal.any([callerSignal, connectionSignal]);\n"
+        "      return { signal: AbortSignal.any([callerSignal, connectionSignal]), cleanup: () => {} };\n"
         "    }\n"
         "    const controller = new AbortController();\n"
-        "    const abort = () => controller.abort();\n"
+        "    let cleaned = false;\n"
+        "    const cleanup = () => {\n"
+        "      if (cleaned) return;\n"
+        "      cleaned = true;\n"
+        "      callerSignal.removeEventListener('abort', abort);\n"
+        "      connectionSignal.removeEventListener('abort', abort);\n"
+        "    };\n"
+        "    const abort = () => {\n"
+        "      cleanup();\n"
+        "      controller.abort();\n"
+        "    };\n"
         "    if (callerSignal.aborted || connectionSignal.aborted) {\n"
         "      abort();\n"
         "    } else {\n"
         "      callerSignal.addEventListener('abort', abort, { once: true });\n"
         "      connectionSignal.addEventListener('abort', abort, { once: true });\n"
         "    }\n"
-        "    return controller.signal;\n"
+        "    return { signal: controller.signal, cleanup };\n"
+        "  }\n\n"
+        "  private async request<T = unknown>(config: AxiosRequestConfig): Promise<AxiosResponse<T>> {\n"
+        "    const { signal, cleanup } = this.combineRequestSignal(config.signal);\n"
+        "    try {\n"
+        "      return await this.instance.request<T>({ ...config, signal });\n"
+        "    } finally {\n"
+        "      cleanup();\n"
+        "    }\n"
         "  }\n\n"
         "  private isStaleConnection(config: AxiosRequestConfig | undefined): boolean {\n"
         "    const revision = (config as AxiosRequestConfig & { __connectionRevision?: number } | undefined)\n"
@@ -1120,8 +1139,7 @@ def patch_api_client_connection_isolation(target: Path) -> None:
         "    this.instance.interceptors.request.use(\n"
         "      (config) => {\n"
         "        (config as AxiosRequestConfig & { __connectionRevision?: number })\n"
-        "          .__connectionRevision = this.getConnectionRevision();\n"
-        "        config.signal = this.combineRequestSignal(config.signal);\n",
+        "          .__connectionRevision = this.getConnectionRevision();\n",
         '.__connectionRevision = this.getConnectionRevision();',
     )
     replace_once(
@@ -1150,6 +1168,21 @@ def patch_api_client_connection_isolation(target: Path) -> None:
         "      }\n"
         "    );\n",
     )
+
+    # Keep cleanup in the owning request's finally: adapter/transform/interceptor
+    # failures may have no Axios config, and concurrent requests must stay isolated.
+    for method in ('get', 'delete'):
+        replace_once(client,
+            f'this.instance.{method}<T>(url, config)',
+            f"this.request<T>({{ ...config, method: '{method}', url }})")
+    for method in ('post', 'put', 'patch'):
+        replace_once(client,
+            f'this.instance.{method}<T>(url, data, config)',
+            f"this.request<T>({{ ...config, method: '{method}', url, data }})")
+    replace_once(client, 'this.instance.get(url, config)',
+        "this.request({ ...config, method: 'get', url })")
+    replace_once(client, 'this.instance.post<T>(url, formData, {\n      ...config,',
+        "this.request<T>({\n      ...config,\n      method: 'post',\n      url,\n      data: formData,")
 
 
 def patch_api_client_management_namespace(target: Path) -> None:

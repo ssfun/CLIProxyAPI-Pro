@@ -58,3 +58,12 @@ TTFT 继续调用原生 `ObservePluginExecutorStreamTTFT`，不得在收敛时�
 - Core 实际服务器：`e2e/v8-usage-http/run.py` 5/5 和 `e2e/v8-claude-usage-http/run.py` 10/10；receipt、SQLite 行、请求响应及配置位于 `/private/tmp/pro-core-parser-convergence/{usage-http,claude-http}`，二进制 SHA256 为 `05f74d90bb83c2f07fa94a8d9870b1cdeef51a8220a09af6592489e8c0469731`。
 
 本地临时目录是本次证据位置，不是版本库持久资产；复验使用仓库中的运行入口生成新的产物目录。本轮没有推送或发布，不推进 hosted validation-state。
+
+
+## 监听器与复验来源收尾（2026-11-05）
+
+基于已推送的 `77b82eb1ccb3eba2e0497b7b8abf70cbdedc58d3`，本轮只修复 Management signal fallback 清理与独立 runner 来源记录。fallback 在任一来源 abort 时同步解绑，在每个请求自己的 `finally` 中幂等清理，覆盖成功、Axios 错误、普通 adapter/transform 错误以及无 config 的排队拒绝。连接 revision 与旧响应保护继续保留。
+
+旧实现先复现 7 个清理失败；修复后强制 fallback 15/15，通过常规 `management.sh` 和独立 runner 中的共享 preload 持续验证。精确 Management v1.27.2 重放及幂等通过，常规 Bun 2,268 项通过（8 个 fallback 专项在普通运行中跳过、在强制运行中执行），lint、类型检查和构建通过；仓库检查 189 项通过。Core 未改动，本轮未重跑 Core，也不将之前的基线比较表述为零失败。
+
+完整 runner 返回 0，产物在 `/private/tmp/management-cleanup-final2-artifacts`，包含 `inputs.json`、二进制差异快照、untracked 定制文件、命令日志及 SHA256SUMS。来源哈希范围显式限制为 Management 和 validation 输入；dirty 标记覆盖整个 Pro 工作区。产物目录必须为空且不能覆盖 Git 跟踪的输入目录。临时 Git 集成验证覆盖 clean/staged/unstaged/untracked、忽略文件、参数转义及不安全产物目录拒绝。以上为本地传输集成和构建证据，不是浏览器 E2E 或新的 hosted 验证；本轮未提交、推送或发布。

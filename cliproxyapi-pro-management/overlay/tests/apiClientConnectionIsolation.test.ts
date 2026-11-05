@@ -173,3 +173,49 @@ describe('API client connection isolation', () => {
     await expect(pending).rejects.toMatchObject({ code: 'ERR_CANCELED' });
   });
 });
+
+// Run separately with AbortSignal.any disabled to exercise older-browser behavior.
+describe('fallback request signal lifetime', () => {
+  const fallbackTest = typeof AbortSignal.any === 'function' ? test.skip : test;
+  for (const outcome of ['success', 'axios failure', 'plain failure', 'transform failure', 'stale pro', 'caller abort', 'connection abort', 'already aborted'] as const) {
+    fallbackTest(`removes both source listeners after ${outcome}`, async () => {
+      apiClient.setConfig({ apiBase: 'https://cleanup.example.com', managementKey: 'key' });
+      const caller = new AbortController();
+      const connection = (apiClient as unknown as { connectionAbortController: AbortController }).connectionAbortController;
+      const counts = [caller.signal, connection.signal].map((signal) => {
+        const listeners = new Set<EventListenerOrEventListenerObject>();
+        const add = signal.addEventListener.bind(signal);
+        const remove = signal.removeEventListener.bind(signal);
+        signal.addEventListener = ((type, listener, options) => {
+          if (type === 'abort' && listener) listeners.add(listener);
+          add(type, listener, options);
+        }) as typeof signal.addEventListener;
+        signal.removeEventListener = ((type, listener, options) => {
+          if (type === 'abort' && listener) listeners.delete(listener);
+          remove(type, listener, options);
+        }) as typeof signal.removeEventListener;
+        return listeners;
+      });
+      if (outcome === 'already aborted') caller.abort();
+      internalClient.instance.defaults.adapter = (async (config: unknown) => {
+        if (outcome === 'axios failure') throw { isAxiosError: true, config, message: 'failed' };
+        if (outcome === 'plain failure') throw new Error('plain failed');
+        if (outcome === 'caller abort') caller.abort();
+        if (outcome === 'connection abort') apiClient.setConfig({ apiBase: 'https://next.example.com', managementKey: 'key' });
+        if (outcome.endsWith('abort')) expect(counts.map((listeners) => listeners.size)).toEqual([0, 0]);
+        return { config, data: {}, status: 200, statusText: 'OK', headers: {} };
+      }) as AxiosAdapter;
+      for (let attempt = 0; attempt < (outcome === 'success' ? 20 : 1); attempt++) {
+        const config = {
+          signal: caller.signal,
+          ...(outcome === 'transform failure' ? { transformRequest: [() => { throw new Error('transform failed'); }] } : {}),
+          ...(outcome === 'stale pro' ? { managementApiNamespace: 'pro', managementConnectionRevision: -1 } : {}),
+        };
+        const pending = apiClient.get('/usage', config);
+        if (outcome === 'success') await pending;
+        else await expect(pending).rejects.toBeDefined();
+        expect(counts.map((listeners) => listeners.size)).toEqual([0, 0]);
+      }
+    });
+  }
+});
