@@ -4301,6 +4301,25 @@ replace_once(
 )
 replace_once(
     claude_execute,
+    '''\t\tif upstreamStreamErr != nil {
+\t\t\tupstreamStreamErr = wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, upstreamStreamErr)
+\t\t\thelps.RecordAPIResponseError(ctx, e.cfg, upstreamStreamErr)
+\t\t\tstreamUsage.PublishFailure(ctx, reporter, upstreamStreamErr)
+\t\t\treturn resp, upstreamStreamErr
+\t\t}
+''',
+    '''\t\tif upstreamStreamErr != nil {
+\t\t\tupstreamStreamErr = wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, upstreamStreamErr)
+\t\t\thelps.RecordAPIResponseError(ctx, e.cfg, upstreamStreamErr)
+\t\t\tif !responseUsageBuffer.PublishFailure(ctx, reporter, upstreamStreamErr) {
+\t\t\t\treporter.PublishFailure(ctx, upstreamStreamErr)
+\t\t\t}
+\t\t\treturn resp, upstreamStreamErr
+\t\t}
+''',
+)
+replace_once(
+    claude_execute,
     '''\t\tif errRestore != nil {
 \t\t\terrRestore = fmt.Errorf("restore Claude OAuth tool name from response: %w", errRestore)
 \t\t\thelps.RecordAPIResponseError(ctx, e.cfg, errRestore)
