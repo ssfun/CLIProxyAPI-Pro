@@ -10,10 +10,10 @@ if [[ "$MODE" != fixed && "$MODE" != before ]]; then
   exit 2
 fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG="$(python3 - "$URL" "$ARTIFACT_DIR" "$MODE" <<'PY'
+CONFIG="$(python3 - "$URL" "$ARTIFACT_DIR" "$MODE" "${TASK_SPACE_ID:-}" "${KEEP_TASK_SPACE:-0}" <<'PY'
 import json
 import sys
-print(json.dumps({'url': sys.argv[1], 'artifactDir': sys.argv[2], 'expectBug': sys.argv[3] == 'before'}))
+print(json.dumps({'url': sys.argv[1], 'artifactDir': sys.argv[2], 'expectBug': sys.argv[3] == 'before', 'taskSpaceId': int(sys.argv[4]) if sys.argv[4] else None, 'keepTaskSpace': sys.argv[5] == '1'}))
 PY
 )"
 { printf 'const config = %s;\n' "$CONFIG"; cat "$SCRIPT_DIR/ego.mjs"; } | ego-browser nodejs

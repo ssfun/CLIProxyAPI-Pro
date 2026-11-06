@@ -111,7 +111,6 @@ class ProModuleBoundaryTests(unittest.TestCase):
                 'inspectionModule',
                 'apiKeyPolicyModule',
                 'oauthPolicyModule',
-                'routingModule',
                 'proxyPoolModule',
                 'dataManagementModule',
                 'quotaModule',
@@ -119,7 +118,7 @@ class ProModuleBoundaryTests(unittest.TestCase):
             re.findall(r'^\s{2}(\w+Module),$', module_list, re.MULTILINE),
         )
 
-        for module in ('monitoring', 'inspection', 'routing', 'proxyPool', 'oauthPolicy', 'dataManagement', 'quota'):
+        for module in ('monitoring', 'inspection', 'proxyPool', 'oauthPolicy', 'dataManagement', 'quota'):
             index = (MODULES / module / 'index.ts').read_text(encoding='utf-8')
             self.assertIn("from './manifest'", index)
 

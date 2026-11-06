@@ -15,7 +15,7 @@ This project does not maintain a full fork of either upstream project. Instead, 
 - A real-model connection test pinned to the selected auth-file `auth_index`, with output, latency, and upstream error details.
 - Optional automatic enable, disable, delete, and token-refresh actions.
 - Optional deep probes for Antigravity soft bans and xAI availability anomalies.
-- A scheduling board showing effective restrictions, with directed checks and releases by source.
+- Account Inspection shows effective restriction details, with directed checks and releases by source.
 - A statically linked proxy pool that aggregates HTTP/SOCKS nodes behind one fixed loopback SOCKS5 endpoint with rotation, health isolation, and failover.
 - A statically linked OAuth account policy that controls model exclusions, prefixes, priorities, and scheduler weights per provider and account plan.
 
@@ -83,7 +83,7 @@ Main capabilities:
 
 - Adds the `/monitoring` request monitoring page.
 - Adds the `/account-inspection` account inspection page.
-- Adds the `/routing` scheduling board with directed checks and recovery.
+- Account Inspection shows full restriction details and targeted recovery; `/routing` retains upstream routing orchestration.
 - Adds the `/proxy-pool` page for node configuration, connectivity tests, runtime statistics, and global-proxy takeover/restoration.
 - Adds the `/oauth-policy` visual editor for provider-specific OAuth account rules covering model exclusions, prefixes, priorities, weights, custom plans, fallbacks, and effective runtime previews; the legacy route redirects.
 - Shows request count, success rate, latency, token, and cost metrics.
@@ -146,13 +146,13 @@ Request monitoring stores diagnostic fields such as TTFT, HTTP status code, stru
 
 Account inspection is executed by the backend only. The management UI configures schedules, starts or controls runs, polls status/progress/results, streams logs and live status over WebSocket/WSS, and confirms manual actions. Backend automatic actions support consecutive-confirmation gating, and quota cache entries record parser version plus response-shape hashes to help diagnose upstream field changes.
 
-The Scheduling Board displays upstream cooldowns, inspection quota protection, and current restrictions. It provides directed checks and release actions scoped to a restriction source, model, and revision. Both operations validate credential identity and reject stale actions. Legacy policy writes, HTTP-status-based request protection, and the old release endpoint are retired and return `410 Gone`; `observe` / `enforce` policy editing is no longer available. Manual disabling and restrictions from other sources remain independent.
+The recovery panel in Account Inspection displays upstream cooldowns, inspection quota protection, and current restrictions. It provides directed checks and release actions scoped to a restriction source, model, and revision. Both operations validate credential identity and reject stale actions. Legacy policy writes, HTTP-status-based request protection, and the old release endpoint are retired and return `410 Gone`; `observe` / `enforce` policy editing is no longer available. Manual disabling and restrictions from other sources remain independent.
 
 During backend inspection, eligible auth records are refreshed before quota/account probing when they are already in their normal refresh window. The inspection refresh path skips API-key accounts, accounts not yet due for refresh, and accounts still blocked by `NextRefreshAfter`. Due-time decisions use upstream logic directly: ordinary disabled accounts can refresh, but disabled accounts with an invalid-grant failure are not retried automatically. Manual forced refresh remains available. If refresh succeeds, probing uses the refreshed auth. If refresh fails, the account is kept and probing is skipped for that account.
 
 The backend forces `usage-statistics-enabled=true` and the Pro management-panel repository in memory at startup. It only changes a YAML key when that key already exists and differs; missing keys are never added. Inspection quota-protection state lives in `usage.sqlite`, not upstream `config.yaml`; legacy request-protection settings are ignored.
 
-If the management UI is used with the unmodified upstream backend, request monitoring, SQLite persistence, model prices, backend account inspection, and the scheduling board will show errors or empty data.
+If the management UI is used with the unmodified upstream backend, request monitoring, SQLite persistence, model prices, backend account inspection, and the scheduling restriction service will show errors or empty data.
 
 ## Release workflows
 

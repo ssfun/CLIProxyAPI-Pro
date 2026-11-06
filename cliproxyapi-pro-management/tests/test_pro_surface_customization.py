@@ -82,14 +82,12 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
         inspection_styles = (
             PRO_ROOT / 'modules/inspection/features/account-inspection-styles/_tables-dialogs.scss'
         ).read_text()
-        routing = (PRO_ROOT / 'modules/routing/RoutingPolicyPage.tsx').read_text()
 
         self.assertIn('width: min(800px', surface_styles)
         self.assertIn('ProInformationDetails', details)
         self.assertIn('grid-template-columns: repeat(2, minmax(0, 1fr))', detail_styles)
         self.assertIn('ProInformationDetails', monitoring)
         self.assertIn('ProInformationDetails', inspection_model)
-        self.assertIn('ProInformationDetails', routing)
         self.assertIn('className={styles.informationDetailsTheme}', monitoring)
         self.assertIn('className={styles.informationDetailsTheme}', inspection_model)
         delete_confirmation = inspection_model[
@@ -393,7 +391,7 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
         inspection = (PRO_ROOT / 'modules/inspection/AccountInspectionPage.tsx').read_text()
         proxy_pool = (PRO_ROOT / 'modules/proxyPool/ProxyPoolPage.tsx').read_text()
         self.assertIn("useProSurfaceState<'realtime-detail' | 'price-management'>", monitoring)
-        self.assertIn("useProSurfaceState<'settings' | 'detail' | 'recovery'>", inspection)
+        self.assertIn("useProSurfaceState<'settings' | 'detail' | 'recovery' | 'recoveryPicker'>", inspection)
         self.assertIn("useProSurfaceState<'node' | 'import' | 'takeover'>", proxy_pool)
 
     def test_account_inspection_summary_merges_incomplete_results_and_deduplicates_auto_execution(self) -> None:
@@ -439,7 +437,6 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
         surface = SURFACE.read_text()
         monitoring = (PRO_ROOT / 'modules/monitoring/MonitoringCenterPage.tsx').read_text()
         inspection = (PRO_ROOT / 'modules/inspection/AccountInspectionPage.tsx').read_text()
-        routing = (PRO_ROOT / 'modules/routing/RoutingPolicyPage.tsx').read_text()
         auth_test = (PRO_ROOT / 'authFiles/AuthFileConnectionTestModal.tsx').read_text()
         account_usage = (PRO_ROOT / 'modules/monitoring/features/components/AccountUsageModal.tsx').read_text()
         proxy_pool = (PRO_ROOT / 'modules/proxyPool/ProxyPoolPage.tsx').read_text()
@@ -447,7 +444,6 @@ class ProSurfaceCustomizationTest(unittest.TestCase):
         self.assertIn('onAfterClose={onAfterClose}', surface)
         self.assertIn('onAfterClose={() => setSelectedRealtimeErrorRowState(null)}', monitoring)
         self.assertIn('onAfterClose={() => setSelectedDetailResultState(null)}', inspection)
-        self.assertIn('onAfterClose={() => setSelectedAuthId(null)}', routing)
         self.assertIn('onAfterClose={() => setDisplayFile(null)}', auth_test)
         self.assertIn('onAfterClose={() => setDisplayFile(null)}', account_usage)
         self.assertIn('onAfterClose={clearClosedNodeSheet}', proxy_pool)

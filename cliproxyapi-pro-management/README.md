@@ -133,25 +133,19 @@ UI 会在主布局中启动 `QuotaPersistenceBootstrap`，把已保存的配额�
 
 在完整 management API 前缀下，后端暴露为 `/v0/management/account-inspection/...`。
 
-### 调度看板页面
+### 限制明细与定向恢复
 
-新增顶级调度看板页面：
+独立 Pro 调度看板已退休，`/routing` 保留 upstream 原生路由编排。账号巡检恢复弹窗展示所有当前限制的来源、账号/模型范围、重试时间、原因、HTTP 状态和恢复方式。检查与解除仍校验账号身份、registration epoch 和限制 revision。
 
-```text
-/routing
-```
+账号巡检页常驻“限制与恢复”入口，按需列出全部受限账号，无需巡检历史，也覆盖 API-key 凭据和不支持巡检的提供商。列表以提供商和账号索引标识账号，支持按这两项搜索，不显示原始密钥。选择账号后进入现有恢复弹窗。
 
-页面展示选择器当前不会选中的账号，不读取或修改 `config.yaml` 的全局路由配置。分桶包括额度、认证与瞬时、待复查和重叠。看板每行直接提供“重检”和“恢复”：前者按当前限制执行额度复查或固定账号连接验证，后者经显式确认后按来源、模型和 revision 解除当前限制。账号详情仅展示账号与限制信息；账号巡检页仍保留完整的定向恢复面板，历史巡检结果与实时调度限制分别展示。
-
-页面使用：
-
-- `GET /routing-policy`
+共享恢复服务保留 `GET /routing-policy`、`POST /routing-policy/check` 和 `POST /routing-policy/restrictions/release`。历史巡检结果与实时限制保持独立。
 
 ### 支撑性 API 与类型补丁
 
 `apply_customizations.py` 还会 patch upstream 文件以增加：
 
-- `/monitoring`、`/account-inspection` 和 `/routing` 路由。
+- `/monitoring` 和 `/account-inspection` 路由。
 - 侧边栏导航文案和图标。
 - 从 `monitoring-locales.json` 合并的多语言文案。
 - monitoring 使用的 `usageStatisticsEnabled` 配置类型；账号巡检设置仅通过 schedule API 管理。
@@ -171,7 +165,7 @@ UI 会在主布局中启动 `QuotaPersistenceBootstrap`，把已保存的配额�
 - `overlay/` — 直接复制到 upstream checkout 的新增/覆盖文件。
 - `overlay/src/pro/modules/monitoring/` — 请求监控、用量分析与备份 UI。
 - `overlay/src/pro/modules/inspection/` — 账号巡检页面、状态与操作逻辑。
-- `overlay/src/pro/modules/routing/` — 调度看板 UI。
+- `overlay/src/pro/modules/routing/` — 共享限制查询与恢复组件（由账号巡检使用）。
 - `overlay/src/pro/modules/proxyPool/` 与 `oauthPolicy/` — 独立业务模块页面及 API。
 - `overlay/src/pro/modules/quota/` — SQLite 配额持久化、排序与 provider 扩展。
 - `overlay/src/pro/modules/*/manifest.tsx` — 各业务模块声明自己的路由、导航和启动副作用；`registry.tsx` 只维护模块清单并派生宿主投影，`ProBootstrap.tsx` 负责认证后挂载。

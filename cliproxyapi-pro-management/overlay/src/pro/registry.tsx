@@ -4,7 +4,6 @@ import { dataManagementModule } from '@/pro/modules/dataManagement';
 import { inspectionModule } from '@/pro/modules/inspection';
 import { apiKeyPolicyModule } from '@/pro/modules/apiKeyPolicy';
 import { oauthPolicyModule } from '@/pro/modules/oauthPolicy';
-import { routingModule } from '@/pro/modules/routing';
 import { proxyPoolModule } from '@/pro/modules/proxyPool';
 import { quotaModule } from '@/pro/modules/quota';
 
@@ -33,7 +32,6 @@ const proModules = [
   inspectionModule,
   apiKeyPolicyModule,
   oauthPolicyModule,
-  routingModule,
   proxyPoolModule,
   dataManagementModule,
   quotaModule,

@@ -1,7 +1,8 @@
-export { routingModule } from './manifest';
 export { SchedulingRecoveryActions, SchedulingRecoveryOutcome } from './SchedulingRecoveryActions';
 export {
   routingPolicyApi,
+  formatTimestamp,
+  schedulingBoardModelsLabel,
   schedulingRecoveryResultTone,
   type SchedulingBoardAccount,
   type SchedulingRecoveryResult,

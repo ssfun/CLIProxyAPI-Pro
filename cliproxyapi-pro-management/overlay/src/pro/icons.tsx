@@ -51,15 +51,6 @@ export function IconSidebarAccountInspection({ size = 20, ...props }: ProIconPro
   );
 }
 
-export function IconSidebarRouting({ size = 20, ...props }: ProIconProps) {
-  return (
-    <svg {...baseSvgProps} width={size} height={size} {...props}>
-      <path d="M6 3v18" />
-      <path d="M6 5h9l3 3-3 3H6" />
-      <path d="M6 13h6l3 3-3 3H6" />
-    </svg>
-  );
-}
 
 export function IconSidebarAccountPolicy({ size = 20, ...props }: ProIconProps) {
   return (

@@ -33,6 +33,7 @@ import { buildInspectionBatchError, formatInspectionBatchMessage } from './featu
 import { getBatchReceiptItems } from './features/accountInspectionBatchReceipt';
 import { readInspectionFocusLocationState } from '@/pro/shared/inspectionNavigation';
 import { SchedulingRecoveryDialog } from './SchedulingRecoveryDialog';
+import { SchedulingRecoveryPicker } from './SchedulingRecoveryPicker';
 import { ProDetailDialog, ProSettingsSheet } from '@/pro/shared/ProSurface';
 import { useProSurfaceState } from '@/pro/shared/useProSurfaceState';
 import {
@@ -172,7 +173,8 @@ export function AccountInspectionPage() {
   } = backendState;
   const [selectedDetailResult, setSelectedDetailResultState] = useState<AccountInspectionResultItem | null>(null);
   const [selectedRecoveryResult, setSelectedRecoveryResult] = useState<AccountInspectionResultItem | null>(null);
-  const { activeSurface, openSurface, closeSurface } = useProSurfaceState<'settings' | 'detail' | 'recovery'>();
+  const { activeSurface, openSurface, closeSurface } = useProSurfaceState<'settings' | 'detail' | 'recovery' | 'recoveryPicker'>();
+  useLayoutEffect(() => { closeSurface(); }, [apiBase, managementKey, connectionStatus, closeSurface]);
   const isSettingsModalOpen = activeSurface === 'settings';
   const setIsSettingsModalOpen = useCallback((open: boolean) => {
     if (open) openSurface('settings');
@@ -1488,6 +1490,10 @@ export function AccountInspectionPage() {
           </div>
         </div>
 
+        <Button variant="secondary" onClick={() => openSurface('recoveryPicker')} disabled={connectionStatus !== 'connected'}>
+          {t('routing_policy.recovery.picker_title')}
+        </Button>
+
         <div className={styles.assetOverviewGrid}>
           <div className={styles.assetKpiGrid}>
             {accountAssetCards.map((card, index) => (
@@ -2268,9 +2274,16 @@ export function AccountInspectionPage() {
         {selectedDetailResult ? <InspectionErrorDetailsPanel item={selectedDetailResult} t={t} /> : null}
       </ProDetailDialog>
 
+      <SchedulingRecoveryPicker
+        key={`${batchStorageKey}:${connectionStatus}`}
+        open={activeSurface === 'recoveryPicker'}
+        disabled={singleMutationBlocked || executing || recheckingKey !== null || bulkActionLoading || runStatus === 'running' || connectionStatus !== 'connected'}
+        onClose={closeSurface}
+      />
       <SchedulingRecoveryDialog
+        key={`recovery:${batchStorageKey}:${connectionStatus}`}
         open={activeSurface === 'recovery' && Boolean(selectedRecoveryResult)}
-        actionsDisabled={singleMutationBlocked}
+        actionsDisabled={singleMutationBlocked || executing || recheckingKey !== null || bulkActionLoading || runStatus === 'running' || connectionStatus !== 'connected'}
         authId={selectedRecoveryResult?.authId || ''}
         authIndex={selectedRecoveryResult?.authIndex || ''}
         accountName={selectedRecoveryResult ? resolveAccountInspectionAccountLabel(selectedRecoveryResult) : ''}

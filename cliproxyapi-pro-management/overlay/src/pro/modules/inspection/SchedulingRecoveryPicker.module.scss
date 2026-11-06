@@ -1,0 +1,17 @@
+.accounts {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 50vh;
+  overflow-y: auto;
+
+  button {
+    width: 100%;
+    justify-content: flex-start;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    text-align: start;
+  }
+}

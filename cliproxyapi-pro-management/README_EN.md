@@ -133,25 +133,19 @@ Backend schedule/status/control routes expected by the page:
 
 Under the full management API prefix these are exposed by the backend as `/v0/management/account-inspection/...`.
 
-### Scheduling board page
+### Restriction details and targeted recovery
 
-Adds a top-level scheduling-board route:
+The independent Pro scheduling board is retired. `/routing` belongs to upstream routing orchestration. Account Inspection's recovery dialog displays all current restrictions with source, credential/model scope, retry time, reason, HTTP status, and recovery method. Checks and releases retain identity, registration epoch, and revision validation.
 
-```text
-/routing
-```
+Account Inspection always shows a “Restrictions and recovery” entry that loads all restricted accounts on demand. No inspection history is required; API-key credentials and providers unsupported by inspection are included. Accounts are labeled and searchable by provider and account index without displaying raw keys. Selecting an account opens the existing recovery dialog.
 
-The page shows accounts currently withheld by the selector without reading or editing global routing values in `config.yaml`. Buckets cover quota, auth/transient failures, pending recheck, and overlap. Each board row directly exposes Recheck and Restore: recheck runs the appropriate quota or pinned-request verification, while restore explicitly confirms and releases the current source/model restrictions by revision. Account details remain informational. Account Inspection keeps the full targeted recovery panel while historical inspection results stay distinct from live scheduling state.
-
-The page uses:
-
-- `GET /routing-policy`
+The shared recovery service keeps `GET /routing-policy`, `POST /routing-policy/check`, and `POST /routing-policy/restrictions/release`. Historical inspection results remain separate from live restrictions.
 
 ### Supporting API and type patches
 
 `apply_customizations.py` also patches upstream files to add:
 
-- `/monitoring`, `/account-inspection`, and `/routing` routes.
+- `/monitoring` and `/account-inspection` routes.
 - sidebar navigation labels and icon.
 - locale entries from `monitoring-locales.json`.
 - the `usageStatisticsEnabled` config type used by monitoring; account-inspection settings are managed only through the schedule API.
@@ -171,7 +165,7 @@ Request Monitoring uses an initial snapshot plus SSE increments and cursor catch
 - `overlay/` — files copied directly into the upstream checkout.
 - `overlay/src/pro/modules/monitoring/` — request monitoring, usage analytics, and backup UI.
 - `overlay/src/pro/modules/inspection/` — account inspection page, state, and actions.
-- `overlay/src/pro/modules/routing/` — scheduling board UI.
+- `overlay/src/pro/modules/routing/` — shared restriction queries and recovery components used by Account Inspection.
 - `overlay/src/pro/modules/proxyPool/` and `oauthPolicy/` — independent module pages and APIs.
 - `overlay/src/pro/modules/quota/` — SQLite quota persistence, sorting, and provider extensions.
 - `overlay/src/pro/modules/*/manifest.tsx` — each business module declares its route, navigation, and startup effects; `registry.tsx` keeps only the module list and derives host projections, while `ProBootstrap.tsx` mounts them after authentication.

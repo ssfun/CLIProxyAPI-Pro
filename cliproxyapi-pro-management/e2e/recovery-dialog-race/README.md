@@ -8,3 +8,5 @@ This harness imports the real `SchedulingRecoveryDialog` and `SchedulingRecovery
 4. Run `bash cliproxyapi-pro-management/e2e/recovery-dialog-race/run.sh [URL] [ARTIFACT_DIR] [fixed|before]` from this repository. The default mode asserts the fix; `before` documents the original failure.
 
 The Ego Browser script checks A→B, a same-account reopen, a closed dialog, the parent callback log, and the next check's account ID. It writes `result.json` to the artifact directory. This proves the React session behavior under controlled API timing; it does not test a live Core response.
+
+The fixed-mode run also checks complete simultaneous restriction details and a targeted upstream model release, including identity/epoch/revision payload and preservation of inspection protection. Set `TASK_SPACE_ID=3 KEEP_TASK_SPACE=1` to reuse an existing Ego task space without closing it.

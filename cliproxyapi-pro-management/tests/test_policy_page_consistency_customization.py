@@ -12,14 +12,9 @@ LOCALES = ROOT / 'monitoring-locales.json'
 
 class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
     def test_optional_features_use_header_activation_actions(self) -> None:
-        routing = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()
         account = (PRO_ROOT / 'oauthPolicy/OAuthPolicyPage.tsx').read_text()
         proxy_header = (PRO_ROOT / 'proxyPool/features/ProxyPoolHeader.tsx').read_text()
 
-        self.assertNotIn('<ProFeatureHeader', routing)
-        self.assertIn("navigate('/account-inspection'", routing)
-        self.assertNotIn('routingPolicyApi.updateRequestProtection', routing)
-        self.assertNotIn('routingPolicyApi.release', routing)
         self.assertIn('<ProFeatureHeader', account)
         self.assertIn('onToggle={toggleEnabled}', account)
         self.assertNotIn('className={styles.enabledField}', account)
@@ -39,13 +34,12 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
         self.assertIn('@media (max-width: 480px)', styles)
 
     def test_optional_feature_tabs_share_proxy_management_style_and_behavior(self) -> None:
-        routing = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()
         account = (PRO_ROOT / 'oauthPolicy/OAuthPolicyPage.tsx').read_text()
         proxy = (PRO_ROOT / 'proxyPool/ProxyPoolPage.tsx').read_text()
         tabs = (SHARED_ROOT / 'ProFeatureTabs.tsx').read_text()
         styles = (SHARED_ROOT / 'ProFeatureTabs.module.scss').read_text()
 
-        for source in (routing, account, proxy):
+        for source in (account, proxy):
             self.assertIn('<ProFeatureTabs', source)
         self.assertIn('role="tablist"', tabs)
         self.assertIn('role="tab"', tabs)
@@ -59,27 +53,21 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
         self.assertIn('@media (max-width: 480px)', styles)
 
     def test_optional_feature_navigation_icons_have_distinct_product_semantics(self) -> None:
-        routing = (PRO_ROOT / 'routing/manifest.tsx').read_text()
         account = (PRO_ROOT / 'oauthPolicy/manifest.tsx').read_text()
         proxy = (PRO_ROOT / 'proxyPool/manifest.tsx').read_text()
         icons = PRO_ICONS.read_text()
 
-        self.assertIn('<IconSidebarRouting size={18} />', routing)
         self.assertIn('<IconSidebarAccountPolicy size={18} />', account)
         self.assertIn('<IconSidebarProxyPool size={18} />', proxy)
-        self.assertIn("from '@/pro/icons'", routing)
         self.assertIn("from '@/pro/icons'", account)
         self.assertIn("from '@/pro/icons'", proxy)
-        self.assertIn('M6 5h9l3 3-3 3H6', icons)
         self.assertIn('M5.5 16c.7-2 1.7-3 3-3s2.3 1 3 3', icons)
         self.assertIn('x="3" y="14" width="18" height="6"', icons)
 
     def test_floating_save_bars_only_render_for_modified_drafts(self) -> None:
-        routing = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()
         account = (PRO_ROOT / 'oauthPolicy/OAuthPolicyPage.tsx').read_text()
         proxy_page = (PRO_ROOT / 'proxyPool/ProxyPoolPage.tsx').read_text()
 
-        self.assertNotIn('isCurrentLayer && dirty', routing)
         self.assertIn('{dirty &&', account)
         self.assertIn('visible={isCurrentLayer && dirty}', proxy_page)
 
@@ -119,83 +107,20 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
         self.assertIn('providerDefinitions.length === 0', account)
         self.assertIn('Object.values(provider.plans).some(({ configured }) => configured)', service)
 
-    def test_routing_board_is_read_only(self) -> None:
-        routing = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()
+    def test_routing_board_is_retired_and_recovery_service_remains(self) -> None:
+        self.assertFalse((PRO_ROOT / 'routing/RoutingPolicyPage.tsx').exists())
+        self.assertFalse((PRO_ROOT / 'routing/manifest.tsx').exists())
         service = (PRO_ROOT / 'routing/routingPolicy.ts').read_text()
-
-        self.assertIn("navigate('/account-inspection'", routing)
-        self.assertIn('buildInspectionFocusLocationState', routing)
-        self.assertNotIn('updateRequestProtection', service)
-        self.assertNotIn("post<SchedulingBoardRawResponse>('/routing-policy/release'", service)
+        registry = (ROOT / 'overlay/src/pro/registry.tsx').read_text()
+        self.assertNotIn('routingModule', registry)
         self.assertIn("get<SchedulingBoardRawResponse>('/routing-policy', { signal })", service)
-        self.assertIn('createLatestRequestGate', routing)
-        self.assertIn('account.authId === selectedAuthId', routing)
-        self.assertNotIn('<ProFeatureHeader', routing)
-        self.assertNotIn('dirtyRef', routing)
-
-    def test_routing_board_ui_ux_enhancements(self) -> None:
-        routing = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()
-        service = (PRO_ROOT / 'routing/routingPolicy.ts').read_text()
-        locales = json.loads(LOCALES.read_text())
-
-        self.assertIn('setKeyword', routing)
-        self.assertIn('setProviderFilter', routing)
-        self.assertIn('setScopeFilter', routing)
-        self.assertIn('handleCopyAuthId', routing)
-        self.assertIn('PRO_PAGE_SIZE_OPTIONS', routing)
-        self.assertIn('formatRemainingTime', routing)
-        self.assertIn('ProPagination', routing)
-        self.assertIn('<Table', routing)
-        self.assertIn('<EmptyState', routing)
-        self.assertIn('<Card', routing)
-
-        self.assertIn('export const schedulingBoardResumeTone', service)
-        self.assertIn('export const formatRemainingTime', service)
-        self.assertIn('export const formatTimestamp', service)
-        self.assertIn('export const formatTimeOnly', service)
-
-        required_runtime_keys = {
-            'healthy_title',
-            'healthy_desc',
-            'search_placeholder',
-            'search_aria_label',
-            'all_providers',
-            'all_scopes',
-            'filter_reset',
-            'filter_empty',
-            'filter_empty_hint',
-            'copied',
-            'copy_auth_id',
-            'source',
-            'expected_recovery',
-            'view_details',
-            'pagination_info',
-        }
-        for locale in ('en.json', 'ru.json', 'zh-CN.json', 'zh-TW.json'):
-            runtime_keys = set(locales[locale]['routing_policy']['runtime'].keys())
-            self.assertTrue(
-                required_runtime_keys.issubset(runtime_keys),
-                f'{locale} missing keys: {required_runtime_keys - runtime_keys}',
-            )
-            self.assertIn('overlap', locales[locale]['routing_policy']['sources'])
-
-    def test_board_distinguishes_unknown_and_empty_snapshots(self) -> None:
-        source = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()
-        self.assertLess(source.index(') : !data ? ('), source.index(') : data.accounts.length === 0 ? ('))
-        self.assertNotIn('summary.nextRetryAt', source)
-        self.assertNotIn('runtime.expected_recovery', source)
-        self.assertNotIn('if (activeSurface !==', source)
-        self.assertIn('runtime.last_updated', source)
-        self.assertIn('summary.global_hint', source)
-        self.assertEqual(source.count('<BoardRecovery account={account} />'), 2)
-        self.assertIn("from '@/utils/clipboard'", source)
+        self.assertIn("'/routing-policy/check'", service)
+        self.assertIn("'/routing-policy/restrictions/release'", service)
 
     def test_header_and_discard_actions_cover_all_locales(self) -> None:
         locales = json.loads(LOCALES.read_text())
-        routing = (PRO_ROOT / 'routing/RoutingPolicyPage.tsx').read_text()
         account = (PRO_ROOT / 'oauthPolicy/OAuthPolicyPage.tsx').read_text()
         required = {
-            'routing_policy': {'title', 'subtitle', 'load_failed'},
             'oauth_policy': {
                 'discard_changes',
                 'providers_with_rules',
@@ -221,10 +146,7 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
             }
             self.assertEqual(len(discard_labels), 1, f'{locale}: discard_changes')
 
-        self.assertNotIn("t('common.disable'", routing)
         self.assertNotIn('t("common.disable"', account)
-        self.assertNotIn("title={t('config_management.reload')}", routing)
-        self.assertNotIn("routing_policy.discard_changes", routing)
         self.assertIn("oauth_policy.discard_changes", account)
 
     def test_policy_titles_match_the_product_navigation_names(self) -> None:
@@ -237,8 +159,8 @@ class PolicyPageConsistencyCustomizationTest(unittest.TestCase):
         }
 
         for locale, (scheduling_title, account_title) in expected.items():
-            self.assertEqual(scheduling_title, locales[locale]['nav']['routing_policy'])
-            self.assertEqual(scheduling_title, locales[locale]['routing_policy']['title'])
+            self.assertNotIn('routing_policy', locales[locale]['nav'])
+            self.assertNotIn('title', locales[locale]['routing_policy'])
             self.assertEqual(account_title, locales[locale]['oauth_policy']['title'])
 
 

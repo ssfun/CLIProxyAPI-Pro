@@ -1773,7 +1773,6 @@ def patch_locales(target: Path) -> None:
                 {
                     'monitoring_center': nav_additions.get('monitoring_center', 'Request Monitoring'),
                     'account_inspection': nav_additions.get('account_inspection', 'Account Inspection'),
-                    'routing_policy': nav_additions.get('routing_policy', 'Scheduling Board'),
                 },
             )
         )

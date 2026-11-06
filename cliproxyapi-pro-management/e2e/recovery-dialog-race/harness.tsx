@@ -10,15 +10,18 @@ type AccountName = 'A' | 'B';
 const accounts = Object.fromEntries((['A', 'B'] as const).map((name) => [name, {
   provider: 'codex', authId: name, authIndex: `index-${name}`, registrationEpoch: '1',
   fileName: name, scope: 'credential', kind: 'quota', bucket: 'quota',
-  sources: ['inspection'], resume: 'recheck-quota', reason: `reason-${name}`,
-  inspection: true, overlap: false,
+  sources: ['inspection', 'upstream'], resume: 'recheck-quota', reason: `reason-${name}`,
+  inspection: true, overlap: true,
   details: [{ source: 'inspection', scope: 'credential', kind: 'quota',
-    resume: 'recheck-quota', reason: `reason-${name}`, revision: '1' }],
+    resume: 'recheck-quota', reason: `reason-${name}`, revision: '1' },
+    { source: 'upstream', scope: 'model', model: 'model-cooldown', kind: 'quota',
+      resume: 'auto-expire', reason: 'upstream-model-reason', httpStatus: 429, retryAt: 1893456000000, revision: 'upstream-2' }],
 }])) as Record<AccountName, SchedulingBoardAccount>;
 
 const pending: Array<{ request: SchedulingRecoveryRequest; resolve: (result: SchedulingRecoveryResult) => void }> = [];
 const notifications: string[] = [];
 const checkRequests: string[] = [];
+const releaseRequests: SchedulingRecoveryRequest[] = [];
 let settledChecks = 0;
 let holdNextBoard = false;
 let releaseBoard: (() => void) | null = null;
@@ -38,6 +41,16 @@ routingPolicyApi.check = (request) => {
   return new Promise((resolve) => pending.push({ request, resolve }));
 };
 
+routingPolicyApi.release = async (request) => {
+  releaseRequests.push(request);
+  const account = accounts[request.authId as AccountName];
+  if (request.authIndex !== account.authIndex || request.registrationEpoch !== account.registrationEpoch) throw new Error('stale identity');
+  const target = account.details.find((detail) => detail.source === request.source && (detail.model || '') === request.model && detail.revision === request.revision);
+  if (!target) throw new Error('stale restriction');
+  account.details = account.details.filter((detail) => detail !== target);
+  return { after: account };
+};
+
 function Harness() {
   const [name, setName] = useState<AccountName | null>(null);
   Object.assign(window, {
@@ -46,6 +59,7 @@ function Harness() {
       close: () => setName(null),
       pending: () => pending.map(({ request }) => request.authId),
       checkRequests: () => [...checkRequests],
+      releaseRequests: () => [...releaseRequests],
       settledChecks: () => settledChecks,
       notifications: () => [...notifications],
       holdNextBoard: () => { holdNextBoard = true; },

@@ -13,8 +13,6 @@ export type SchedulingBoardResume =
   | 'multiple';
 export type SchedulingBoardScope = 'credential' | 'model';
 
-export type SchedulingBoardResumeTone = 'good' | 'warning' | 'danger' | 'info' | 'neutral';
-
 export interface SchedulingBoardSummary {
   blocked: number;
   quota: number;
@@ -150,60 +148,6 @@ export const schedulingBoardModelsLabel = (
   return account.models?.join(', ') || emptyLabel;
 };
 
-export const schedulingBoardResumeTone = (
-  resume: SchedulingBoardResume | string
-): SchedulingBoardResumeTone => {
-  switch (resume) {
-    case 'auto-expire':
-      return 'good';
-    case 'recheck-quota':
-      return 'info';
-    case 'probe-request':
-    case 'refresh-token':
-    case 'multiple':
-      return 'warning';
-    case 'reauthenticate':
-    case 'manual':
-      return 'danger';
-    case 'await-state-change':
-    default:
-      return 'neutral';
-  }
-};
-
-export const formatRemainingTime = (
-  retryAt: number | undefined,
-  resume: string,
-  t: (key: string, options?: Record<string, unknown>) => string,
-  emptyText = '-',
-  now = Date.now()
-): string => {
-  if (retryAt && retryAt > 0) {
-    const diffSeconds = Math.ceil((retryAt - now) / 1000);
-
-    if (diffSeconds > 0) {
-      if (diffSeconds < 60) {
-        return t('routing_policy.runtime.remaining_seconds', { count: diffSeconds });
-      }
-      const minutes = Math.ceil(diffSeconds / 60);
-      if (minutes < 60) {
-        return t('routing_policy.runtime.remaining_minutes', { count: minutes });
-      }
-      const hours = Math.ceil(minutes / 60);
-      return t('routing_policy.runtime.remaining_hours', { count: hours, defaultValue: `${hours}h left` });
-    }
-    if (resume === 'action') return t('routing_policy.runtime.due_action');
-    if (resume === 'recheck-quota') {
-      return t('routing_policy.runtime.due_recheck');
-    }
-    if (resume === 'probe-request') {
-      return t('routing_policy.runtime.due_probe');
-    }
-    return t('routing_policy.runtime.due_now');
-  }
-  return emptyText;
-};
-
 export const formatTimestamp = (
   value: number | undefined,
   locale: string,
@@ -220,20 +164,5 @@ export const formatTimestamp = (
     hour: '2-digit',
     minute: '2-digit',
     second: compact ? undefined : '2-digit',
-  }).format(date);
-};
-
-export const formatTimeOnly = (
-  value: number | undefined,
-  locale: string,
-  emptyText: string
-): string => {
-  if (!value) return emptyText;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return emptyText;
-  return new Intl.DateTimeFormat(locale, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
   }).format(date);
 };
