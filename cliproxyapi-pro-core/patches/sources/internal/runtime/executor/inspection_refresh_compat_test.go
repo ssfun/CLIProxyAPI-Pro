@@ -24,7 +24,8 @@ func TestInspectionRefreshCodexForceBothLayers(t *testing.T) {
 					siwcExpiry = now.Add(-time.Hour)
 				}
 				m := cliproxyauth.NewManager(nil, nil, nil)
-				m.RegisterExecutor(NewCodexExecutor(&config.Config{}))
+				// Isolate refresh receipts across subtests and repeated test runs.
+				m.RegisterExecutor(NewCodexExecutor(&config.Config{AuthDir: t.TempDir()}))
 				a, err := m.Register(context.Background(), &cliproxyauth.Auth{ID: "inspection-dual", Provider: "codex", Status: cliproxyauth.StatusActive, ProxyURL: proxyURL, Metadata: map[string]any{
 					"access_token": "outer-old", "refresh_token": "outer-refresh-old", "expired": outerExpiry.Format(time.RFC3339), "use_siwc": true,
 					"siwc": map[string]any{"access_token": "siwc-old", "refresh_token": "siwc-refresh-old", "client_id": "oaiapp_test", "device_id": "e61bbe28-07ef-466d-8e5d-a344f94ab305", "expired": siwcExpiry.Format(time.RFC3339)},
