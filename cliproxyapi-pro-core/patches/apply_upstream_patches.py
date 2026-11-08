@@ -2495,16 +2495,17 @@ replace_once(
 
 # A canceled request can race upstream data EOF. Preserve actual queued errors,
 # but do not turn cancellation into a synthesized missing-terminal error.
+# handleChunk returns true to stop the forwarding loop.
 replace_once(
     ROOT / 'sdk/api/handlers/stream_forwarder.go',
-    '\t\t\t\tif terminalErr == nil && opts.CloseError != nil {',
-    '\t\t\t\tif terminalErr == nil {\n'
-    '\t\t\t\t\tif errCanceled := c.Request.Context().Err(); errCanceled != nil {\n'
-    '\t\t\t\t\t\tcancel(errCanceled)\n'
-    '\t\t\t\t\t\treturn\n'
-    '\t\t\t\t\t}\n'
+    '\t\t\tif terminalErr == nil && opts.CloseError != nil {',
+    '\t\t\tif terminalErr == nil {\n'
+    '\t\t\t\tif errCanceled := c.Request.Context().Err(); errCanceled != nil {\n'
+    '\t\t\t\t\tcancel(errCanceled)\n'
+    '\t\t\t\t\treturn true\n'
     '\t\t\t\t}\n'
-    '\t\t\t\tif terminalErr == nil && opts.CloseError != nil {',
+    '\t\t\t}\n'
+    '\t\t\tif terminalErr == nil && opts.CloseError != nil {',
     'if errCanceled := c.Request.Context().Err(); errCanceled != nil {',
 )
 
