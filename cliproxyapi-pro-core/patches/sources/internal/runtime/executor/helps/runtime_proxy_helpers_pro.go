@@ -24,6 +24,10 @@ func pooledProxyTransport(proxyURL string, cfg *config.Config, auth *cliproxyaut
 	return pooledProxyTransportResolved(proxyutil.ResolveEffectiveProxy(proxyURL), cfg, auth)
 }
 
+func pooledTransport(kind proxyPoolKind, proxyURL string, cfg *config.Config, auth *cliproxyauth.Auth, build func() (*http.Transport, error)) (*http.Transport, bool) {
+	return pooledTransportResolved(kind, proxyutil.ResolveEffectiveProxy(proxyURL), cfg, auth, build)
+}
+
 func buildPooledBaseTransport(proxyURL string) (*http.Transport, error) {
 	return buildPooledBaseTransportResolved(proxyutil.ResolveEffectiveProxy(proxyURL).Effective)
 }

@@ -66,7 +66,6 @@ sdk/api/handlers/handlers_interceptors.go
 sdk/api/handlers/handlers_routing.go
 sdk/api/handlers/handlers_stream.go
 sdk/api/handlers/openai/openai_handlers.go
-sdk/api/handlers/openai/openai_responses_interrupt_test.go
 sdk/api/handlers/openai/openai_responses_websocket.go
 sdk/api/handlers/openai/openai_responses_websocket_claimed_interrupt_test.go
 sdk/api/handlers/openai/openai_responses_websocket_forward.go

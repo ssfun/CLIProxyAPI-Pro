@@ -517,6 +517,35 @@ for variant in ('WithSession', 'Sessionless', 'NonstreamSessionless'):
 \t\t}()'''
     if variant == 'WithSession':
         reader = reader.replace('\t\t\t\t\treturn', '\t\t\t\t\treadErrCh <- errRead\n\t\t\t\t\treturn')
+    # v8.0.63 supplies the same barrier natively. Validate the complete reader
+    # and wait ordering before leaving it untouched; partial drift must fail.
+    if 'payloadReceived' in body:
+        native_reader = '\t\tpayloadReceived := make(chan struct{})\n' + reader.replace(
+            '\t\tgo func() {\n', '\t\tgo func() {\n\t\t\tsignaled := false\n', 1,
+        ).replace(
+            '\t\t\t}\n\t\t}()',
+            '\t\t\t\tif !signaled {\n\t\t\t\t\tsignaled = true\n'
+            '\t\t\t\t\tclose(payloadReceived)\n\t\t\t\t}\n\t\t\t}\n\t\t}()', 1,
+        )
+        wait_message = 'timed out waiting for client payload after pong'
+        if variant == 'Sessionless':
+            wait_message += ' on sessionless connection'
+        elif variant == 'NonstreamSessionless':
+            wait_message += ' on nonstream sessionless connection'
+        native_wait = (
+            '\t\tselect {\n\t\tcase <-payloadReceived:\n'
+            '\t\tcase <-time.After(5 * time.Second):\n'
+            f'\t\t\tt.Errorf("{wait_message}")\n'
+            '\t\t\treturn\n\t\t}\n'
+        )
+        response = '\t\trespPayload := '
+        if (body.count('payloadReceived') != 3
+                or body.count(native_reader) != 1
+                or body.count(native_wait) != 1
+                or body.count(response) != 1
+                or not body.index(native_reader) < body.index(native_wait) < body.index(response)):
+            raise SystemExit(f'expected native upload synchronization in {websocket_tests}: {signature}')
+        continue
     if body.count(reader) != 1:
         raise SystemExit(f'expected one upload reader in {websocket_tests}: {signature}')
     # The Codex session test has an unused error channel before its reader.
@@ -2574,16 +2603,61 @@ replace_once(responses_claimed_test,
     '\tlocal.observe([]byte(`{"type":"response.created","response":{"id":"r1"}}`))\n')
 
 responses_interrupt_test = ROOT / 'sdk/api/handlers/openai/openai_responses_interrupt_test.go'
-replace_once(responses_interrupt_test,
-    '\tcanceled atomic.Bool\n', '\tcanceled chan struct{}\n')
-replace_once(responses_interrupt_test,
-    '\t\te.canceled.Store(true)\n', '\t\tclose(e.canceled)\n')
-replace_once(responses_interrupt_test,
-    'executor := &blockingHTTPInterruptExecutor{}',
-    'executor := &blockingHTTPInterruptExecutor{canceled: make(chan struct{})}')
-replace_once(responses_interrupt_test,
-    '\tif !executor.canceled.Load() {\n\t\tt.Fatal("http upstream was not canceled")\n\t}',
-    '\tselect {\n\tcase <-executor.canceled:\n\tcase <-time.After(5 * time.Second):\n\t\tt.Fatal("http upstream was not canceled")\n\t}')
+# v8.0.63 supplies a cancellation completion barrier; preserve it instead of
+# replacing the atomic flag. Reject partial native synchronization changes.
+interrupt_body = read(responses_interrupt_test)
+if 'canceledCh' in interrupt_body:
+    native_cancellation_blocks = (
+        '''type blockingHTTPInterruptExecutor struct {
+\tcalls      atomic.Int32
+\tcanceled   atomic.Bool
+\tcanceledCh chan struct{}
+\tcancelOnce sync.Once
+}
+''',
+        '''\tif call == 1 {
+\t\tcontext.AfterFunc(ctx, func() {
+\t\t\te.canceled.Store(true)
+\t\t\te.cancelOnce.Do(func() {
+\t\t\t\tif e.canceledCh != nil {
+\t\t\t\t\tclose(e.canceledCh)
+\t\t\t\t}
+\t\t\t})
+\t\t})
+\t}
+''',
+        '''\t\t<-ctx.Done()
+\t\te.canceled.Store(true)
+\t\te.cancelOnce.Do(func() {
+\t\t\tif e.canceledCh != nil {
+\t\t\t\tclose(e.canceledCh)
+\t\t\t}
+\t\t})
+''',
+        '''\texecutor := &blockingHTTPInterruptExecutor{canceledCh: make(chan struct{})}''',
+        '''\tselect {
+\tcase <-executor.canceledCh:
+\tcase <-time.After(time.Second):
+\t\tt.Fatal("http upstream was not canceled")
+\t}
+\tif !executor.canceled.Load() {
+\t\tt.Fatal("http upstream was not canceled")
+\t}
+''',
+    )
+    if any(interrupt_body.count(block) != 1 for block in native_cancellation_blocks):
+        raise SystemExit(f'expected native cancellation synchronization in {responses_interrupt_test}')
+else:
+    replace_once(responses_interrupt_test,
+        '\tcanceled atomic.Bool\n', '\tcanceled chan struct{}\n')
+    replace_once(responses_interrupt_test,
+        '\t\te.canceled.Store(true)\n', '\t\tclose(e.canceled)\n')
+    replace_once(responses_interrupt_test,
+        'executor := &blockingHTTPInterruptExecutor{}',
+        'executor := &blockingHTTPInterruptExecutor{canceled: make(chan struct{})}')
+    replace_once(responses_interrupt_test,
+        '\tif !executor.canceled.Load() {\n\t\tt.Fatal("http upstream was not canceled")\n\t}',
+        '\tselect {\n\tcase <-executor.canceled:\n\tcase <-time.After(5 * time.Second):\n\t\tt.Fatal("http upstream was not canceled")\n\t}')
 
 # Upstream v8.0.43 handles queued terminal errors through handleErr and
 # PendingStreamError; retain the regression coverage without duplicating it.
@@ -6523,8 +6597,8 @@ replace_once(
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_lifecycle.go'
 replace_once(
     auth_conductor,
-    '\tauth.Generation = 1\n\t// Serialize this credential, but release the manager lock during store I/O.\n',
-    '\tauth.Generation = 1\n\trestoreQuotaProtection(auth)\n\t// Serialize this credential, but release the manager lock during store I/O.\n',
+    '\t// Serialize this credential, but release the manager lock during store I/O.\n',
+    '\trestoreQuotaProtection(auth)\n\t// Serialize this credential, but release the manager lock during store I/O.\n',
     'restoreQuotaProtection(auth)',
 )
 
@@ -6934,6 +7008,20 @@ replace_once(
     '''\tm.RefreshSchedulerEntry(snapshot.ID)
 \tif cooldownStateChanged {''',
 )
+# v8.0.63 reconciles aliases while holding m.mu. Keep those atomic scheduler
+# updates in place, applying policy only to their execution snapshots.
+native_alias_reconciliation = 'type reconciledAuthItem struct {' in read(auth_conductor)
+if native_alias_reconciliation:
+    replace_once(
+        auth_conductor,
+        '\t\t\tm.scheduler.upsertAuth(snapshot.Clone())\n',
+        '\t\t\tm.scheduler.upsertAuth(resolveAccountPolicy(snapshot, m.accountPolicyResolver))\n',
+    )
+    replace_once(
+        auth_conductor,
+        '\t\t\t\t\t\tm.scheduler.upsertAuth(current.Clone())\n',
+        '\t\t\t\t\t\tm.scheduler.upsertAuth(resolveAccountPolicy(current, m.accountPolicyResolver))\n',
+    )
 auth_conductor_text = read(auth_conductor)
 candidate_append = '\t\tcandidates = append(candidates, candidate)\n'
 policy_candidate_append = '\t\tcandidates = append(candidates, resolveAccountPolicy(candidate, m.accountPolicyResolver))\n'
@@ -7303,32 +7391,20 @@ replace_once(
 }''',
     'cursorKey  string',
 )
+# Insert only Pro cursor fields; preserve native weighted-selector ownership.
 replace_once(
     auth_scheduler,
-    '''func newAuthScheduler(selector Selector) *authScheduler {
-\treturn &authScheduler{
-\t\tstrategy:            selectorStrategy(selector),
-\t\tproviders:           make(map[string]*providerScheduler),
-\t\tauthProviders:       make(map[string]string),
-\t\tauthGenerations:     make(map[string]scheduledGenerationMeta),
-\t\tmixedCursors:        make(map[string]int),
-\t\tmixedWeightedStates: make(map[string]*smoothWeightedState),
-\t}
-}''',
-    '''func newAuthScheduler(selector Selector) *authScheduler {
-\tpersistedCursors := loadRoutingCursorStates()
-\treturn &authScheduler{
-\t\tstrategy:            selectorStrategy(selector),
-\t\tproviders:           make(map[string]*providerScheduler),
-\t\tauthProviders:       make(map[string]string),
-\t\tauthGenerations:     make(map[string]scheduledGenerationMeta),
-\t\tmixedCursors:        make(map[string]int),
-\t\tmixedWeightedStates: make(map[string]*smoothWeightedState),
-\t\tmixedRestored:       make(map[string]bool),
-\t\tpersistedCursors:    persistedCursors,
-\t}
-}''',
+    'func newAuthScheduler(selector Selector) *authScheduler {\n',
+    'func newAuthScheduler(selector Selector) *authScheduler {\n\tpersistedCursors := loadRoutingCursorStates()\n',
     'persistedCursors := loadRoutingCursorStates()',
+)
+replace_once(
+    auth_scheduler,
+    '\t\tmixedWeightedStates: make(map[string]*smoothWeightedState),\n',
+    '\t\tmixedWeightedStates: make(map[string]*smoothWeightedState),\n'
+    '\t\tmixedRestored:       make(map[string]bool),\n'
+    '\t\tpersistedCursors:    persistedCursors,\n',
+    '\t\tpersistedCursors:    persistedCursors,',
 )
 replace_once(
     auth_scheduler,
@@ -7343,12 +7419,10 @@ replace_once(
 )
 replace_once(
     auth_scheduler,
-    '''\ts.strategy = selectorStrategy(selector)
-\tclear(s.mixedCursors)
+    '''\tclear(s.mixedCursors)
 \tclear(s.mixedWeightedStates)
 ''',
-    '''\ts.strategy = selectorStrategy(selector)
-\tclear(s.mixedCursors)
+    '''\tclear(s.mixedCursors)
 \tclear(s.mixedWeightedStates)
 \tclear(s.mixedRestored)
 ''',
@@ -7437,7 +7511,8 @@ replace_once(
 )
 
 # Account policy fields are execution-only overlays. Every Manager-driven
-# full scheduler refresh must therefore go through RefreshSchedulerEntry.
+# full scheduler refresh uses RefreshSchedulerEntry, except locked native alias
+# reconciliation, whose two snapshots explicitly resolve the same policy.
 # Result updates retain upstream model scope and stale-generation handling,
 # applying the cached account policy to an execution-only snapshot.
 auth_package = ROOT / 'sdk/cliproxy/auth'
@@ -7451,7 +7526,9 @@ direct_scheduler_upserts = {
     for path in auth_go_paths
     if read(path).count('m.scheduler.upsertAuth(') > 0
 }
-expected_direct_scheduler_upserts = {'sdk/cliproxy/auth/conductor_selection.go': 1}
+expected_direct_scheduler_upserts = {
+    'sdk/cliproxy/auth/conductor_selection.go': 3 if native_alias_reconciliation else 1,
+}
 if direct_scheduler_upserts != expected_direct_scheduler_upserts:
     raise SystemExit(
         'Manager scheduler upserts must be centralized in RefreshSchedulerEntry: '
