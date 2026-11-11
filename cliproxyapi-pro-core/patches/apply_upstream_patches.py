@@ -4265,16 +4265,9 @@ insert_before(
 )
 replace_once(
     usage_helpers,
-    '''\t\treporter.accessTokenHash = authAccessTokenSHA256(auth)
-\t}
-\treturn reporter
-''',
-    '''\t\treporter.accessTokenHash = authAccessTokenSHA256(auth)
-\t}
-\treporter.speed = usage.SpeedFromContext(ctx)
-\treturn reporter
-''',
-    'reporter.speed = usage.SpeedFromContext(ctx)',
+    '\treporter := &UsageReporter{\n',
+    '\treporter := &UsageReporter{\n\t\tspeed: usage.SpeedFromContext(ctx),\n',
+    '\t\tspeed: usage.SpeedFromContext(ctx),\n',
 )
 insert_before(
     usage_helpers,
