@@ -38,6 +38,5 @@ src/utils/quota/constants.ts
 src/utils/quota/resolvers.ts
 src/utils/quota/validators.ts
 src/utils/quota/xaiPaid.ts
-tests/authFileCooldowns.test.ts
 tests/claudeOAuthUsage.test.ts
 tests/quotaPageLogic.test.ts

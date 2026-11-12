@@ -2077,7 +2077,7 @@ def patch_quota_cards_latest(target: Path) -> None:
         # arbitrary upstream JSX attributes. Keep legacy renderers below.
         if '<adapter.Body\n' in read(path):
             after_plan = ('afterPlan={entry.type === \'codex\' ? codexAfterPlan : claudeAfterPlan}'
-                          if relative_path.endswith('QuotaCard.tsx')
+                          if relative_path.endswith('QuotaCard.tsx') and 'codexAfterPlan' in read(path)
                           else 'afterPlan={claudeAfterPlan}')
             body = ('<adapter.Body\n'
                     + indent + '  quota={quota}\n'
