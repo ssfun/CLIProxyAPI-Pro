@@ -24,7 +24,13 @@ overlay_source = out / original.name
 overlay_source.write_text(code.replace(anchor, anchor + '\t\tif proCreditsRecoveryObservedHint != nil { proCreditsRecoveryObservedHint() }\n'))
 fixture = Path(__file__).with_name('recovery_test.go').resolve()
 overlay = out / 'overlay.json'
-overlay.write_text(json.dumps({'Replace': {str(original): str(overlay_source), str(src / 'internal/runtime/executor/pro_credits_recovery_order_test.go'): str(fixture)}}))
+fixture_target = src / 'internal/runtime/executor/pro_credits_recovery_order_test.go'
+fixture_target_existed = fixture_target.exists()
+if not fixture_target_existed:
+    # Go overlays replace existing files; materialize a disposable placeholder
+    # so the injected E2E fixture is discovered by the package loader.
+    fixture_target.write_text('package executor\n')
+overlay.write_text(json.dumps({'Replace': {str(original): str(overlay_source), str(fixture_target): str(fixture)}}))
 command = ['go', 'test', '-overlay', str(overlay), '-json', '-timeout=120s', '-count='+str(a.count), './internal/runtime/executor', '-run', '^(TestProCreditsRecoveryPublicationOrdering|TestAntigravityManagerExecuteAndStream_ToppedUpCreditsRecoverDuringQuotaCooldown)$']
 if a.race:
     command.insert(2, '-race')
@@ -32,7 +38,11 @@ env = os.environ.copy()
 env.setdefault('GOTOOLCHAIN', 'go1.26.0')
 env.setdefault('GOCACHE', '/tmp/cliproxy-go-build-cache')
 with (out / 'events.jsonl').open('w') as f:
-    result = subprocess.run(command, cwd=src, env=env, stdout=f, stderr=subprocess.STDOUT)
+    try:
+        result = subprocess.run(command, cwd=src, env=env, stdout=f, stderr=subprocess.STDOUT)
+    finally:
+        if not fixture_target_existed:
+            fixture_target.unlink(missing_ok=True)
 failures=[]
 required_tests = {
     'TestProCreditsRecoveryPublicationOrdering',

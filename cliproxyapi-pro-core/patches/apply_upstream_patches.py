@@ -1524,19 +1524,29 @@ replace_once(
 ''',
     'ctx = withXAIQuotaObserver(ctx, auth, req.Model)',
 )
-replace_once(
-    xai_websocket_executor,
-    '''\t\t\t\tbodyErrRetry := websocketHandshakeBody(respHSRetry)
+# Upstream v8.0.67 centralizes retry-dial failure recording in
+# recordWebsocketDialRetryFailure. Keep the old rejection hook for older
+# releases, but validate the native helper and call site when present.
+xai_websocket_text = read(xai_websocket_executor)
+xai_retry_anchor = '''\t\t\t\tbodyErrRetry := websocketHandshakeBody(respHSRetry)
 \t\t\t\tcloseHTTPResponseBody(respHSRetry, "xai websockets executor: close handshake response body error")
-''',
-    '''\t\t\t\tbodyErrRetry := websocketHandshakeBody(respHSRetry)
+'''
+if xai_retry_anchor in xai_websocket_text:
+    replace_once(
+        xai_websocket_executor,
+        xai_retry_anchor,
+        '''\t\t\t\tbodyErrRetry := websocketHandshakeBody(respHSRetry)
 \t\t\t\tif respHSRetry != nil {
 \t\t\t\t\thelps.RecordAPIWebsocketUpgradeRejection(ctx, e.cfg, websocketUpgradeRequestLog(wsReqLog), respHSRetry.StatusCode, respHSRetry.Header.Clone(), bodyErrRetry)
 \t\t\t\t}
 \t\t\t\tcloseHTTPResponseBody(respHSRetry, "xai websockets executor: close handshake response body error")
 ''',
-    'helps.RecordAPIWebsocketUpgradeRejection(ctx, e.cfg, websocketUpgradeRequestLog(wsReqLog), respHSRetry.StatusCode',
-)
+        'helps.RecordAPIWebsocketUpgradeRejection(ctx, e.cfg, websocketUpgradeRequestLog(wsReqLog), respHSRetry.StatusCode',
+    )
+else:
+    native_retry_call = 'bodyErrRetry := recordWebsocketDialRetryFailure(ctx, e.cfg, wsReqLog, respHSRetry, errDialRetry)'
+    if xai_websocket_text.count(native_retry_call) != 1:
+        raise SystemExit('expected native websocket retry failure recording in xai_websockets_executor.go')
 
 # Upstream owns the quota capability, RPC transport and reset/describe endpoints.
 # Keep only the Pro snapshot fields needed for persisted quota and legacy plugins.
@@ -4476,21 +4486,26 @@ insert_before(
 )
 
 openai_compat_execute = ROOT / 'internal/runtime/executor/openai_compat_executor.go'
-replace_once(
-    openai_compat_execute,
-    '''\thelps.AppendAPIResponseChunk(ctx, e.cfg, body)
+openai_compat_text = read(openai_compat_execute)
+openai_compat_legacy_anchor = '''\thelps.AppendAPIResponseChunk(ctx, e.cfg, body)
 \treporter.ObserveResponseModel(body)
 \t// Ensure we at least record the request even if upstream doesn't return usage
 \t// Translate response back to source format when needed
-''',
-    '''\thelps.AppendAPIResponseChunk(ctx, e.cfg, body)
+'''
+if openai_compat_legacy_anchor in openai_compat_text:
+    replace_once(
+        openai_compat_execute,
+        openai_compat_legacy_anchor,
+        '''\thelps.AppendAPIResponseChunk(ctx, e.cfg, body)
 \treporter.ObserveResponseModel(body)
 \t// Translate response back to source format before publishing success. A
 \t// translator panic is an upstream-attempt failure and must win the one-shot
 \t// terminal usage publication while retaining the parsed token detail.
 ''',
-    'translator panic is an upstream-attempt failure',
-)
+        'translator panic is an upstream-attempt failure',
+    )
+elif openai_compat_text.count('\t// Ensure we at least record the request even if upstream doesn\'t return usage\n') != 1:
+    raise SystemExit('expected native OpenAI compatibility response handling in openai_compat_executor.go')
 replace_once(
     openai_compat_execute,
     '''\tvar param any
@@ -4501,6 +4516,7 @@ replace_once(
 ''',
     'out, errTranslate := translateNonStreamResponse(ctx, to, responseFormat',
 )
+
 replace_once(
     openai_compat_execute,
     '''\tif helps.ApplyPatchTranslationError(param) != nil || len(out) == 0 {
@@ -7399,17 +7415,25 @@ replace_once(
     '\t\tpersistedCursors:    persistedCursors,\n',
     '\t\tpersistedCursors:    persistedCursors,',
 )
-replace_once(
-    auth_scheduler,
-    '''\ts.mixedCursors = make(map[string]int)
+auth_scheduler_text = read(auth_scheduler)
+auth_scheduler_legacy_refresh = '''\ts.mixedCursors = make(map[string]int)
 \ts.mixedWeightedStates = make(map[string]*smoothWeightedState)
-\tnow := time.Now()''',
-    '''\ts.mixedCursors = make(map[string]int)
+\tnow := time.Now()'''
+auth_scheduler_native_refresh = '''\ts.mixedCursors = make(map[string]int, len(existingMixedCursors))
+\ts.mixedWeightedStates = make(map[string]*smoothWeightedState)
+\tnow := time.Now()'''
+if auth_scheduler_legacy_refresh in auth_scheduler_text:
+    replace_once(
+        auth_scheduler,
+        auth_scheduler_legacy_refresh,
+        '''\ts.mixedCursors = make(map[string]int)
 \ts.mixedWeightedStates = make(map[string]*smoothWeightedState)
 \ts.mixedRestored = make(map[string]bool)
 \tnow := time.Now()''',
-    's.mixedWeightedStates = make(map[string]*smoothWeightedState)\n\ts.mixedRestored = make(map[string]bool)\n\tnow := time.Now()',
-)
+        's.mixedWeightedStates = make(map[string]*smoothWeightedState)\n\ts.mixedRestored = make(map[string]bool)\n\tnow := time.Now()',
+    )
+elif auth_scheduler_text.count(auth_scheduler_native_refresh) != 1:
+    raise SystemExit('expected native scheduler refresh initialization in scheduler.go')
 replace_once(
     auth_scheduler,
     '''\tclear(s.mixedCursors)
