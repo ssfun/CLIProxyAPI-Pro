@@ -2076,11 +2076,14 @@ def patch_quota_cards_latest(target: Path) -> None:
         # complete known props and branch boundaries, never reconstruct or drop
         # arbitrary upstream JSX attributes. Keep legacy renderers below.
         if '<adapter.Body\n' in read(path):
+            after_plan = ('afterPlan={entry.type === \'codex\' ? codexAfterPlan : claudeAfterPlan}'
+                          if relative_path.endswith('QuotaCard.tsx')
+                          else 'afterPlan={claudeAfterPlan}')
             body = ('<adapter.Body\n'
                     + indent + '  quota={quota}\n'
                     + indent + f'  classes={{{classes}}}\n'
                     + indent + '  planItems={claudePlanItems}\n'
-                    + indent + '  afterPlan={claudeAfterPlan}\n'
+                    + indent + f'  {after_plan}\n'
                     + indent + '/>')
             nested_body = body.replace('\n', '\n  ')
             fragment = f'{indent}<>\n{indent}  {nested_body}\n{indent}  {timestamp}\n{indent}</>\n'
@@ -2093,9 +2096,13 @@ def patch_quota_cards_latest(target: Path) -> None:
             )
             if retained:
                 guard = '{retainedClaudeUsage && quota && (\n'
+                retained_body = body.replace(
+                    'afterPlan={entry.type === \'codex\' ? codexAfterPlan : claudeAfterPlan}',
+                    'afterPlan={claudeAfterPlan}',
+                )
                 replace_once(
                     path,
-                    guard + indent + body + '\n' + indent[:-2] + ')}',
+                    guard + indent + retained_body + '\n' + indent[:-2] + ')}',
                     guard + fragment + indent[:-2] + ')}',
                 )
             continue
