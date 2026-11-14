@@ -2166,7 +2166,13 @@ replace_once(
     'apiKeyRefs:          make(map[string]apiKeyReference)',
 )
 if '''\th.mu.Lock()
-\tdefer h.mu.Unlock()''' in read(management_handler_source):
+\tdefer h.mu.Unlock()
+\tif h.isStaleConfigFileSnapshotLocked(cloned) {
+\t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
+\t\treturn
+\t}
+\th.cfg = cloned
+''' in read(management_handler_source):
     replace_once(
         management_handler_source,
         '''\th.mu.Lock()
