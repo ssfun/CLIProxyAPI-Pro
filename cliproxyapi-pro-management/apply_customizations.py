@@ -2288,7 +2288,7 @@ def main() -> None:
     patch_codex_account_id_resolver(target)
     patch_quota_provider_model_latest(target)
     patch_quota_success_timestamps(target)
-    patch_antigravity_quota_builders(target)
+    # Upstream v1.28.0 owns the current Antigravity quota model builders.
     patch_antigravity_quota_refresh(target)
     patch_quota_page_latest(target)
     patch_quota_cards_latest(target)
