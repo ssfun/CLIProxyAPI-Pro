@@ -2242,6 +2242,22 @@ else:
     )
 replace_once(
     management_handler_source,
+    '''\tif prevSecretHash != nextSecretHash {
+\t\th.authCache.invalidate()
+\t}
+''',
+    '''\tif prevSecretHash != nextSecretHash {
+\t\th.authCache.invalidate()
+\t}
+\th.mu.Unlock()
+\tif application != nil && application.APIKeyPolicy() != nil {
+\t\tapplication.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)
+\t}
+''',
+    'application.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)',
+)
+replace_once(
+    management_handler_source,
     '''\t\t\tc.AbortWithStatusJSON(statusCode, gin.H{"error": errMsg})
 \t\t\treturn
 \t\t}
