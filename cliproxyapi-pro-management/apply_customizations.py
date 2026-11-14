@@ -1406,33 +1406,6 @@ def patch_codex_account_id_resolver(target: Path) -> None:
     )
 
 
-def patch_antigravity_quota_builders(target: Path) -> None:
-    path = target / 'src/utils/quota/builders.ts'
-    insert_once(path, 'export ', '// Pro preserves upstream quota builders for v1.28.0.\nexport ', 'Pro preserves upstream quota builders')
-    return
-    insert_once(
-        path,
-        "\nfunction getAntigravityWindowOrder(bucket: AntigravityQuotaBucket): number {\n",
-        "\nfunction getCanonicalAntigravityGroupId(label: string, description?: string): string {\n  const normalizedLabel = toStableId(label, '');\n  const normalizedDescription = description ? toStableId(description, '') : '';\n  const combined = `${normalizedLabel}-${normalizedDescription}`;\n  if (combined.includes('claude') && (combined.includes('gpt') || combined.includes('gpt-oss') || combined.includes('openai'))) {\n    return 'claude-gpt';\n  }\n  if (combined.includes('gemini')) {\n    return 'gemini';\n  }\n  return normalizedLabel;\n}\n\nfunction getAntigravityWindowOrder(bucket: AntigravityQuotaBucket): number {\n",
-        "getCanonicalAntigravityGroupId",
-    )
-    replace_once(
-        path,
-        "      const groupId = toStableId(label, `quota-group-${groupIndex + 1}`);\n      const buckets = Array.isArray(group.buckets) ? group.buckets : [];\n",
-        "      const description = normalizeStringValue(group.description) ?? undefined;\n      const groupId = getCanonicalAntigravityGroupId(label, description) || `quota-group-${groupIndex + 1}`;\n      const buckets = Array.isArray(group.buckets) ? group.buckets : [];\n",
-    )
-    replace_once(
-        path,
-        "        description: normalizeStringValue(group.description) ?? undefined,\n",
-        "        description,\n",
-    )
-    replace_once(
-        path,
-        "    productUsage: primary.productUsage.length > 0 ? primary.productUsage : fallback.productUsage,\n",
-        "    productUsage: Array.isArray(primary.productUsage) && primary.productUsage.length > 0\n      ? primary.productUsage\n      : Array.isArray(fallback.productUsage)\n        ? fallback.productUsage\n        : [],\n",
-    )
-
-
 def patch_antigravity_quota_refresh(target: Path) -> None:
     data_path = target / 'src/features/quota/providers/antigravity/data.ts'
     insert_once(
