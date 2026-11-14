@@ -2215,7 +2215,7 @@ elif '''\th.mu.Lock()
 \t\tprevSecretHash = h.cfg.RemoteManagement.SecretKey
 \t}
 \th.cfg = cloned
-\t''' in read(management_handler_source):
+''' in read(management_handler_source):
     replace_once(
         management_handler_source,
         '''\th.mu.Lock()
