@@ -1485,12 +1485,6 @@ const fetchAntigravityQuota = async (
 ''',
         '      // Explicit empty groups or buckets are a valid empty summary.\n\n',
     )
-    replace_once(
-        data_path,
-        '  return { groups: [], subscription: await subscriptionPromise, serverTimeOffsetMs: null };\n',
-        '  // Invalid HTTP 2xx responses must fail without replacing cached quota.\n  return { groups: [], subscription: await subscriptionPromise, serverTimeOffsetMs: null };\n',
-    )
-
     # The quota page's single/batch hooks and auth-file cards all use this setter.
     # Keep previous evidence through loading/error, while explicit success and
     # clearQuotaCache remain authoritative replacements/invalidation.
