@@ -2266,6 +2266,24 @@ replace_once(
         'application.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)',
     )
 replace_once(
+        management_handler_source,
+        '''\tif application != nil && application.APIKeyPolicy() != nil {
+\t\tapplication.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)
+\t}
+\tnextSecretHash := ""
+\tif cloned != nil {
+\t\tnextSecretHash = cloned.RemoteManagement.SecretKey
+\t}
+\tif prevSecretHash != nextSecretHash {
+\t\th.authCache.invalidate()
+\t}
+}''',
+        '''\tif application != nil && application.APIKeyPolicy() != nil {
+\t\tapplication.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)
+\t}''',
+        'remove duplicate reload block',
+    )
+replace_once(
     management_handler_source,
     '''\t\t\tc.AbortWithStatusJSON(statusCode, gin.H{"error": errMsg})
 \t\t\treturn
