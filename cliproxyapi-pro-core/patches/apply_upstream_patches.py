@@ -6512,7 +6512,7 @@ insert_before_nth(
     '''\tusageService, err := embeddedusage.StartForPath(runCtx, configPath)
 \tif err != nil {
 \t\tlog.Errorf("failed to start embedded usage service: %v", err)
-\t\treturn
+\t\treturn err
 \t}
 \tembeddedusage.SetDefaultService(usageService)
 \tapplyProRequiredStartupConfig(cfg, configPath)
