@@ -2165,9 +2165,17 @@ replace_once(
 ''',
     'apiKeyRefs:          make(map[string]apiKeyReference)',
 )
-replace_once(
-    management_handler_source,
-    '''\th.mu.Lock()
+if '''\th.mu.Lock()
+\tdefer h.mu.Unlock()
+\tif h.isStaleConfigFileSnapshotLocked(cloned) {
+\t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
+\t\treturn
+\t}
+\th.cfg = cloned
+''' in read(management_handler_source):
+    replace_once(
+        management_handler_source,
+        '''\th.mu.Lock()
 \tdefer h.mu.Unlock()
 \tif h.isStaleConfigFileSnapshotLocked(cloned) {
 \t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
@@ -2196,6 +2204,8 @@ replace_once(
 ''',
     'application.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)',
 )
+else:
+    pass
 replace_once(
     management_handler_source,
     '''\t\t\tc.AbortWithStatusJSON(statusCode, gin.H{"error": errMsg})
