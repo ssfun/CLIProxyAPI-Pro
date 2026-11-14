@@ -1651,8 +1651,8 @@ def patch_management_update_check(target: Path) -> None:
     page_path = target / 'src/pages/SystemPage.tsx'
     insert_once(
         page_path,
-        "import { configApi, versionApi } from '@/services/api';\n",
-        "import { configApi, versionApi } from '@/services/api';\n"
+        "from '@/services/api';\n",
+        "from '@/services/api';\n"
         "import { ManagementVersionTileExtension } from '@/pro/system/ManagementVersionTileExtension';\n",
         "ManagementVersionTileExtension } from '@/pro/system/ManagementVersionTileExtension'",
     )
