@@ -6490,7 +6490,7 @@ insert_before(
 queue_go_source('internal/cmd/pro_startup_config_test.go')
 insert_before_nth(
     run,
-    '''\tservice, err := builder.Build()
+    '''\tgo func() {
 ''',
     '''\tusageService, err := embeddedusage.StartForPath(ctx, configPath)
 \tif err != nil {
@@ -6502,12 +6502,12 @@ insert_before_nth(
 \tapplyProRequiredStartupConfig(cfg, configPath)
 
 ''',
-    2,
+    1,
     'embeddedusage.StartForPath(ctx, configPath)',
 )
 insert_before_nth(
     run,
-    '''\tservice, err := builder.Build()
+    '''\terr = service.Run(runCtx)
 ''',
     '''\tusageService, err := embeddedusage.StartForPath(runCtx, configPath)
 \tif err != nil {
