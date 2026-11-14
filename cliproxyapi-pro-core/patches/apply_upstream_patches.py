@@ -2332,6 +2332,17 @@ if '\ts.handlers.SetPluginHost(optionState.pluginHost)\n' in read(server_source)
 else:
     pass
 
+replace_once(
+    server_source,
+    '\ts.handlers.SetPluginHost(s.interceptorHost)\n',
+    '''\tif optionState.proApp != nil {
+\t\ts.apiKeyPolicy = optionState.proApp.APIKeyPolicy()
+\t}
+\ts.handlers.SetPluginHost(s.interceptorHost)
+''',
+    's.apiKeyPolicy = optionState.proApp.APIKeyPolicy()',
+)
+
 server_reload_source = ROOT / 'internal/api/server_reload.go'
 replace_once(
     server_reload_source,
