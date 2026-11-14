@@ -1462,7 +1462,6 @@ const fetchAntigravityQuota = async (
 ''',
         'const isValidAntigravityQuotaPayload =',
     )
-    replace_once(data_path, '  let hadSuccess = false;\n', '  // A transport success alone is not quota evidence.\n')
     replace_once(
         data_path,
         '''      hadSuccess = true;
@@ -1475,6 +1474,7 @@ const fetchAntigravityQuota = async (
       if (!isValidAntigravityQuotaPayload(payload)) {
 ''',
     )
+    replace_once(data_path, '      const groups = buildAntigravityQuotaGroups(payload);\n', '      hadSuccess = true;\n      const groups = buildAntigravityQuotaGroups(payload);\n')
     replace_once(
         data_path,
         '''      if (groups.length === 0) {
