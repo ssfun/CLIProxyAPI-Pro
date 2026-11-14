@@ -2231,7 +2231,7 @@ else:
 \t\tprevSecretHash = h.cfg.RemoteManagement.SecretKey
 \t}
 \th.cfg = cloned
-\tupdateAPIKeyConfigGenerationLocked()
+\th.updateAPIKeyConfigGenerationLocked()
 \tnextSecretHash := ""
 \tif cloned != nil {
 \t\tnextSecretHash = cloned.RemoteManagement.SecretKey
