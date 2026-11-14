@@ -2236,7 +2236,7 @@ elif '''\th.mu.Lock()
 \tif prevSecretHash != nextSecretHash {
 \t\th.authCache.invalidate()
 \t}
-\t''',
+''',
         '''\th.mu.Lock()
 \tif h.isStaleConfigFileSnapshotLocked(cloned) {
 \t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
