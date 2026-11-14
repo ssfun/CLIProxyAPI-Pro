@@ -6548,8 +6548,7 @@ replace_once(
     '''\th.startAttemptCleanup()
 \treturn h
 ''',
-    '''\th.startProManagementRuntime()
-\th.startAttemptCleanup()
+    '''\th.startAttemptCleanup()
 \treturn h
 ''',
 )

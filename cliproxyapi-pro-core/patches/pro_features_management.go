@@ -21,6 +21,7 @@ func (h *Handler) SetProApp(application *proapp.App) {
 	if application != nil && application.APIKeyPolicy() != nil {
 		application.APIKeyPolicy().SetConfiguredAPIKeys(keys)
 	}
+	h.startProManagementRuntime()
 }
 
 func (h *Handler) proApplication() *proapp.App {
