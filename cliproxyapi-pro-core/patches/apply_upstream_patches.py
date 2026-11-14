@@ -6545,11 +6545,11 @@ insert_before(
 )
 replace_once(
     handler,
-    '''\th.startProManagementRuntime()
-\th.startAttemptCleanup()
+    '''\th.startAttemptCleanup()
 \treturn h
 ''',
-    '''\th.startAttemptCleanup()
+    '''\th.startProManagementRuntime()
+\th.startAttemptCleanup()
 \treturn h
 ''',
 )
