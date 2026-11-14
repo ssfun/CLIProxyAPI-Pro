@@ -2165,7 +2165,7 @@ replace_once(
 ''',
     'apiKeyRefs:          make(map[string]apiKeyReference)',
 )
-if '''\th.mu.Lock()
+if False and '''\th.mu.Lock()
 \tdefer h.mu.Unlock()
 \tif h.isStaleConfigFileSnapshotLocked(cloned) {
 \t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
