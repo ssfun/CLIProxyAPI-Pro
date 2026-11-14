@@ -2227,6 +2227,7 @@ else:
 \t}
 \th.updateAPIKeyConfigGenerationLocked()
 \tprevSecretHash := ""
+\tnextSecretHash := ""
 \tif h.cfg != nil {
 \t\tprevSecretHash = h.cfg.RemoteManagement.SecretKey
 \t}
