@@ -2174,6 +2174,24 @@ if '''\th.mu.Lock()
 \th.cfg = cloned
 ''' in read(management_handler_source):
     replace_once(
+    management_handler_source,
+    '''\tif application != nil && application.APIKeyPolicy() != nil {
+\t\tapplication.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)
+\t}
+\tnextSecretHash := ""
+\tif cloned != nil {
+\t\tnextSecretHash = cloned.RemoteManagement.SecretKey
+\t}
+\tif prevSecretHash != nextSecretHash {
+\t\th.authCache.invalidate()
+\t}
+}''',
+    '''\tif application != nil && application.APIKeyPolicy() != nil {
+\t\tapplication.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)
+\t}''',
+    'remove duplicate reload block',
+)
+replace_once(
         management_handler_source,
         '''\th.mu.Lock()
 \tdefer h.mu.Unlock()
@@ -2206,19 +2224,6 @@ if '''\th.mu.Lock()
 )
 else:
     replace_once(
-    management_handler_source,
-    '''\tnextSecretHash := ""
-\tif cloned != nil {
-\t\tnextSecretHash = cloned.RemoteManagement.SecretKey
-\t}
-\tif prevSecretHash != nextSecretHash {
-\t\th.authCache.invalidate()
-\t}
-}''',
-    '',
-    'nextSecretHash = cloned.RemoteManagement.SecretKey',
-)
-replace_once(
         management_handler_source,
         '''\th.mu.Lock()
 \tdefer h.mu.Unlock()
