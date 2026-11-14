@@ -2165,17 +2165,9 @@ replace_once(
 ''',
     'apiKeyRefs:          make(map[string]apiKeyReference)',
 )
-if '''\th.mu.Lock()
-\tdefer h.mu.Unlock()
-\tif h.isStaleConfigFileSnapshotLocked(cloned) {
-\t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
-\t\treturn
-\t}
-\th.cfg = cloned
-''' in read(management_handler_source):
-    replace_once(
-        management_handler_source,
-        '''\th.mu.Lock()
+replace_once(
+    management_handler_source,
+    '''\th.mu.Lock()
 \tdefer h.mu.Unlock()
 \tif h.isStaleConfigFileSnapshotLocked(cloned) {
 \t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
@@ -2196,58 +2188,6 @@ if '''\th.mu.Lock()
 \tvar apiKeys []string
 \tif cloned != nil {
 \t\tapiKeys = append(apiKeys, cloned.APIKeys...)
-\t}
-\th.mu.Unlock()
-\tif application != nil && application.APIKeyPolicy() != nil {
-\t\tapplication.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)
-\t}
-''',
-    'application.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)',
-)
-else:
-    replace_once(
-        management_handler_source,
-        '''\th.mu.Lock()
-\tdefer h.mu.Unlock()
-\tif h.isStaleConfigFileSnapshotLocked(cloned) {
-\t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
-\t\treturn
-\t}
-\tprevSecretHash := ""
-\tif h.cfg != nil {
-\t\tprevSecretHash = h.cfg.RemoteManagement.SecretKey
-\t}
-\th.cfg = cloned
-''',
-        '''\th.mu.Lock()
-\tif h.isStaleConfigFileSnapshotLocked(cloned) {
-\t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
-\t\th.mu.Unlock()
-\t\treturn
-\t}
-\th.updateAPIKeyConfigGenerationLocked()
-\tprevSecretHash := ""
-\tif h.cfg != nil {
-\t\tprevSecretHash = h.cfg.RemoteManagement.SecretKey
-\t}
-\th.cfg = cloned
-\th.updateAPIKeyConfigGenerationLocked()
-\tapplication := h.proApp
-\tvar apiKeys []string
-\tif cloned != nil {
-\t\tapiKeys = append(apiKeys, cloned.APIKeys...)
-\t}
-''',
-        'application.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)',
-    )
-replace_once(
-    management_handler_source,
-    '''\tif prevSecretHash != nextSecretHash {
-\t\th.authCache.invalidate()
-\t}
-''',
-    '''\tif prevSecretHash != nextSecretHash {
-\t\th.authCache.invalidate()
 \t}
 \th.mu.Unlock()
 \tif application != nil && application.APIKeyPolicy() != nil {
@@ -2303,10 +2243,9 @@ replace_once(
     '\ts.mgmt.SetPluginHost(optionState.pluginHost)\n\ts.mgmt.SetProApp(optionState.proApp)\n',
     's.mgmt.SetProApp(optionState.proApp)',
 )
-if '\ts.handlers.SetPluginHost(optionState.pluginHost)\n' in read(server_source):
-    replace_once(
-        server_source,
-        '\ts.handlers.SetPluginHost(optionState.pluginHost)\n',
+replace_once(
+    server_source,
+    '\ts.handlers.SetPluginHost(optionState.pluginHost)\n',
     '''\tif optionState.proApp != nil {
 \t\ts.apiKeyPolicy = optionState.proApp.APIKeyPolicy()
 \t}
@@ -2314,8 +2253,6 @@ if '\ts.handlers.SetPluginHost(optionState.pluginHost)\n' in read(server_source)
 ''',
     's.apiKeyPolicy = optionState.proApp.APIKeyPolicy()',
 )
-else:
-    pass
 
 server_reload_source = ROOT / 'internal/api/server_reload.go'
 replace_once(
@@ -3955,10 +3892,9 @@ replace_once(
 ''',
     'proApplication, errProApp := proapp.New',
 )
-if '\t\tpluginHost:          pluginHost,\n' in read(builder_source):
-    replace_once(
-        builder_source,
-        '\t\tpluginHost:          pluginHost,\n',
+replace_once(
+    builder_source,
+    '\t\tpluginHost:          pluginHost,\n',
     '\t\tpluginHost:          pluginHost,\n\t\tproApp:         proApplication,\n',
     'proApp:         proApplication',
 )
