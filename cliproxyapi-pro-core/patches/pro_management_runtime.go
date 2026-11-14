@@ -7,9 +7,7 @@ func (h *Handler) startProManagementRuntime() {
 		return
 	}
 	h.startAccountInspectionScheduler(accountInspectionQuotaAdapter{h: h})
-	if h.proApplication() != nil {
-		startRoutingPolicyController(h)
-	}
+	startRoutingPolicyController(h)
 }
 
 // Shutdown stops every background task owned by this management handler.

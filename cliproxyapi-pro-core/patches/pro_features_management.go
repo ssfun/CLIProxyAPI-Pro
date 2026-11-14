@@ -21,7 +21,6 @@ func (h *Handler) SetProApp(application *proapp.App) {
 	if application != nil && application.APIKeyPolicy() != nil {
 		application.APIKeyPolicy().SetConfiguredAPIKeys(keys)
 	}
-	startRoutingPolicyController(h)
 }
 
 func (h *Handler) proApplication() *proapp.App {
