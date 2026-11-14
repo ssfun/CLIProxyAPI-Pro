@@ -2206,6 +2206,19 @@ if '''\th.mu.Lock()
 )
 else:
     replace_once(
+    management_handler_source,
+    '''\tnextSecretHash := ""
+\tif cloned != nil {
+\t\tnextSecretHash = cloned.RemoteManagement.SecretKey
+\t}
+\tif prevSecretHash != nextSecretHash {
+\t\th.authCache.invalidate()
+\t}
+}''',
+    '',
+    'nextSecretHash = cloned.RemoteManagement.SecretKey',
+)
+replace_once(
         management_handler_source,
         '''\th.mu.Lock()
 \tdefer h.mu.Unlock()
