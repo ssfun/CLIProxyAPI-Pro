@@ -1433,6 +1433,13 @@ def patch_antigravity_quota_builders(target: Path) -> None:
 
 def patch_antigravity_quota_refresh(target: Path) -> None:
     data_path = target / 'src/features/quota/providers/antigravity/data.ts'
+    insert_once(
+        data_path,
+        'const fetchAntigravityQuota = async (\n',
+        '// Pro keeps the upstream Antigravity refresh implementation for v1.28.0.\nconst fetchAntigravityQuota = async (\n',
+        'upstream Antigravity refresh implementation',
+    )
+    return
     replace_once(
         data_path,
         '  normalizeStringValue,\n',
@@ -2282,7 +2289,7 @@ def main() -> None:
     patch_quota_provider_model_latest(target)
     patch_quota_success_timestamps(target)
     patch_antigravity_quota_builders(target)
-    # Upstream v1.28.0 owns the current Antigravity refresh semantics.
+    patch_antigravity_quota_refresh(target)
     patch_quota_page_latest(target)
     patch_quota_cards_latest(target)
     patch_auth_files_page_search_latest(target)
