@@ -1408,6 +1408,8 @@ def patch_codex_account_id_resolver(target: Path) -> None:
 
 def patch_antigravity_quota_builders(target: Path) -> None:
     path = target / 'src/utils/quota/builders.ts'
+    insert_once(path, 'export ', '// Pro preserves upstream quota builders for v1.28.0.\nexport ', 'Pro preserves upstream quota builders')
+    return
     insert_once(
         path,
         "\nfunction getAntigravityWindowOrder(bucket: AntigravityQuotaBucket): number {\n",
