@@ -158,6 +158,7 @@ type accountInspectionScheduler struct {
 	lifecycle               *proinspection.Lifecycle
 	backupUnregister        func()
 	backupHookUnregister    func()
+	loopOnce                sync.Once
 }
 
 type accountInspectionAccount struct {
@@ -216,14 +217,21 @@ func (h *Handler) startAccountInspectionScheduler(quota proinspection.QuotaGatew
 			Resume: scheduler.lifecycle.Resume,
 		})
 		scheduler.cleanupLegacyQuotaCaches(context.Background())
-		if h.lifecycleContext != nil {
-			h.lifecycleWG.Add(1)
-			go func() {
-				defer h.lifecycleWG.Done()
-				scheduler.loop(h.lifecycleContext)
-			}()
-		}
+		scheduler.startLoop()
 	}
+}
+
+func (s *accountInspectionScheduler) startLoop() {
+	if s == nil || s.h == nil || s.h.lifecycleContext == nil || s.h.proApplication() == nil {
+		return
+	}
+	s.loopOnce.Do(func() {
+		s.h.lifecycleWG.Add(1)
+		go func() {
+			defer s.h.lifecycleWG.Done()
+			s.loop(s.h.lifecycleContext)
+		}()
+	})
 }
 
 func (s *accountInspectionScheduler) applyImportedQuotaProtection(ctx context.Context, item embeddedusage.ProSetting) error {
