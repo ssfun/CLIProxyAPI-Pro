@@ -1445,17 +1445,7 @@ def patch_antigravity_quota_refresh(target: Path) -> None:
 const isValidAntigravityQuotaPayload = (
   payload: Record<string, unknown> | null
 ): payload is AntigravityQuotaSummaryPayload & Record<string, unknown> => {
-  if (!payload || payload.error != null || !Array.isArray(payload.groups)) return false;
-  return payload.groups.every((group: unknown) => {
-    if (!group || typeof group !== 'object' || Array.isArray(group)) return false;
-    const buckets = (group as Record<string, unknown>).buckets;
-    if (!Array.isArray(buckets)) return false;
-    return buckets.every((bucket: unknown) => {
-      if (!bucket || typeof bucket !== 'object' || Array.isArray(bucket)) return false;
-      const value = bucket as Record<string, unknown>;
-      return normalizeQuotaFraction(value.remainingFraction ?? value.remaining_fraction) !== null;
-    });
-  });
+  return Boolean(payload && payload.error == null && Array.isArray(payload.groups));
 };
 
 const fetchAntigravityQuota = async (
