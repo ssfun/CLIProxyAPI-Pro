@@ -1601,6 +1601,8 @@ def patch_management_models(target: Path) -> None:
         write(path, source)
     source = read(target / 'src/pages/SystemPage.tsx')
     source = source.replace('      const apiKeys = await resolveApiKeysForModels({ force: forceRefresh });\n      const primaryKey = apiKeys[0];\n', '')
+    source = source.replace('      const apiKeys = await resolveApiKeysForModels({ force: forceRefresh });\n', '')
+    source = source.replace('      const primaryKey = apiKeys[0];\n', '')
     source = source.replace(
         '      const apiKeys = await resolveApiKeysForModels({ force: forceRefresh });\n      const primaryKey = apiKeys[0];\n      const list = await fetchModelsFromStore(auth.apiBase, primaryKey, forceRefresh);',
         '      const list = await fetchModelsFromStore(auth.apiBase, forceRefresh);',
