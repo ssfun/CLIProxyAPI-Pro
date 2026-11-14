@@ -1450,7 +1450,6 @@ const fetchAntigravityQuota = async (
 ''',
     )
     replace_once(data_path, '      const groups = buildAntigravityQuotaGroups(payload);\n', '      hadSuccess = true;\n      const groups = buildAntigravityQuotaGroups(payload);\n')
-    replace_once(data_path, '      if (groups.length === 0) {\n', '      if (groups.length === 0) {\n        break;\n      }\n      if (groups.length === 0) {\n')
     replace_once(data_path, '      if (collectedGroups.size === 0) {\n', '      if (collectedGroups.size === 0 && groups.length > 0) {\n')
     replace_once(
         data_path,
@@ -1460,7 +1459,7 @@ const fetchAntigravityQuota = async (
       }
 
 ''',
-        '      // Explicit empty groups or buckets are a valid empty summary.\n\n',
+        '      if (groups.length === 0) {\n        break;\n      }\n\n',
     )
     # The quota page's single/batch hooks and auth-file cards all use this setter.
     # Keep previous evidence through loading/error, while explicit success and

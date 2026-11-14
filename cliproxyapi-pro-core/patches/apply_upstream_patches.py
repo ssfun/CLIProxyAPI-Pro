@@ -3906,9 +3906,10 @@ replace_once(
 ''',
     'proApplication, errProApp := proapp.New',
 )
-replace_once(
-    builder_source,
-    '\t\tpluginHost:          pluginHost,\n',
+if '\t\tpluginHost:          pluginHost,\n' in read(builder_source):
+    replace_once(
+        builder_source,
+        '\t\tpluginHost:          pluginHost,\n',
     '\t\tpluginHost:          pluginHost,\n\t\tproApp:         proApplication,\n',
     'proApp:         proApplication',
 )
