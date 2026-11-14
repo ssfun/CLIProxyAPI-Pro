@@ -2282,7 +2282,7 @@ def main() -> None:
     patch_quota_provider_model_latest(target)
     patch_quota_success_timestamps(target)
     patch_antigravity_quota_builders(target)
-    patch_antigravity_quota_refresh(target)
+    # Upstream v1.28.0 owns the current Antigravity refresh semantics.
     patch_quota_page_latest(target)
     patch_quota_cards_latest(target)
     patch_auth_files_page_search_latest(target)
