@@ -1487,12 +1487,8 @@ const fetchAntigravityQuota = async (
     )
     replace_once(
         data_path,
-        '''  if (hadSuccess) {
-    return { groups: [], subscription: await subscriptionPromise, serverTimeOffsetMs: null };
-  }
-
-''',
-        '  // Invalid HTTP 2xx responses must fail without replacing cached quota.\n\n',
+        '  return { groups: [], subscription: await subscriptionPromise, serverTimeOffsetMs: null };\n',
+        '  // Invalid HTTP 2xx responses must fail without replacing cached quota.\n  return { groups: [], subscription: await subscriptionPromise, serverTimeOffsetMs: null };\n',
     )
 
     # The quota page's single/batch hooks and auth-file cards all use this setter.
