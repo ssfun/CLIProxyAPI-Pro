@@ -1408,11 +1408,6 @@ def patch_codex_account_id_resolver(target: Path) -> None:
 
 def patch_antigravity_quota_refresh(target: Path) -> None:
     data_path = target / 'src/features/quota/providers/antigravity/data.ts'
-    replace_once(
-        data_path,
-        '  normalizeStringValue,\n',
-        '  normalizeStringValue,\n  normalizeQuotaFraction,\n',
-    )
     insert_once(
         data_path,
         'const fetchAntigravityQuota = async (\n',
@@ -1605,6 +1600,7 @@ def patch_management_models(target: Path) -> None:
         source = source.replace('  const resolveApiKeysForModels = useApiKeysForModels();\n', '')
         write(path, source)
     source = read(target / 'src/pages/SystemPage.tsx')
+    source = source.replace('      const apiKeys = await resolveApiKeysForModels({ force: forceRefresh });\n      const primaryKey = apiKeys[0];\n', '')
     source = source.replace(
         '      const apiKeys = await resolveApiKeysForModels({ force: forceRefresh });\n      const primaryKey = apiKeys[0];\n      const list = await fetchModelsFromStore(auth.apiBase, primaryKey, forceRefresh);',
         '      const list = await fetchModelsFromStore(auth.apiBase, forceRefresh);',
