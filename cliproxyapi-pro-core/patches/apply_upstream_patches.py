@@ -2253,9 +2253,10 @@ replace_once(
     '\ts.mgmt.SetPluginHost(optionState.pluginHost)\n\ts.mgmt.SetProApp(optionState.proApp)\n',
     's.mgmt.SetProApp(optionState.proApp)',
 )
-replace_once(
-    server_source,
-    '\ts.handlers.SetPluginHost(optionState.pluginHost)\n',
+if '\ts.handlers.SetPluginHost(optionState.pluginHost)\n' in read(server_source):
+    replace_once(
+        server_source,
+        '\ts.handlers.SetPluginHost(optionState.pluginHost)\n',
     '''\tif optionState.proApp != nil {
 \t\ts.apiKeyPolicy = optionState.proApp.APIKeyPolicy()
 \t}
@@ -2263,6 +2264,8 @@ replace_once(
 ''',
     's.apiKeyPolicy = optionState.proApp.APIKeyPolicy()',
 )
+else:
+    pass
 
 server_reload_source = ROOT / 'internal/api/server_reload.go'
 replace_once(
