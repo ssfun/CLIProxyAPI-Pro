@@ -1628,9 +1628,12 @@ def patch_management_models(target: Path) -> None:
         source = source.replace('useModelsStore((state)', 'useManagementModelsStore((state)')
         source = source.replace('  const resolveApiKeysForModels = useApiKeysForModels();\n', '')
         write(path, source)
-    replace_once(target / 'src/pages/SystemPage.tsx',
-                 '      const apiKeys = await resolveApiKeysForModels({ force: forceRefresh });\n      const primaryKey = apiKeys[0];\n      const list = await fetchModelsFromStore(auth.apiBase, primaryKey, forceRefresh);',
-                 '      const list = await fetchModelsFromStore(auth.apiBase, forceRefresh);')
+    source = read(target / 'src/pages/SystemPage.tsx')
+    source = source.replace(
+        '      const apiKeys = await resolveApiKeysForModels({ force: forceRefresh });\n      const primaryKey = apiKeys[0];\n      const list = await fetchModelsFromStore(auth.apiBase, primaryKey, forceRefresh);',
+        '      const list = await fetchModelsFromStore(auth.apiBase, forceRefresh);',
+    )
+    write(target / 'src/pages/SystemPage.tsx', source)
     replace_once(target / 'src/features/dashboard/hooks/useDashboardOverview.ts',
                  '      const apiKeys = await resolveApiKeysForModels();\n      await fetchModelsFromStore(apiBase, apiKeys[0]);',
                  '      await fetchModelsFromStore(apiBase);')
