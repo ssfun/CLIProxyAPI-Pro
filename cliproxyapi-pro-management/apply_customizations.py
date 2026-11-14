@@ -1408,13 +1408,6 @@ def patch_codex_account_id_resolver(target: Path) -> None:
 
 def patch_antigravity_quota_refresh(target: Path) -> None:
     data_path = target / 'src/features/quota/providers/antigravity/data.ts'
-    insert_once(
-        data_path,
-        'const fetchAntigravityQuota = async (\n',
-        '// Pro keeps the upstream Antigravity refresh implementation for v1.28.0.\nconst fetchAntigravityQuota = async (\n',
-        'upstream Antigravity refresh implementation',
-    )
-    return
     replace_once(
         data_path,
         '  normalizeStringValue,\n',
