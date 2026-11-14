@@ -2258,17 +2258,6 @@ replace_once(
 )
 replace_once(
     management_handler_source,
-    '''\th.cfg = cloned
-''',
-    '''\th.cfg = cloned
-\tif h.proApp != nil && h.proApp.APIKeyPolicy() != nil {
-\t\th.proApp.APIKeyPolicy().SetConfiguredAPIKeys(cloned.APIKeys)
-\t}
-''',
-    'h.proApp.APIKeyPolicy().SetConfiguredAPIKeys',
-)
-replace_once(
-    management_handler_source,
     '''\t\t\tc.AbortWithStatusJSON(statusCode, gin.H{"error": errMsg})
 \t\t\treturn
 \t\t}
