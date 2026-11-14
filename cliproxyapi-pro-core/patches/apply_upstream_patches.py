@@ -2315,7 +2315,7 @@ replace_once(
 replace_once(
     server_source,
     '\ts.mgmt.SetPluginHost(optionState.pluginHost)\n',
-    '\ts.mgmt.SetPluginHost(optionState.pluginHost)\n\ts.mgmt.SetProApp(optionState.proApp)\n',
+    '\ts.mgmt.SetPluginHost(optionState.pluginHost)\n\ts.mgmt.SetProApp(optionState.proApp)\n\tif optionState.proApp != nil && optionState.proApp.APIKeyPolicy() != nil {\n\t\toptionState.proApp.APIKeyPolicy().SetConfiguredAPIKeys(cfg.APIKeys)\n\t}\n',
     's.mgmt.SetProApp(optionState.proApp)',
 )
 if '\ts.handlers.SetPluginHost(optionState.pluginHost)\n' in read(server_source):
