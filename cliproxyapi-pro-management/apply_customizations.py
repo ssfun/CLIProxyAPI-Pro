@@ -1450,6 +1450,7 @@ const fetchAntigravityQuota = async (
 ''',
     )
     replace_once(data_path, '      const groups = buildAntigravityQuotaGroups(payload);\n', '      hadSuccess = true;\n      const groups = buildAntigravityQuotaGroups(payload);\n')
+    replace_once(data_path, '      if (collectedGroups.size === 0) {\n', '      if (collectedGroups.size === 0 && groups.length > 0) {\n')
     replace_once(
         data_path,
         '''      if (groups.length === 0) {
