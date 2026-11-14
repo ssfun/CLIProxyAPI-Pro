@@ -2183,55 +2183,6 @@ if '''\th.mu.Lock()
 \t}
 \th.cfg = cloned
 ''',
-    '''\th.mu.Lock()
-\tif h.isStaleConfigFileSnapshotLocked(cloned) {
-\t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
-\t\th.mu.Unlock()
-\t\treturn
-\t}
-\th.updateAPIKeyConfigGenerationLocked()
-\th.cfg = cloned
-\th.updateAPIKeyConfigGenerationLocked()
-\tapplication := h.proApp
-\tvar apiKeys []string
-\tif cloned != nil {
-\t\tapiKeys = append(apiKeys, cloned.APIKeys...)
-\t}
-\th.mu.Unlock()
-\tif application != nil && application.APIKeyPolicy() != nil {
-\t\tapplication.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)
-\t}
-''',
-    'application.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)',
-)
-else:
-    replace_once(
-    management_handler_source,
-    '''\tnextSecretHash := ""
-\tif cloned != nil {
-\t\tnextSecretHash = cloned.RemoteManagement.SecretKey
-\t}
-\tif prevSecretHash != nextSecretHash {
-\t\th.authCache.invalidate()
-\t}
-}''',
-    '',
-    'nextSecretHash = cloned.RemoteManagement.SecretKey',
-)
-replace_once(
-        management_handler_source,
-        '''\th.mu.Lock()
-\tdefer h.mu.Unlock()
-\tif h.isStaleConfigFileSnapshotLocked(cloned) {
-\t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
-\t\treturn
-\t}
-\tprevSecretHash := ""
-\tif h.cfg != nil {
-\t\tprevSecretHash = h.cfg.RemoteManagement.SecretKey
-\t}
-\th.cfg = cloned
-''',
         '''\th.mu.Lock()
 \tif h.isStaleConfigFileSnapshotLocked(cloned) {
 \t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
@@ -2239,20 +2190,8 @@ replace_once(
 \t\treturn
 \t}
 \th.updateAPIKeyConfigGenerationLocked()
-\tprevSecretHash := ""
-\tnextSecretHash := ""
-\tif h.cfg != nil {
-\t\tprevSecretHash = h.cfg.RemoteManagement.SecretKey
-\t}
 \th.cfg = cloned
 \th.updateAPIKeyConfigGenerationLocked()
-\tnextSecretHash = ""
-\tif cloned != nil {
-\t\tnextSecretHash = cloned.RemoteManagement.SecretKey
-\t}
-\tif prevSecretHash != nextSecretHash {
-\t\th.authCache.invalidate()
-\t}
 \tapplication := h.proApp
 \tvar apiKeys []string
 \tif cloned != nil {
@@ -2265,6 +2204,73 @@ replace_once(
 ''',
         'application.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)',
     )
+elif '''\th.mu.Lock()
+\tdefer h.mu.Unlock()
+\tif h.isStaleConfigFileSnapshotLocked(cloned) {
+\t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
+\t\treturn
+\t}
+\tprevSecretHash := ""
+\tif h.cfg != nil {
+\t\tprevSecretHash = h.cfg.RemoteManagement.SecretKey
+\t}
+\th.cfg = cloned
+\t''' in read(management_handler_source):
+    replace_once(
+        management_handler_source,
+        '''\th.mu.Lock()
+\tdefer h.mu.Unlock()
+\tif h.isStaleConfigFileSnapshotLocked(cloned) {
+\t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
+\t\treturn
+\t}
+\tprevSecretHash := ""
+\tif h.cfg != nil {
+\t\tprevSecretHash = h.cfg.RemoteManagement.SecretKey
+\t}
+\th.cfg = cloned
+\tnextSecretHash := ""
+\tif cloned != nil {
+\t\tnextSecretHash = cloned.RemoteManagement.SecretKey
+\t}
+\tif prevSecretHash != nextSecretHash {
+\t\th.authCache.invalidate()
+\t}
+\t''',
+        '''\th.mu.Lock()
+\tif h.isStaleConfigFileSnapshotLocked(cloned) {
+\t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
+\t\th.mu.Unlock()
+\t\treturn
+\t}
+\th.updateAPIKeyConfigGenerationLocked()
+\tprevSecretHash := ""
+\tif h.cfg != nil {
+\t\tprevSecretHash = h.cfg.RemoteManagement.SecretKey
+\t}
+\th.cfg = cloned
+\th.updateAPIKeyConfigGenerationLocked()
+\tnextSecretHash := ""
+\tif cloned != nil {
+\t\tnextSecretHash = cloned.RemoteManagement.SecretKey
+\t}
+\tif prevSecretHash != nextSecretHash {
+\t\th.authCache.invalidate()
+\t}
+\tapplication := h.proApp
+\tvar apiKeys []string
+\tif cloned != nil {
+\t\tapiKeys = append(apiKeys, cloned.APIKeys...)
+\t}
+\th.mu.Unlock()
+\tif application != nil && application.APIKeyPolicy() != nil {
+\t\tapplication.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)
+\t}
+\t''',
+        'application.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)',
+    )
+else:
+    raise SystemExit('no SetConfig anchor')
 replace_once(
     management_handler_source,
     '''\t\t\tc.AbortWithStatusJSON(statusCode, gin.H{"error": errMsg})
