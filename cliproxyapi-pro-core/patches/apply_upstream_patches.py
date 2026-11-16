@@ -7400,21 +7400,29 @@ replace_once(
 replace_once(
     auth_files_crud_handler,
     '''\t\t\t\tdeleted++
-\t\t\t\th.removeAuth(ctx, full)
+\t\t\t\tif v8Mode {
+\t\t\t\t\th.reconcileRemovedV8SourceAuths(ctx, full, resolvedFull, "")
+\t\t\t\t} else {
+\t\t\t\t\th.removeAuth(ctx, full)
+\t\t\t\t}
 ''',
     '''\t\t\t\tdeleted++
-\t\t\t\th.removeAuth(ctx, full)
+\t\t\t\tif v8Mode {
+\t\t\t\t\th.reconcileRemovedV8SourceAuths(ctx, full, resolvedFull, "")
+\t\t\t\t} else {
+\t\t\t\t\th.removeAuth(ctx, full)
+\t\t\t\t}
 \t\t\t\t_ = embeddedusage.DeleteAuthRuntimeState(ctx, "", "", name)
 ''',
     'DeleteAuthRuntimeState(ctx, "", "", name)',
 )
 replace_once(
     auth_files_crud_handler,
-    '''\ttargetPath := filepath.Join(h.cfg.AuthDir, filepath.Base(name))
+    '''\ttargetPath := filepath.Join(h.currentHandlerAuthDir(), filepath.Base(name))
 \ttargetID := ""
 \tif targetAuth := h.findAuthForDelete(name); targetAuth != nil {
 ''',
-    '''\ttargetPath := filepath.Join(h.cfg.AuthDir, filepath.Base(name))
+    '''\ttargetPath := filepath.Join(h.currentHandlerAuthDir(), filepath.Base(name))
 \ttargetID := ""
 \ttargetIndex := ""
 \tif targetAuth := h.findAuthForDelete(name); targetAuth != nil {
@@ -7434,10 +7442,18 @@ replace_once(
 )
 replace_once(
     auth_files_crud_handler,
-    '''\th.removeAuthsForPath(ctx, targetPath, targetID)
+    '''\tif isV8AuthFileMutation(ctx) {
+\t\th.reconcileRemovedV8SourceAuths(ctx, targetPath, resolvedTargetPath, targetID)
+\t} else {
+\t\th.removeAuthsForPath(ctx, targetPath, targetID)
+\t}
 \treturn filepath.Base(name), http.StatusOK, nil
 ''',
-    '''\th.removeAuthsForPath(ctx, targetPath, targetID)
+    '''\tif isV8AuthFileMutation(ctx) {
+\t\th.reconcileRemovedV8SourceAuths(ctx, targetPath, resolvedTargetPath, targetID)
+\t} else {
+\t\th.removeAuthsForPath(ctx, targetPath, targetID)
+\t}
 \t_ = embeddedusage.DeleteAuthRuntimeState(ctx, targetID, targetIndex, filepath.Base(name))
 \treturn filepath.Base(name), http.StatusOK, nil
 ''',
