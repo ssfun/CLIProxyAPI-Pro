@@ -2767,7 +2767,6 @@ queue_go_source('sdk/api/handlers/openai/responses_websocket_terminal_order_test
 queue_go_source('sdk/api/handlers/openai/responses_interrupt_lifecycle_test.go')
 
 realtime_websocket_source = ROOT / 'internal/client/codex/live/websocket.go'
-add_go_import(realtime_websocket_source, '\t"context"\n', '\t"encoding/json"\n')
 add_go_import(realtime_websocket_source, '\t"context"\n', '\t"errors"\n')
 add_go_import(realtime_websocket_source, '\t"errors"\n', '\t"fmt"\n')
 add_go_import(realtime_websocket_source, '\t"strings"\n', '\t"sync"\n')
