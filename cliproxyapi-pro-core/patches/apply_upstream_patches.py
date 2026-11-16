@@ -2674,11 +2674,14 @@ replace_once(responses_websocket_forward,
     '\t\t\treturn completeResponsesWebsocketLocalInterrupt(writer,')
 replace_once(responses_websocket_forward,
     '\t\t\t\t\tif !turnEnded {\n'
+    '\t\t\t\t\t\tmarkDownstreamCommitted()\n'
     '\t\t\t\t\t\treturn completeResponsesWebsocketLocalInterrupt(writer,',
     '\t\t\t\t\tactive, _ := opts.localInterrupt.classify(interruptPayload)\n'
     '\t\t\t\t\tif !turnEnded && active {\n'
     '\t\t\t\t\t\topts.localInterrupt.completeInterrupt(interruptPayload)\n'
-    '\t\t\t\t\t\treturn completeResponsesWebsocketLocalInterrupt(writer,')
+    '\t\t\t\t\t\tmarkDownstreamCommitted()\n'
+    '\t\t\t\t\t\treturn completeResponsesWebsocketLocalInterrupt(writer,',
+    )
 replace_once(ROOT / 'sdk/api/handlers/openai/openai_responses_websocket_forward.go',
     '\t\t\tfor i := range payloads {\n',
     '\t\t\tfor i := range payloads {\n\t\t\t\topts.localInterrupt.observe(payloads[i])\n')
@@ -2764,7 +2767,8 @@ queue_go_source('sdk/api/handlers/openai/responses_websocket_terminal_order_test
 queue_go_source('sdk/api/handlers/openai/responses_interrupt_lifecycle_test.go')
 
 realtime_websocket_source = ROOT / 'internal/client/codex/live/websocket.go'
-add_go_import(realtime_websocket_source, '\t"encoding/json"\n', '\t"errors"\n')
+add_go_import(realtime_websocket_source, '\t"context"\n', '\t"encoding/json"\n')
+add_go_import(realtime_websocket_source, '\t"context"\n', '\t"errors"\n')
 add_go_import(realtime_websocket_source, '\t"errors"\n', '\t"fmt"\n')
 add_go_import(realtime_websocket_source, '\t"strings"\n', '\t"sync"\n')
 add_go_import(realtime_websocket_source, '\t"sync"\n', '\t"time"\n')
