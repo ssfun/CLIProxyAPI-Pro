@@ -131,15 +131,28 @@ func TestCodexRetryAfterRejectsNonStandardOrMissingValues(t *testing.T) {
 	}
 }
 
-func TestCodexRetryAfterIgnoresHeaderForNon429(t *testing.T) {
-	err := newCodexStatusErrWithHeadersAndCooling(
-		http.StatusBadGateway,
-		http.Header{"Retry-After": []string{"37"}},
-		[]byte(`{"error":{"message":"upstream unavailable"}}`),
-		false,
-	)
-	if retryAfter := err.RetryAfter(); retryAfter != nil {
-		t.Fatalf("non-429 RetryAfter() = %v, want nil", *retryAfter)
+func TestCodexRetryAfterTransientAndPermanentStatusHeaders(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    int
+		wantRetry bool
+	}{
+		{name: "transient bad gateway", status: http.StatusBadGateway, wantRetry: true},
+		{name: "permanent bad request", status: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := newCodexStatusErrWithHeadersAndCooling(tc.status,
+				http.Header{"Retry-After": []string{"37"}},
+				[]byte(`{"error":{"message":"upstream unavailable"}}`), false)
+			retryAfter := err.RetryAfter()
+			if tc.wantRetry {
+				if retryAfter == nil || *retryAfter != 37*time.Second {
+					t.Fatalf("transient RetryAfter() = %v, want 37s", retryAfter)
+				}
+			} else if retryAfter != nil {
+				t.Fatalf("permanent RetryAfter() = %v, want nil", *retryAfter)
+			}
+		})
 	}
 }
 

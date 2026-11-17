@@ -468,12 +468,23 @@ replace_once(
     '''	now := time.Now()
 	if retryAfter := parseCodexRetryAfter(status, out, now); retryAfter != nil {
 		statusError.retryAfter = retryAfter
-	} else if status == http.StatusTooManyRequests {
-		if retryAfter := parseCodexRetryAfterHeader(headers.Get("Retry-After"), now); retryAfter != nil {
-			statusError.retryAfter = retryAfter
-		} else if isCodexWebsocketConnectionLimitError(payload) {
-			retryAfter := time.Duration(0)
-			statusError.retryAfter = &retryAfter
+	} else if status == http.StatusTooManyRequests && isCodexWebsocketConnectionLimitError(payload) {
+		// Pro honours an explicit frame-level retry hint. Nested hints retain
+		// upstream's connection-limit immediate-retry precedence.
+		hasFrameRetryAfter := false
+		ojson.GetBytesNoCopy(payload, "headers").ForEach(func(key, _ ojson.Result) bool {
+			if strings.EqualFold(strings.TrimSpace(key.String()), "Retry-After") {
+				hasFrameRetryAfter = true
+				return false
+			}
+			return true
+		})
+		retryAfter := time.Duration(0)
+		statusError.retryAfter = &retryAfter
+		if hasFrameRetryAfter {
+			if retryAfter := parseCodexRetryAfterHeader(headers.Get("Retry-After"), now); retryAfter != nil {
+				statusError.retryAfter = retryAfter
+			}
 		}
 	} else if isCodexWebsocketConnectionLimitError(payload) {
 ''',
