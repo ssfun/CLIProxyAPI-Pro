@@ -3390,10 +3390,10 @@ replace_once(
 )
 replace_once(
     handlers_execution_source,
-    '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
+    '''\tctx = coreauth.WithFreshRequestContinuitySession(enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata))
 \tresp, err := h.AuthManager.Execute(ctx, providers, req, opts)
 ''',
-    '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
+    '''\tctx = coreauth.WithFreshRequestContinuitySession(enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata))
 \tctx, errMsg = admitAPIKeyQuota(ctx)
 \tif errMsg != nil {
 \t\tlifecycle.completeError(ctx, errMsg)
@@ -3589,10 +3589,10 @@ replace_once(
 )
 replace_once(
     handlers_stream_source,
-    '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
+    '''\tctx = coreauth.WithRequestContinuitySession(enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata))
 \tstreamResult, err := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
 ''',
-    '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
+    '''\tctx = coreauth.WithRequestContinuitySession(enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata))
 \tctx, errMsg = admitAPIKeyQuota(ctx)
 \tif errMsg != nil {
 \t\tlifecycle.completeError(ctx, errMsg)
@@ -6189,8 +6189,8 @@ for relative_path in (
     )
 replace_once(
     ROOT / 'internal/runtime/executor/xai_websockets_executor.go',
-    '\twsReqBody := buildXAIWebsocketRequestBodyDoc(ctx, doc, prepared.finalizePayload)',
-    '\twsReqBody := buildXAIWebsocketRequestBodyDoc(ctx, doc, prepared.finalizePayload)\n\treporter.ObserveUpstreamRequestModel(wsReqBody)',
+    '\twsReqBody := buildXAIWebsocketRequestBodyDoc(doc)',
+    '\twsReqBody := buildXAIWebsocketRequestBodyDoc(doc)\n\treporter.ObserveUpstreamRequestModel(wsReqBody)',
     'reporter.ObserveUpstreamRequestModel(wsReqBody)',
 )
 aistudio_executor = ROOT / 'internal/runtime/executor/aistudio_executor.go'
