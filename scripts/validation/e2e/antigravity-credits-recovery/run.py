@@ -35,7 +35,7 @@ command = ['go', 'test', '-overlay', str(overlay), '-json', '-timeout=120s', '-c
 if a.race:
     command.insert(2, '-race')
 env = os.environ.copy()
-env.setdefault('GOTOOLCHAIN', 'go1.26.0')
+env.setdefault('GOTOOLCHAIN', 'auto')
 env.setdefault('GOCACHE', '/tmp/cliproxy-go-build-cache')
 with (out / 'events.jsonl').open('w') as f:
     try:
