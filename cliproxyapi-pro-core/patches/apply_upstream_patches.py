@@ -5321,8 +5321,44 @@ replace_once(
 ''',
 )
 
-replace_once(
-    ROOT / 'internal/pluginhost/adapters_executors.go',
+plugin_executor_adapter = ROOT / 'internal/pluginhost/adapters_executors.go'
+if 'ApplyPluginExecutorAttribution' in read(plugin_executor_adapter):
+    replace_once(
+    plugin_executor_adapter,
+    '''\tif reporter != nil {
+\t\treporter.ApplyPluginExecutorAttribution(a.pluginID, pluginResp.Attribution)
+\t\treporter.RecordFirstPacket()
+\t\tdetail := helps.ParsePluginExecutorResponseUsage(prepared.outputFormat.String(), pluginResp.Payload)
+\t\treporter.Publish(ctx, detail)
+\t\treporter.EnsurePublished(ctx)
+\t}
+
+\treturn coreexecutor.Response{
+\t\tPayload:  a.translateExecutorResponse(ctx, prepared, pluginResp.Payload, false, nil),
+\t\tMetadata: cloneAnyMap(pluginResp.Metadata),
+\t\tHeaders:  cloneHeader(pluginResp.Headers),
+\t}, nil
+''',
+    '''\tctx = pluginExecutorUsageContext(ctx, pluginResp.Headers)
+\tresp = coreexecutor.Response{
+\t\tPayload:  a.translateExecutorResponse(ctx, prepared, pluginResp.Payload, false, nil),
+\t\tMetadata: cloneAnyMap(pluginResp.Metadata),
+\t\tHeaders:  cloneHeader(pluginResp.Headers),
+\t}
+\tif reporter != nil {
+\t\treporter.ApplyPluginExecutorAttribution(a.pluginID, pluginResp.Attribution)
+\t\treporter.RecordFirstPacket()
+\t\tif !publishPluginExecutorUsage(ctx, reporter, pluginExecutorUsageFormat(prepared), resp.Payload, false) {
+\t\t\treporter.EnsurePublished(ctx)
+\t\t}
+\t}
+\treturn resp, nil
+''',
+    'publishPluginExecutorUsage(ctx, reporter, pluginExecutorUsageFormat(prepared), resp.Payload, false)',
+    )
+else:
+    replace_once(
+    plugin_executor_adapter,
     '''\tif reporter != nil {
 \t\treporter.RecordFirstPacket()
 \t\tdetail := helps.ParsePluginExecutorResponseUsage(prepared.outputFormat.String(), pluginResp.Payload)
@@ -5351,7 +5387,7 @@ replace_once(
 \treturn resp, nil
 ''',
     'publishPluginExecutorUsage(ctx, reporter, pluginExecutorUsageFormat(prepared), resp.Payload, false)',
-)
+    )
 
 replace_once(
     ROOT / 'internal/pluginhost/adapters_executors.go',
