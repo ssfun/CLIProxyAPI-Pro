@@ -5337,7 +5337,7 @@ if 'ApplyPluginExecutorAttribution' in read(plugin_executor_adapter):
 \t\tPayload:  a.translateExecutorResponse(ctx, prepared, pluginResp.Payload, false, nil),
 \t\tMetadata: cloneAnyMap(pluginResp.Metadata),
 \t\tHeaders:  cloneHeader(pluginResp.Headers),
-\t}, nil
+\t}, pluginResp.Attribution, nil
 ''',
     '''\tctx = pluginExecutorUsageContext(ctx, pluginResp.Headers)
 \tresp = coreexecutor.Response{
@@ -5352,7 +5352,7 @@ if 'ApplyPluginExecutorAttribution' in read(plugin_executor_adapter):
 \t\t\treporter.EnsurePublished(ctx)
 \t\t}
 \t}
-\treturn resp, nil
+\treturn resp, pluginResp.Attribution, nil
 ''',
     'publishPluginExecutorUsage(ctx, reporter, pluginExecutorUsageFormat(prepared), resp.Payload, false)',
     )
