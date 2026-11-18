@@ -5389,8 +5389,27 @@ else:
     'publishPluginExecutorUsage(ctx, reporter, pluginExecutorUsageFormat(prepared), resp.Payload, false)',
     )
 
-replace_once(
-    ROOT / 'internal/pluginhost/adapters_executors.go',
+if 'ApplyPluginExecutorAttribution' in read(plugin_executor_adapter):
+    replace_once(
+    plugin_executor_adapter,
+    '''\tchunks := a.observeAndTranslateExecutorStream(ctx, prepared, pluginResp.Chunks, reporter)
+\treturn &coreexecutor.StreamResult{
+\t\tHeaders: cloneHeader(pluginResp.Headers),
+\t\tChunks:  chunks,
+\t}, pluginResp.Attribution, nil
+''',
+    '''\tctx = pluginExecutorUsageContext(ctx, pluginResp.Headers)
+\tchunks := a.observeAndTranslateExecutorStream(ctx, prepared, pluginResp.Chunks, reporter)
+\treturn &coreexecutor.StreamResult{
+\t\tHeaders: cloneHeader(pluginResp.Headers),
+\t\tChunks:  chunks,
+\t}, pluginResp.Attribution, nil
+''',
+    'ctx = pluginExecutorUsageContext(ctx, pluginResp.Headers)\n\tchunks := a.observeAndTranslateExecutorStream',
+    )
+else:
+    replace_once(
+    plugin_executor_adapter,
     '''\tchunks := a.observeAndTranslateExecutorStream(ctx, prepared, pluginResp.Chunks, reporter)
 \treturn &coreexecutor.StreamResult{
 \t\tHeaders: cloneHeader(pluginResp.Headers),
@@ -5405,7 +5424,7 @@ replace_once(
 \t}, nil
 ''',
     'ctx = pluginExecutorUsageContext(ctx, pluginResp.Headers)\n\tchunks := a.observeAndTranslateExecutorStream',
-)
+    )
 
 replace_once(
     ROOT / 'internal/pluginhost/adapters_executors.go',
