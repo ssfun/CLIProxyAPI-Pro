@@ -1214,8 +1214,7 @@ replace_once(
 
 antigravity_executor = ROOT / 'internal/runtime/executor/antigravity_executor.go'
 add_go_import(antigravity_executor, '\t"strings"\n', '\t"sync/atomic"\n')
-replace_once(
-    antigravity_executor,
+antigravity_key_shapes = [
     '''type antigravityTransportKey struct {
 	credential          string
 	proxy               string
@@ -1223,34 +1222,49 @@ replace_once(
 	shortMode           bool
 	idleConnTimeout     time.Duration
 	maxIdleConnsPerHost int
-}
-''',
+}''',
     '''type antigravityTransportKey struct {
-	credential          string
-	proxy               string
-	base                *http.Transport
-	generation          uint64
-	shortMode           bool
-	idleConnTimeout     time.Duration
-	maxIdleConnsPerHost int
+	credential                  string
+	proxy                       string
+	base                        *http.Transport
+	shortMode                   bool
+	idleConnTimeout             time.Duration
+	maxIdleConnsPerHost         int
+	maxIdleConnsPerHostExplicit bool
+}''',
+]
+antigravity_key_replacement = '''type antigravityTransportKey struct {
+	credential                  string
+	proxy                       string
+	base                        *http.Transport
+	generation                  uint64
+	shortMode                   bool
+	idleConnTimeout             time.Duration
+	maxIdleConnsPerHost         int
+	maxIdleConnsPerHostExplicit bool
 }
 
 var antigravityRuntimeProxyGeneration atomic.Uint64
 
 func syncAntigravityRuntimeProxyGeneration(generation uint64) {
 	cache.SyncGeneration(&antigravityRuntimeProxyGeneration, generation, antigravityTransports.Purge)
-}
-''',
-    'antigravityRuntimeProxyGeneration atomic.Uint64',
-)
+}'''
+antigravity_key_text = read(antigravity_executor)
+if sum(antigravity_key_text.count(x) for x in antigravity_key_shapes) != 1:
+    raise SystemExit('expected one Antigravity transport key shape')
+replace_once(antigravity_executor, next(x for x in antigravity_key_shapes if x in antigravity_key_text), antigravity_key_replacement, 'antigravity transport key')
 replace_once(
     antigravity_executor,
-    '''		base:                base,
-		shortMode:           settings.shortMode,
+    '''		base:                        base,
+		shortMode:                   settings.shortMode,
+		idleConnTimeout:             settings.idleConnTimeout,
+		maxIdleConnsPerHost:         settings.maxIdleConnsPerHost,
+		maxIdleConnsPerHostExplicit: settings.maxIdleConnsPerHostExplicit,
 ''',
-    '''		base:                base,
-		generation:          resolution.Generation,
-		shortMode:           settings.shortMode,
+    '''		base:                        base,
+		generation:                  resolution.Generation,
+		shortMode:                   settings.shortMode,
+		maxIdleConnsPerHostExplicit: settings.maxIdleConnsPerHostExplicit,
 ''',
 )
 replace_once(
@@ -1293,9 +1307,9 @@ replace_once(
 )
 replace_once(
     antigravity_executor,
-    '''		credential:          antigravityTransportScope(auth),
-		proxy:               proxyURL,
-		shortMode:           settings.shortMode,
+    '''		credential:                  antigravityTransportScope(auth),
+		proxy:                       proxyURL,
+		shortMode:                   settings.shortMode,
 ''',
     '''		credential:          antigravityTransportScope(auth),
 		proxy:               resolution.Effective,
