@@ -2303,6 +2303,11 @@ replace_once(
     '''\t\t\tc.AbortWithStatusJSON(statusCode, gin.H{"error": errMsg})
 \t\t\treturn
 \t\t}
+\t\tif c.Request.Method != http.MethodOptions {
+\t\t\tsetHeader := func(id string) { c.Header(ServerIDHeader, id) }
+\t\t\tsetHeader(snapshot.serverID)
+\t\t\tc.Set(managementIdentityKey, managementIdentity{id: snapshot.serverID, setHeader: setHeader})
+\t\t}
 \t\tc.Next()
 ''',
     '''\t\t\tc.AbortWithStatusJSON(statusCode, gin.H{"error": errMsg})
