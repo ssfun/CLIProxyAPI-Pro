@@ -32,7 +32,7 @@ RUN set -eux; \
       echo "${PRO_MANAGEMENT_DIGEST#sha256:}  /tmp/pro-management.html" | sha256sum -c -; \
     fi
 
-FROM golang:1.27-bookworm@sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9 AS builder
+FROM golang:1.27-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea AS builder
 
 RUN set -eux; \
     apt-get update; \
