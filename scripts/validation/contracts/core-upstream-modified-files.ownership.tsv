@@ -74,7 +74,6 @@ sdk/api/handlers/openai/openai_responses_websocket.go	must-remain-host-patch	api
 sdk/api/handlers/openai/openai_responses_websocket_claimed_interrupt_test.go	upstream-generic-fix	websocket-interrupt-lifecycle	seed-active-response-ids-for-claim-queue-and-ownership-regressions
 sdk/api/handlers/openai/openai_responses_websocket_forward.go	upstream-generic-fix	websocket-terminal-order	consume-queued-terminal-error-before-data-channel-eof
 sdk/api/handlers/openai/openai_responses_websocket_input.go	upstream-generic-fix	stream-cancellation	upstream-response-scoped-interrupt-lifecycle
-sdk/api/handlers/stream_forwarder.go	upstream-generic-fix	stream-cancellation	upstream-canceled-eof-classification
 sdk/auth/codex_device.go	upstream-generic-fix	auth-identity	upstream-stable-codex-account-identity
 sdk/auth/filestore.go	upstream-generic-fix	auth-identity	upstream-provider-identity-preserving-reauth
 sdk/cliproxy/antigravity_models.go	generic-host-hook	account-policy	upstream-auth-model-filter-hook-and-generation-fence
