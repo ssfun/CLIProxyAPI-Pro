@@ -4319,8 +4319,8 @@ for target, old_call, new_call, marker in (
     ),
     (
         auth_conductor_home,
-        '\t\t\tresp, errExec := c.executor.Execute(creditsCtx, c.auth, execReq, creditsOpts)\n',
-        '\t\t\tcreditsCtx = coreusage.NextAttemptContext(creditsCtx)\n\t\t\tresp, errExec := c.executor.Execute(creditsCtx, c.auth, execReq, creditsOpts)\n',
+        '\t\t\tresp, errExec := c.executor.Execute(creditsCtx, c.auth, execReq, execOpts)\n',
+        '\t\t\tcreditsCtx = coreusage.NextAttemptContext(creditsCtx)\n\t\t\tresp, errExec := c.executor.Execute(creditsCtx, c.auth, execReq, execOpts)\n',
         'creditsCtx = coreusage.NextAttemptContext(creditsCtx)',
     ),
 ):
