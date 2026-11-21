@@ -2596,6 +2596,20 @@ for route in (
     routes_text = routes_text.replace(route, route.replace(', realtimeAuth,', ', realtimeAuth, apiKeyQuotaMiddleware(s.apiKeyPolicy),'), 1)
 write(server_routes_source, routes_text)
 
+stream_forwarder = ROOT / 'sdk/api/handlers/stream_forwarder.go'
+replace_once(
+    stream_forwarder,
+    '\t\t\tif terminalErr == nil && opts.CloseError != nil {',
+    '\t\t\tif terminalErr == nil {\n'
+    '\t\t\t\tif errCanceled := c.Request.Context().Err(); errCanceled != nil {\n'
+    '\t\t\t\t\tcancel(errCanceled)\n'
+    '\t\t\t\t\treturn true\n'
+    '\t\t\t\t}\n'
+    '\t\t\t}\n'
+    '\t\t\tif terminalErr == nil && opts.CloseError != nil {',
+    'if errCanceled := c.Request.Context().Err(); errCanceled != nil',
+)
+
 responses_websocket_source = ROOT / 'sdk/api/handlers/openai/openai_responses_websocket.go'
 add_go_import(
     responses_websocket_source,

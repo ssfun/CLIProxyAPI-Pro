@@ -103,3 +103,4 @@ sdk/cliproxy/service_plugins.go	upstream-generic-fix	model-registration	upstream
 sdk/cliproxy/usage/manager.go	generic-host-hook	usage-lifecycle	upstream-request-metadata-and-named-plugin-unregister
 sdk/pluginapi/types.go	generic-host-hook	plugin-quota	upstream-provider-neutral-quota-contract
 sdk/proxyutil/proxy.go	must-remain-host-patch	final-outbound-transport	retain-runtime-proxy-override-until-transport-hook-exists
+sdk/api/handlers/stream_forwarder.go	upstream-generic-fix	stream-cancellation	upstream-canceled-eof-classification

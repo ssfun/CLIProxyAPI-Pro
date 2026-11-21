@@ -99,3 +99,5 @@ sdk/cliproxy/service_plugins.go
 sdk/cliproxy/usage/manager.go
 sdk/pluginapi/types.go
 sdk/proxyutil/proxy.go
+
+sdk/api/handlers/stream_forwarder.go
