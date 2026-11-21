@@ -55,6 +55,9 @@ func (t claudeStreamTerminal) emitCancellation(buffer *helps.StreamUsageBuffer, 
 }
 
 func (t claudeStreamTerminal) publishCancellation(buffer *helps.StreamUsageBuffer, cause error) {
+	if cause == nil {
+		cause = context.Canceled
+	}
 	if !t.emitCancellation(buffer, cause) {
 		t.publishFailure(buffer, cause)
 	}
