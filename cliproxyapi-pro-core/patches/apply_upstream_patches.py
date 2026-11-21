@@ -1782,17 +1782,19 @@ insert_before(
 ''',
     'func (s *Service) registerResolvedModelsForCurrentAuth',
 )
-replace_once(
-    service_executors,
+service_models_patterns = [
     '''\tmodels := applyExcludedModels(result.Models, activeExcluded)
 \tmodels = applyOAuthModelAliasForAuth(cfg, providerKey, activeAuthKind, activeAuth.Attributes, models)
 ''',
-    '''\tmodels := applyExcludedModels(result.Models, activeExcluded)
-\tmodels = s.applyOAuthPolicy(ctx, cfg, activeAuth, models)
+    '''\tmodels = applyExcludedModels(models, activeExcluded)
 \tmodels = applyOAuthModelAliasForAuth(cfg, providerKey, activeAuthKind, activeAuth.Attributes, models)
 ''',
-    'models = s.applyOAuthPolicy(ctx, cfg, activeAuth, models)',
-)
+]
+service_models_text = read(service_executors)
+service_models_pattern = next((x for x in service_models_patterns if x in service_models_text), None)
+if service_models_pattern is None:
+    raise SystemExit('expected service model publication anchor')
+replace_once(service_executors, service_models_pattern, service_models_pattern.replace('\n\tmodels = applyOAuthModelAliasForAuth', '\n\tmodels = s.applyOAuthPolicy(ctx, cfg, activeAuth, models)\n\tmodels = applyOAuthModelAliasForAuth'), 'models = s.applyOAuthPolicy(ctx, cfg, activeAuth, models)')
 
 replace_once(
     service_executors,
