@@ -69,7 +69,7 @@ func (t claudeStreamTerminal) emitResponseError(buffer *helps.StreamUsageBuffer,
 	t.publishFailure(buffer, errResponse)
 	select {
 	case t.out <- coreexecutor.StreamChunk{Err: errResponse}:
-	case <-t.ctx.Done():
+	default:
 	}
 }
 
