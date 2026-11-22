@@ -7299,9 +7299,10 @@ elif False:
 \tm.mu.Unlock()
 }''',
     )
-replace_once(
-    auth_conductor,
-    '''\t\t\tm.auths[id] = current
+if False:
+    replace_once(
+        auth_conductor,
+        '''\t\t\tm.auths[id] = current
 \t\t\tif m.scheduler != nil {
 \t\t\t\tm.scheduler.upsertAuth(current.Clone())
 \t\t\t}
