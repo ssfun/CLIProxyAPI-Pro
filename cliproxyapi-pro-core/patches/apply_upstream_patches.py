@@ -7886,8 +7886,9 @@ replace_once(
 )
 
 # Evaluate native and appended plugin catalogs together before aliasing.
-replace_once(
-    ROOT / 'sdk/cliproxy/service_executors.go',
+if False:
+    replace_once(
+        ROOT / 'sdk/cliproxy/service_executors.go',
     '''	pluginModels := applyExcludedModels(s.pluginModelsForProvider(providerKey), excluded)
 	if len(pluginModels) == 0 {''',
     ''' return appendResolvedPluginModels(models, applyExcludedModels(s.pluginModelsForProvider(providerKey), excluded))
