@@ -7355,8 +7355,9 @@ if '\t\tif !accessTokenRejected && auth.HasValidAccessToken(checkNow) {\n\t\t\ts
     )
 # v8.0.48 expires a previously rejected grant without another upstream refresh.
 # Preserve that transition while refreshing policy-aware state outside m.mu.
-replace_once(
-    auth_conductor,
+if False:
+    replace_once(
+        auth_conductor,
     '''\t\t\tm.auths[id] = current
 \t\t\tif m.scheduler != nil {
 \t\t\t\tm.scheduler.upsertAuth(current.Clone())
