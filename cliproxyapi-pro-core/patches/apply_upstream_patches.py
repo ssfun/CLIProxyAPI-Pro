@@ -7405,9 +7405,10 @@ legacy_refresh_reschedule = (
     if '\t\t\tm.auths[id] = current\n\t\t\tshouldReschedule = true\n' in read(auth_conductor)
     else ''
 )
-replace_once(
-    auth_conductor,
-    '\t\t\tm.auths[id] = current\n' + legacy_refresh_reschedule + '''\t\t\tif m.scheduler != nil {
+if False:
+    replace_once(
+        auth_conductor,
+        '\t\t\tm.auths[id] = current\n' + legacy_refresh_reschedule + '''\t\t\tif m.scheduler != nil {
 \t\t\t\tm.scheduler.upsertAuth(current.Clone())
 \t\t\t}
 \t\t}
