@@ -4318,7 +4318,7 @@ for target, old_call, new_call, marker in (
     ),
     (
         auth_conductor_stream,
-        '\t\t\t\t\tretryStream, retryErr := executor.ExecuteStream(ctx, auth, execReq, execOpts)\n',
+        '\t\t\t\t\tretryStream, retryErr := executor.ExecuteStream(attemptCtx, auth, execReq, execOpts)\n',
         '\t\t\t\t\tctx = coreusage.NextAttemptContext(ctx)\n\t\t\t\t\tretryStream, retryErr := executor.ExecuteStream(ctx, auth, execReq, execOpts)\n',
         'ctx = coreusage.NextAttemptContext(ctx)\n\t\t\t\t\tretryStream, retryErr := executor.ExecuteStream',
     ),
