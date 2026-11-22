@@ -6869,7 +6869,7 @@ replace_once(
 ''',
     '''func (m *Manager) updateInternalWithStatus(ctx context.Context, base, auth *Auth, mode updateAuthMode, strictPrepareVersion bool) (*Auth, bool, bool, error) {
 	if auth == nil || auth.ID == "" {
-		return nil, nil
+		return nil, false, false, false, nil
 	}
 	RestoreAccountPolicyBase(auth)
 ''',
