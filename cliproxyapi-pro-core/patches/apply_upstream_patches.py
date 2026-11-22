@@ -7232,7 +7232,7 @@ if policy_candidate_append not in auth_conductor_text:
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_refresh.go'
 # Preserve v8.0.17 rejected-token and canceled-refresh state changes, but keep
 # scheduler snapshots policy-aware and acquire them only after releasing m.mu.
-if 'current != nil && recordRejectedTokenOnAuth(current, failedAccessToken)' in read(auth_conductor):
+if 'current != nil && recordRejectedTokenOnAuth(current, failedAccessToken)' in read(auth_conductor) and 'm.notifyAuthChangeLocked(id)' not in read(auth_conductor):
     replace_once(
         auth_conductor,
         '''\t\tcurrent.Generation++
