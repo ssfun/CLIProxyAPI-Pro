@@ -8253,4 +8253,11 @@ format_go_writes([
     'sdk/proxyutil/runtime_override.go',
     'sdk/proxyutil/runtime_override_test.go',
 ])
+lifecycle_out = ROOT / 'sdk/cliproxy/auth/conductor_lifecycle.go'
+if lifecycle_out in _writes:
+    lifecycle_text = read(lifecycle_out)
+    lifecycle_text = lifecycle_text.replace('return current, false, true, nil', 'return current, false, true, false, nil')
+    lifecycle_text = lifecycle_text.replace('return nil, false, true, fmt.Errorf', 'return nil, false, true, false, fmt.Errorf')
+    write(lifecycle_out, lifecycle_text)
+
 flush_writes()
