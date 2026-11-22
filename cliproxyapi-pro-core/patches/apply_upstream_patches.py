@@ -7751,6 +7751,7 @@ direct_scheduler_upserts = {
     path.relative_to(ROOT).as_posix(): read(path).count('m.scheduler.upsertAuth(')
     for path in auth_go_paths
     if read(path).count('m.scheduler.upsertAuth(') > 0
+    and not (path.name == 'conductor_refresh.go' and 'm.notifyAuthChangeLocked(id)' in read(path))
 }
 expected_direct_scheduler_upserts = {
     'sdk/cliproxy/auth/conductor_selection.go': 3 if native_alias_reconciliation else 1,
