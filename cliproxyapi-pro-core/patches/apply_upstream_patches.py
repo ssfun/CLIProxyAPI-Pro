@@ -7377,7 +7377,7 @@ if False:
 )
 # v8.0.12 adds an early return for failed refresh of terminal 401 credentials.
 # Keep its terminal state, but refresh the policy-aware scheduler outside m.mu.
-if '\t\t\tif wasTerminalUnauthorized {\n' in read(auth_conductor):
+if False and '\t\t\tif wasTerminalUnauthorized {\n' in read(auth_conductor):
     replace_once(
         auth_conductor,
         '''\t\t\t\tm.auths[id] = current
