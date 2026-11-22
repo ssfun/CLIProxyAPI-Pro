@@ -4300,6 +4300,12 @@ for target in (
 for target, old_call, new_call, marker in (
     (
         auth_conductor_stream,
+        '\t\tstreamResult, errStream := executor.ExecuteStream(attemptCtx, auth, execReq, execOpts)\n',
+        '\t\tctx = coreusage.NextAttemptContext(ctx)\n\t\tstreamResult, errStream := executor.ExecuteStream(attemptCtx, auth, execReq, execOpts)\n',
+        'ctx = coreusage.NextAttemptContext(ctx)\n\t\tstreamResult, errStream := executor.ExecuteStream',
+    ),
+    (
+        auth_conductor_stream,
         '\t\tstreamResult, errStream := executor.ExecuteStream(ctx, auth, execReq, execOpts)\n',
         '\t\tctx = coreusage.NextAttemptContext(ctx)\n\t\tstreamResult, errStream := executor.ExecuteStream(ctx, auth, execReq, execOpts)\n',
         'ctx = coreusage.NextAttemptContext(ctx)\n\t\tstreamResult, errStream := executor.ExecuteStream',
