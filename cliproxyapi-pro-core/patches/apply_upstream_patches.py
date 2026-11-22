@@ -6862,12 +6862,12 @@ replace_once(
 )
 replace_once(
     auth_conductor,
-    '''func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode updateAuthMode) (*Auth, error) {
+    '''func (m *Manager) updateInternalWithStatus(ctx context.Context, base, auth *Auth, mode updateAuthMode, strictPrepareVersion bool) (*Auth, bool, bool, error) {
 	if auth == nil || auth.ID == "" {
-		return nil, nil
+		return nil, false, false, nil
 	}
 ''',
-    '''func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode updateAuthMode) (*Auth, error) {
+    '''func (m *Manager) updateInternalWithStatus(ctx context.Context, base, auth *Auth, mode updateAuthMode, strictPrepareVersion bool) (*Auth, bool, bool, error) {
 	if auth == nil || auth.ID == "" {
 		return nil, nil
 	}
