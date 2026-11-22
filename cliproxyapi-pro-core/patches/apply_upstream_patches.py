@@ -7276,7 +7276,7 @@ elif False and '\t\tcurrent.RejectedAccessToken = failedAccessToken' in read(aut
 \tm.mu.Unlock()
 }''',
     )
-else:
+elif False:
     replace_once(
         auth_conductor,
         '''\t\t\tcurrent.RejectedAccessToken = failedAccessToken
