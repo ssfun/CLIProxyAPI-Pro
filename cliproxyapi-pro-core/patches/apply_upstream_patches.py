@@ -7255,7 +7255,7 @@ if 'current != nil && recordRejectedTokenOnAuth(current, failedAccessToken)' in 
 \tm.mu.Unlock()
 }''',
     )
-elif '\t\tcurrent.RejectedAccessToken = failedAccessToken' in read(auth_conductor).splitlines() and 'm.notifyAuthChangeLocked(id)' not in read(auth_conductor):
+elif False and '\t\tcurrent.RejectedAccessToken = failedAccessToken' in read(auth_conductor).splitlines():
     replace_once(
         auth_conductor,
         '''\t\tcurrent.RejectedAccessToken = failedAccessToken
