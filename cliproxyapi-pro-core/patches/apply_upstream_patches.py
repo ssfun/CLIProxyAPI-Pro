@@ -1214,58 +1214,28 @@ replace_once(
 
 antigravity_executor = ROOT / 'internal/runtime/executor/antigravity_executor.go'
 add_go_import(antigravity_executor, '\t"strings"\n', '\t"sync/atomic"\n')
-antigravity_key_shapes = [
-    '''type antigravityTransportKey struct {
-	credential          string
-	proxy               string
-	base                *http.Transport
-	shortMode           bool
-	idleConnTimeout     time.Duration
-	maxIdleConnsPerHost int
-}''',
-    '''type antigravityTransportKey struct {
-	credential                  string
-	proxy                       string
-	base                        *http.Transport
-	shortMode                   bool
-	idleConnTimeout             time.Duration
-	maxIdleConnsPerHost         int
-	maxIdleConnsPerHostExplicit bool
-}''',
-]
-antigravity_key_replacement = '''type antigravityTransportKey struct {
-	credential                  string
-	proxy                       string
-	base                        *http.Transport
-	generation                  uint64
-	shortMode                   bool
-	idleConnTimeout             time.Duration
-	maxIdleConnsPerHost         int
-	maxIdleConnsPerHostExplicit bool
-}
-
-var antigravityRuntimeProxyGeneration atomic.Uint64
+insert_before(
+    antigravity_executor,
+    'type antigravityTransportKey struct {',
+    '''var antigravityRuntimeProxyGeneration atomic.Uint64
 
 func syncAntigravityRuntimeProxyGeneration(generation uint64) {
 	cache.SyncGeneration(&antigravityRuntimeProxyGeneration, generation, antigravityTransports.Purge)
-}'''
-antigravity_key_text = read(antigravity_executor)
-if sum(antigravity_key_text.count(x) for x in antigravity_key_shapes) != 1:
-    raise SystemExit('expected one Antigravity transport key shape')
-replace_once(antigravity_executor, next(x for x in antigravity_key_shapes if x in antigravity_key_text), antigravity_key_replacement, 'antigravity transport key')
+}
+
+''',
+    'var antigravityRuntimeProxyGeneration atomic.Uint64',
+)
 replace_once(
     antigravity_executor,
-    '''		base:                        base,
-		shortMode:                   settings.shortMode,
-		idleConnTimeout:             settings.idleConnTimeout,
-		maxIdleConnsPerHost:         settings.maxIdleConnsPerHost,
-		maxIdleConnsPerHostExplicit: settings.maxIdleConnsPerHostExplicit,
-''',
-    '''		base:                        base,
-		generation:                  resolution.Generation,
-		shortMode:                   settings.shortMode,
-		maxIdleConnsPerHostExplicit: settings.maxIdleConnsPerHostExplicit,
-''',
+    'type antigravityTransportKey struct {',
+    'type antigravityTransportKey struct {\n\tgeneration uint64',
+)
+insert_before(
+    antigravity_executor,
+    '\t\tbase:                        base,',
+    '\t\tgeneration:                  resolution.Generation,\n',
+    'generation:                  resolution.Generation,',
 )
 replace_once(
     antigravity_executor,
@@ -1629,21 +1599,6 @@ quota_provider_test_target = ROOT / 'internal/pluginhost/pro_quota_provider_test
 write(quota_provider_test_target, re.sub(r'github\.com/router-for-me/CLIProxyAPI/v\d+', MODULE_PATH, read_text(quota_provider_test_source)))
 
 service_models = ROOT / 'sdk/cliproxy/service_models.go'
-replace_once(
-    service_models,
-    '''\tif ctx.Err() != nil {
-\t\treturn true
-\t}
-\tmodels = applyOAuthModelAliasForAuth(cfg, provider, authKind, a.Attributes, models)
-''',
-    '''\tif ctx.Err() != nil {
-\t\treturn true
-\t}
-\tmodels = s.applyOAuthPolicy(ctx, cfg, a, models)
-\tmodels = applyOAuthModelAliasForAuth(cfg, provider, authKind, a.Attributes, models)
-''',
-    'models = s.applyOAuthPolicy(ctx, cfg, a, models)',
-)
 insert_before(
     service_models,
     'func (s *Service) oauthExcludedModels(provider, authKind string) []string {\n',
@@ -1687,49 +1642,69 @@ replace_once(
 ''',
     'if a != nil { a = a.Clone(); coreauth.RestoreAccountPolicyBase(a) }',
 )
-replace_once(
+insert_before(
     antigravity_models,
-    '''\t\t// Keep the config snapshot stable through publication. Registry CAS must
-\t\t// remain strict: an epoch from another publisher may use newer auth settings.
-\t\ts.cfgMu.RLock()
-\t\tmodels := s.antigravityModelsForHintsWithConfig(auth, hints, s.cfg)
+    '\tpublish := func(current *coreauth.Auth) bool {',
+    '''	if ctx == nil { ctx = context.Background() }
+	cfg := s.currentConfig()
+	var models []*ModelInfo
+	var commitPolicy func(func()) bool
+	if hints.ModelIDs != nil {
+		policyAuth := auth.Clone()
+		if s.coreManager != nil {
+			current, exists := s.coreManager.GetByID(auth.ID)
+			if !exists || !antigravityAuthModelSettingsEqual(current, auth) { return }
+			policyAuth = current.Clone()
+		}
+		coreauth.RestoreAccountPolicyBase(policyAuth)
+		if s.proApp != nil && s.proApp.OAuthPolicy() != nil {
+			commitPolicy = s.proApp.OAuthPolicy().PublicationGuard(policyAuth.ID, policyAuth.Generation, policyAuth.RegistrationEpoch)
+		}
+		models = s.antigravityModelsForHintsWithPolicy(ctx, policyAuth, hints, cfg)
+	}
 ''',
-    '''\t\t// Resolve policy without service/cache/publication locks: plan detection can
-\t\t// call the provider. Use the latest request generation, but retain admission
-\t\t// ownership and the strict registry epoch captured before the probe.
-\t\tcfg := s.currentConfig()
-\t\tpolicyAuth := auth.Clone()
-\t\tif s.coreManager != nil {
-\t\t\tcurrent, exists := s.coreManager.GetByID(auth.ID)
-\t\t\tif !exists || !antigravityAuthModelSettingsEqual(current, auth) { return }
-\t\t\tpolicyAuth = current.Clone()
-\t\t}
-\t\tcoreauth.RestoreAccountPolicyBase(policyAuth)
-\t\tvar commitPolicy func(func()) bool
-\t\tif s.proApp != nil && s.proApp.OAuthPolicy() != nil {
-\t\t\tcommitPolicy = s.proApp.OAuthPolicy().PublicationGuard(policyAuth.ID, policyAuth.Generation, policyAuth.RegistrationEpoch)
-\t\t}
-\t\tmodels := s.antigravityModelsForHintsWithPolicy(ctx, policyAuth, hints, cfg)
-\t\tif ctx.Err() != nil { return }
-\t\ts.authModelCommitMu.Lock()
-\t\tdefer s.authModelCommitMu.Unlock()
-\t\tif _, found := ctx.Value(authModelRegistrationContextKey{}).(authModelRegistrationToken); found && !s.currentAuthModelRegistrationLocked(ctx, auth) { return }
-\t\tif s.coreManager != nil {
-\t\t\tcurrent, exists := s.coreManager.GetByID(auth.ID)
-\t\t\tif !exists || current.Disabled || !antigravityAuthModelSettingsEqual(current, auth) || s.antigravityCapabilityKey(current) != expectedKey { return }
-\t\t}
-\t\ts.cfgMu.RLock()
-\t\tif s.cfg != cfg || (cfg != nil && cfg.Home.Enabled) { s.cfgMu.RUnlock(); return }
-''',
-    'commitPolicy = s.proApp.OAuthPolicy().PublicationGuard(policyAuth.ID, policyAuth.Generation, policyAuth.RegistrationEpoch)',
+    'var commitPolicy func(func()) bool',
 )
 replace_once(
     antigravity_models,
-    '\t\tappliedEpoch, updated = reg.ReplaceClientModels(auth.ID, providerKey, expectedRegEpoch, models)\n',
-    '''\t\tpublish := func() { if ctx.Err() == nil { appliedEpoch, updated = reg.ReplaceClientModels(auth.ID, providerKey, expectedRegEpoch, models) } }
-\t\tif commitPolicy != nil { commitPolicy(publish) } else { publish() }
+    'models := s.antigravityModelsForHintsWithConfig(current, hints, s.cfg)',
+    'if s.cfg != cfg { return false }',
+)
+replace_once(
+    antigravity_models,
+    'appliedEpoch, ok := reg.ReplaceClientModels(current.ID, providerKey, expectedRegEpoch, models)',
+    '''var appliedEpoch uint64
+			var ok bool
+			commit := func() {
+				if ctx.Err() == nil {
+					appliedEpoch, ok = reg.ReplaceClientModels(current.ID, providerKey, expectedRegEpoch, models)
+				}
+			}
+			if commitPolicy != nil { commitPolicy(commit) } else { commit() }''',
+)
+insert_before(
+    antigravity_models,
+    '\tvar updated bool\n',
+    '''	s.authModelCommitMu.Lock()
+	if _, found := ctx.Value(authModelRegistrationContextKey{}).(authModelRegistrationToken); found && !s.currentAuthModelRegistrationLocked(ctx, auth) {
+		s.authModelCommitMu.Unlock()
+		return
+	}
 ''',
-    'if commitPolicy != nil { commitPolicy(publish) } else { publish() }',
+    'if _, found := ctx.Value(authModelRegistrationContextKey{})',
+)
+insert_before(
+    antigravity_models,
+    '\tif updated && s.coreManager != nil {',
+    '\ts.authModelCommitMu.Unlock()\n',
+    '\ts.authModelCommitMu.Unlock()\n\tif updated',
+)
+
+insert_before(
+    antigravity_models,
+    '\t\tupdated = s.coreManager.PublishIfRegistrationCurrentContext(ctx, auth.ID, expectedEpoch',
+    '\t\tauth = auth.Clone()\n\t\tcoreauth.RestoreAccountPolicyBase(auth)\n',
+    'coreauth.RestoreAccountPolicyBase(auth)',
 )
 
 service_auth = ROOT / 'sdk/cliproxy/service_auth.go'
@@ -2192,46 +2167,7 @@ replace_once(
 ''',
     'apiKeyRefs:          make(map[string]apiKeyReference)',
 )
-if False and '''\th.mu.Lock()
-\tdefer h.mu.Unlock()
-\tif h.isStaleConfigFileSnapshotLocked(cloned) {
-\t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
-\t\treturn
-\t}
-\th.cfg = cloned
-''' in read(management_handler_source):
-    replace_once(
-        management_handler_source,
-        '''\th.mu.Lock()
-\tdefer h.mu.Unlock()
-\tif h.isStaleConfigFileSnapshotLocked(cloned) {
-\t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
-\t\treturn
-\t}
-\th.cfg = cloned
-''',
-        '''\th.mu.Lock()
-\tif h.isStaleConfigFileSnapshotLocked(cloned) {
-\t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
-\t\th.mu.Unlock()
-\t\treturn
-\t}
-\th.updateAPIKeyConfigGenerationLocked()
-\th.cfg = cloned
-\th.updateAPIKeyConfigGenerationLocked()
-\tapplication := h.proApp
-\tvar apiKeys []string
-\tif cloned != nil {
-\t\tapiKeys = append(apiKeys, cloned.APIKeys...)
-\t}
-\th.mu.Unlock()
-\tif application != nil && application.APIKeyPolicy() != nil {
-\t\tapplication.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)
-\t}
-''',
-        'application.APIKeyPolicy().SetConfiguredAPIKeys(apiKeys)',
-    )
-elif '''\th.mu.Lock()
+if '''\th.mu.Lock()
 \tdefer h.mu.Unlock()
 \tif h.isStaleConfigFileSnapshotLocked(cloned) {
 \t\tlog.Debug("management: ignoring config reload parsed from an older config file version")
@@ -2298,26 +2234,13 @@ elif '''\th.mu.Lock()
     )
 else:
     raise SystemExit('no SetConfig anchor')
-replace_once(
+insert_before(
     management_handler_source,
-    '''\t\t\tc.AbortWithStatusJSON(statusCode, gin.H{"error": errMsg})
-\t\t\treturn
-\t\t}
-\t\tif c.Request.Method != http.MethodOptions {
-\t\t\tsetHeader := func(id string) { c.Header(ServerIDHeader, id) }
-\t\t\tsetHeader(snapshot.serverID)
-\t\t\tc.Set(managementIdentityKey, managementIdentity{id: snapshot.serverID, setHeader: setHeader})
-\t\t}
-\t\tc.Next()
-''',
-    '''\t\t\tc.AbortWithStatusJSON(statusCode, gin.H{"error": errMsg})
-\t\t\treturn
-\t\t}
-\t\tsessionSum := sha256.Sum256([]byte(clientIP + "\\x00" + provided))
+    '\t\tif c.Request.Method != http.MethodOptions {\n\t\t\tsetHeader := func(id string)',
+    '''\t\tsessionSum := sha256.Sum256([]byte(clientIP + "\\x00" + provided))
 \t\tc.Set(apiKeyPolicyManagementSessionContextKey, hex.EncodeToString(sessionSum[:]))
-\t\tc.Next()
 ''',
-    'apiKeyPolicyManagementSessionContextKey',
+    'sessionSum := sha256.Sum256',
 )
 
 insert_before(
@@ -4297,31 +4220,13 @@ for target in (
         f'\tcoreusage "{import_path("sdk/cliproxy/usage")}"\n',
     )
 
+replace_once(
+    auth_conductor_stream,
+    'attemptCtx, cancelAttempt = context.WithCancel(parent)',
+    'attemptCtx, cancelAttempt = context.WithCancel(coreusage.NextAttemptContext(parent))',
+)
+
 for target, old_call, new_call, marker in (
-    (
-        auth_conductor_stream,
-        '\t\tstreamResult, errStream := executor.ExecuteStream(attemptCtx, auth, execReq, execOpts)\n',
-        '\t\tctx = coreusage.NextAttemptContext(ctx)\n\t\tstreamResult, errStream := executor.ExecuteStream(attemptCtx, auth, execReq, execOpts)\n',
-        'ctx = coreusage.NextAttemptContext(ctx)\n\t\tstreamResult, errStream := executor.ExecuteStream',
-    ),
-    (
-        auth_conductor_stream,
-        '\t\tstreamResult, errStream := executor.ExecuteStream(ctx, auth, execReq, execOpts)\n',
-        '\t\tctx = coreusage.NextAttemptContext(ctx)\n\t\tstreamResult, errStream := executor.ExecuteStream(ctx, auth, execReq, execOpts)\n',
-        'ctx = coreusage.NextAttemptContext(ctx)\n\t\tstreamResult, errStream := executor.ExecuteStream',
-    ),
-    (
-        auth_conductor_stream,
-        '\t\t\t\t\tstreamResult, errStream = executor.ExecuteStream(attemptCtx, auth, execReq, execOpts)\n',
-        '\t\t\t\t\tctx = coreusage.NextAttemptContext(ctx)\n\t\t\t\t\tstreamResult, errStream = executor.ExecuteStream(attemptCtx, auth, execReq, execOpts)\n',
-        'ctx = coreusage.NextAttemptContext(ctx)\n\t\t\t\t\tstreamResult, errStream = executor.ExecuteStream',
-    ),
-    (
-        auth_conductor_stream,
-        '\t\t\t\t\tretryStream, retryErr := executor.ExecuteStream(attemptCtx, auth, execReq, execOpts)\n',
-        '\t\t\t\t\tctx = coreusage.NextAttemptContext(ctx)\n\t\t\t\t\tretryStream, retryErr := executor.ExecuteStream(ctx, auth, execReq, execOpts)\n',
-        'ctx = coreusage.NextAttemptContext(ctx)\n\t\t\t\t\tretryStream, retryErr := executor.ExecuteStream',
-    ),
     (
         auth_conductor,
         '\t\t\tresp, errExec := executor.Execute(execCtx, auth, execReq, execOpts)\n',
@@ -6819,7 +6724,7 @@ replace_once(
     '\tif mode == updateModeRefresh {\n\t\tmerged := MergeRefreshedAuth(base, existing, auth)\n',
     '''\tif mode == updateModeInspectionRefresh && !inspectionRefreshIdentityMatches(base, existing) {
 \t\tm.mu.Unlock()
-\t\treturn nil, false, false, ErrInspectionAuthChanged
+\t\treturn nil, false, false, false, ErrInspectionAuthChanged
 \t}
 \tif mode == updateModeRefresh || mode == updateModeInspectionRefresh {
 \t\tmerged := MergeRefreshedAuth(base, existing, auth)
@@ -6834,6 +6739,11 @@ replace_once(
     '\t\tif credChanged || mode == updateModeRefresh {\n',
     '\t\tif (credChanged || mode == updateModeRefresh) && (mode != updateModeInspectionRefresh || inspectionRefreshRestrictionsMatch(base, existing)) {\n',
     'if (credChanged || mode == updateModeRefresh) && (mode != updateModeInspectionRefresh',
+)
+replace_once(
+    auth_conductor,
+    'if reconcileAuthGrantCooldownAfterRefresh(auth, existing, preserveNonAuth, now) {',
+    'if (mode != updateModeInspectionRefresh || !existing.NextRetryAfter.After(now)) && reconcileAuthGrantCooldownAfterRefresh(auth, existing, preserveNonAuth, now) {',
 )
 replace_once(
     auth_conductor,
@@ -7230,95 +7140,6 @@ if policy_candidate_append not in auth_conductor_text:
     write(auth_conductor, auth_conductor_text.replace(candidate_append, policy_candidate_append))
 
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_refresh.go'
-# Preserve v8.0.17 rejected-token and canceled-refresh state changes, but keep
-# scheduler snapshots policy-aware and acquire them only after releasing m.mu.
-if False and 'current != nil && recordRejectedTokenOnAuth(current, failedAccessToken)' in read(auth_conductor):
-    replace_once(
-        auth_conductor,
-        '''\t\tcurrent.Generation++
-\t\tcurrent.UpdatedAt = time.Now()
-\t\tm.auths[id] = current
-\t\tif m.scheduler != nil {
-\t\t\tm.scheduler.upsertAuth(current.Clone())
-\t\t}
-\t}
-\tm.mu.Unlock()
-}''',
-        '''\t\tcurrent.Generation++
-\t\tcurrent.UpdatedAt = time.Now()
-\t\tm.auths[id] = current
-\t\tm.mu.Unlock()
-\t\treleaseMutation()
-\t\tm.RefreshSchedulerEntry(id)
-\t\treturn
-\t}
-\tm.mu.Unlock()
-}''',
-    )
-elif False and '\t\tcurrent.RejectedAccessToken = failedAccessToken' in read(auth_conductor).splitlines():
-    replace_once(
-        auth_conductor,
-        '''\t\tcurrent.RejectedAccessToken = failedAccessToken
-\t\tm.auths[id] = current
-\t\tif m.scheduler != nil {
-\t\t\tm.scheduler.upsertAuth(current.Clone())
-\t\t}
-\t}
-\tm.mu.Unlock()
-}''',
-        '''\t\tcurrent.RejectedAccessToken = failedAccessToken
-\t\tm.auths[id] = current
-\t\tm.mu.Unlock()
-\t\treleaseMutation()
-\t\tm.RefreshSchedulerEntry(id)
-\t\treturn
-\t}
-\tm.mu.Unlock()
-}''',
-    )
-elif False:
-    replace_once(
-        auth_conductor,
-        '''\t\t\tcurrent.RejectedAccessToken = failedAccessToken
-\t\t\tm.auths[id] = current
-\t\t\tif m.scheduler != nil {
-\t\t\t\tm.scheduler.upsertAuth(current.Clone())
-\t\t\t}
-\t\t}
-\t}
-\tm.mu.Unlock()
-}''',
-        '''\t\t\tcurrent.RejectedAccessToken = failedAccessToken
-\t\t\tm.auths[id] = current
-\t\t\tm.mu.Unlock()
-\t\t\treleaseMutation()
-\t\t\tm.RefreshSchedulerEntry(id)
-\t\t\treturn
-\t\t}
-\t}
-\tm.mu.Unlock()
-}''',
-    )
-if False:
-    replace_once(
-        auth_conductor,
-        '''\t\t\tm.auths[id] = current
-\t\t\tif m.scheduler != nil {
-\t\t\t\tm.scheduler.upsertAuth(current.Clone())
-\t\t\t}
-\t\t}
-\t\tm.mu.Unlock()
-\t\tm.queueRefreshReschedule(id)
-\t\treturn nil, err
-''',
-    '''\t\t\tm.auths[id] = current
-\t\t}
-\t\tm.mu.Unlock()
-\t\tm.RefreshSchedulerEntry(id)
-\t\tm.queueRefreshReschedule(id)
-\t\treturn nil, err
-''',
-)
 # v8.0.53 keeps a usable access token until expiry after its refresh grant was
 # rejected. Preserve its guarded mutation and reschedule/unschedule decisions,
 # but refresh the policy-aware scheduler only after releasing m.mu.
@@ -7353,81 +7174,14 @@ if '\t\tif !accessTokenRejected && auth.HasValidAccessToken(checkNow) {\n\t\t\ts
 \t\t\tif shouldReschedule {
 ''',
     )
-# v8.0.48 expires a previously rejected grant without another upstream refresh.
-# Preserve that transition while refreshing policy-aware state outside m.mu.
-if False:
-    replace_once(
-        auth_conductor,
-    '''\t\t\tm.auths[id] = current
-\t\t\tif m.scheduler != nil {
-\t\t\t\tm.scheduler.upsertAuth(current.Clone())
-\t\t\t}
-\t\t}
-\t\tm.mu.Unlock()
-\t\tm.queueRefreshUnschedule(id)
-\t\tif auth.RefreshError != nil {
-''',
-    '''\t\t\tm.auths[id] = current
-\t\t}
-\t\tm.mu.Unlock()
-\t\tm.RefreshSchedulerEntry(id)
-\t\tm.queueRefreshUnschedule(id)
-\t\tif auth.RefreshError != nil {
-''',
-)
-# v8.0.12 adds an early return for failed refresh of terminal 401 credentials.
-# Keep its terminal state, but refresh the policy-aware scheduler outside m.mu.
-if False and '\t\t\tif wasTerminalUnauthorized {\n' in read(auth_conductor):
-    replace_once(
-        auth_conductor,
-        '''\t\t\t\tm.auths[id] = current
-\t\t\t\tif m.scheduler != nil {
-\t\t\t\t\tm.scheduler.upsertAuth(current.Clone())
-\t\t\t\t}
-\t\t\t\tm.mu.Unlock()
-\t\t\t\tm.queueRefreshUnschedule(id)
-''',
-        '''\t\t\t\tm.auths[id] = current
-\t\t\t\tm.mu.Unlock()
-\t\t\t\tm.RefreshSchedulerEntry(id)
-\t\t\t\tm.queueRefreshUnschedule(id)
-''',
-    )
-# v7.3.18 only reschedules retryable failures. Scheduler state must still be
-# refreshed for terminal failures, after releasing the manager lock.
-replace_once(
+# Keep upstream refresh notifications and retry decisions. Resolve the same
+# scheduler view used by RefreshSchedulerEntry while the auth is stable.
+replace_all_exact(
     auth_conductor,
-    '\t\tinvalidGrant := isInvalidGrantError(err)\n\t\tshouldReschedule := false\n',
-    '\t\tinvalidGrant := isInvalidGrantError(err)\n\t\tshouldReschedule := false\n\t\tshouldRefreshScheduler := false\n',
+    'm.scheduler.upsertAuth(current.Clone())',
+    'm.scheduler.upsertAuth(resolveAccountPolicy(current, m.accountPolicyResolver))',
+    5,
 )
-legacy_refresh_reschedule = (
-    '\t\t\tshouldReschedule = true\n'
-    if '\t\t\tm.auths[id] = current\n\t\t\tshouldReschedule = true\n' in read(auth_conductor)
-    else ''
-)
-if False:
-    replace_once(
-        auth_conductor,
-        '\t\t\tm.auths[id] = current\n' + legacy_refresh_reschedule + '''\t\t\tif m.scheduler != nil {
-\t\t\t\tm.scheduler.upsertAuth(current.Clone())
-\t\t\t}
-\t\t}
-\t\tm.mu.Unlock()
-\t\tif shouldReschedule {
-\t\t\tm.queueRefreshReschedule(id)
-''',
-    '\t\t\tm.auths[id] = current\n' + legacy_refresh_reschedule + '''\t\t\tshouldRefreshScheduler = true
-\t\t}
-\t\tm.mu.Unlock()
-\t\tif shouldRefreshScheduler {
-\t\t\tm.RefreshSchedulerEntry(id)
-\t\t}
-\t\tif shouldReschedule {
-\t\t\tm.queueRefreshReschedule(id)
-''',
-    'shouldRefreshScheduler {\n\t\t\tm.RefreshSchedulerEntry(id)',
-)
-
 auth_conductor = ROOT / 'sdk/cliproxy/auth/conductor_selection.go'
 replace_once(
     auth_conductor,
@@ -7814,7 +7568,7 @@ replace_once(
     ''' if mode == updateModeSnapshot && (base == nil || existing.RegistrationEpoch != base.RegistrationEpoch || !snapshotAuthInputsEqual(existing, base)) {
   current := existing.Clone()
   m.mu.Unlock()
-  return current, false, false, nil
+  return current, false, false, false, nil
  }
  if mode == updateModeSnapshot { mergeAuthSaveDelta(auth, base, existing, false) }
 	if m.authEpochs == nil {
@@ -7824,7 +7578,7 @@ replace_once(
     ''' if mode == updateModeSnapshot && (base == nil || existing.RegistrationEpoch != base.RegistrationEpoch || !snapshotAuthInputsEqual(existing, base)) {
   current := existing.Clone()
   m.mu.Unlock()
-  return current, false, false, nil
+  return current, false, false, false, nil
  }
  if mode == updateModeSnapshot { mergeAuthSaveDelta(auth, base, existing, false) }
 	if m.authEpochs == nil {
@@ -7885,32 +7639,13 @@ replace_once(
     'Capture existing before reading disk:',
 )
 
-# Evaluate native and appended plugin catalogs together before aliasing.
-if False:
-    replace_once(
-        ROOT / 'sdk/cliproxy/service_executors.go',
-    '''	pluginModels := applyExcludedModels(s.pluginModelsForProvider(providerKey), excluded)
-	if len(pluginModels) == 0 {''',
-    ''' return appendResolvedPluginModels(models, applyExcludedModels(s.pluginModelsForProvider(providerKey), excluded))
-}
-
-func appendResolvedPluginModels(models, pluginModels []*ModelInfo) []*ModelInfo {
-	if len(pluginModels) == 0 {''',
-    ''' return appendResolvedPluginModels(models, applyExcludedModels(s.pluginModelsForProvider(providerKey), excluded))
-}
-
-func appendResolvedPluginModels(models, pluginModels []*ModelInfo) []*ModelInfo {
-	if len(pluginModels) == 0 {''',
-)
 insert_before(
     ROOT / 'sdk/cliproxy/service_models.go',
     'func (s *Service) applyOAuthPolicy(',
     '''// Filter both original catalogs in one evaluation so effective policy counts
 // include plugin contributions. Keep them separate until native aliasing is done.
-func (s *Service) filterOAuthCatalogs(ctx context.Context, cfg *config.Config, auth *coreauth.Auth, provider string, native []*ModelInfo, excluded []string) ([]*ModelInfo, []*ModelInfo) {
- plugins := s.pluginModelsForProvider(provider)
- plugins = applyExcludedModels(plugins, excluded)
- filtered := appendResolvedPluginModels(native, plugins)
+func (s *Service) filterOAuthCatalogs(ctx context.Context, cfg *config.Config, auth *coreauth.Auth, native, plugins []*ModelInfo) ([]*ModelInfo, []*ModelInfo) {
+ filtered := appendDistinctModels(native, plugins)
  if s.proApp != nil { filtered = s.proApp.FilterModels(ctx, cfg, auth, filtered, s.coreManager) }
  allowed := make(map[string]bool, len(filtered))
  for _, model := range filtered { if model != nil { allowed[strings.TrimSpace(model.ID)] = true } }
@@ -7925,18 +7660,18 @@ func (s *Service) filterOAuthCatalogs(ctx context.Context, cfg *config.Config, a
 )
 replace_once(
     ROOT / 'sdk/cliproxy/service_models.go',
-    '''	models = s.applyOAuthPolicy(ctx, cfg, a, models)
+    '''	models = applyExcludedModels(models, excluded)
 	models = applyOAuthModelAliasForAuth''',
-    '''	models, policyPlugins := s.filterOAuthCatalogs(ctx, cfg, a, provider, models, excluded)
+    '''	models, staticModels = s.filterOAuthCatalogs(ctx, cfg, a, applyExcludedModels(models, excluded), applyExcludedModels(staticModels, excluded))
 	models = applyOAuthModelAliasForAuth''',
-    '''	models, policyPlugins := s.filterOAuthCatalogs(ctx, cfg, a, provider, models, excluded)
+    '''	models, staticModels = s.filterOAuthCatalogs(ctx, cfg, a, applyExcludedModels(models, excluded), applyExcludedModels(staticModels, excluded))
 	models = applyOAuthModelAliasForAuth''',
 )
 replace_once(
     ROOT / 'sdk/cliproxy/service_models.go',
-    '\tmodels = s.appendPluginModels(key, models, excluded)',
-    '\tmodels = appendResolvedPluginModels(models, policyPlugins)',
-    '\tmodels = appendResolvedPluginModels(models, policyPlugins)',
+    '\tmodels = appendDistinctModels(models, applyExcludedModels(staticModels, excluded))',
+    '\tmodels = appendDistinctModels(models, staticModels)',
+    '\tmodels = appendDistinctModels(models, staticModels)',
 )
 replace_all_exact(
     ROOT / 'sdk/cliproxy/service_models.go',
@@ -7959,22 +7694,32 @@ replace_all_exact(
 replace_once(
     ROOT / 'sdk/cliproxy/antigravity_models.go',
     '\tif s.proApp != nil { models = s.proApp.FilterModels(ctx, cfg, auth, models, s.coreManager) }',
-    '\tmodels, policyPlugins := s.filterOAuthCatalogs(ctx, cfg, auth, "antigravity", models, excluded)',
-    '\tmodels, policyPlugins := s.filterOAuthCatalogs(ctx, cfg, auth, "antigravity", models, excluded)',
+    '\tmodels, policyPlugins := s.filterOAuthCatalogs(ctx, cfg, auth, models, applyExcludedModels(s.pluginModelsForProvider("antigravity"), excluded))',
+    '\tmodels, policyPlugins := s.filterOAuthCatalogs(ctx, cfg, auth, models, applyExcludedModels(s.pluginModelsForProvider("antigravity"), excluded))',
 )
 replace_once(
     ROOT / 'sdk/cliproxy/antigravity_models.go',
     '\tmodels = s.appendPluginModels("antigravity", models, excluded)',
-    '\tmodels = appendResolvedPluginModels(models, policyPlugins)',
-    '\tmodels = appendResolvedPluginModels(models, policyPlugins)',
+    '\tmodels = appendDistinctModels(models, policyPlugins)',
+    '\tmodels = appendDistinctModels(models, policyPlugins)',
 )
 
 # Recovery may observe an unavailable hint just before a balance refresh publishes.
 # Invalidate only the observation that justified cleanup, in local and Home modes.
 replace_once(
     ROOT / 'internal/runtime/executor/antigravity_executor_credits.go',
-    '\t\t\tcliproxyauth.SetAntigravityCreditsHint(authID, cliproxyauth.AntigravityCreditsHint{})',
-    '\t\t\tcliproxyauth.CompareAndSwapAntigravityCreditsHint(authID, hint, cliproxyauth.AntigravityCreditsHint{})',
+    '''	defer unlock()
+	_, hadFailure := antigravityCreditsFailureByAuth.LoadAndDelete(key)
+	if hint, ok := cliproxyauth.GetAntigravityCreditsHintForAuth(auth); ok && hint.Known && !hint.Available {''',
+    '''	_, hadFailure := antigravityCreditsFailureByAuth.LoadAndDelete(key)
+	hint, ok := cliproxyauth.GetAntigravityCreditsHintForAuth(auth)
+	unlock()
+	if ok && hint.Known && !hint.Available {''',
+)
+replace_once(
+    ROOT / 'internal/runtime/executor/antigravity_executor_credits.go',
+    '\t\t\tcliproxyauth.SetAntigravityCreditsHintForAuth(auth, cliproxyauth.AntigravityCreditsHint{})',
+    '\t\t\tcliproxyauth.CompareAndSwapAntigravityCreditsHintForAuth(auth, hint, cliproxyauth.AntigravityCreditsHint{})',
 )
 queue_go_source('sdk/cliproxy/auth/antigravity_credits_recovery_pro.go')
 queue_go_source('sdk/cliproxy/auth/antigravity_credits_recovery_pro_test.go')

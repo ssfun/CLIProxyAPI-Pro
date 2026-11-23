@@ -1,0 +1,2 @@
+# Unified diff context starts with a literal space, including on blank and tab-indented lines.
+scripts/validation/fixtures/*.patch whitespace=-space-before-tab,-blank-at-eol

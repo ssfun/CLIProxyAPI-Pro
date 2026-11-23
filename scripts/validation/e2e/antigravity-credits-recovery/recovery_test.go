@@ -28,21 +28,26 @@ func TestProCreditsRecoveryPublicationOrdering(t *testing.T) {
 		{name: "fresh_without_failure", fresh: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			auth := &cliproxyauth.Auth{ID: "pro-recovery-order-" + tc.name}
+			auth := &cliproxyauth.Auth{ID: "pro-recovery-order-" + tc.name, RegistrationEpoch: 2}
+			key, unlock, current := lockAntigravityCreditsScope(auth)
+			if !current {
+				t.Fatal("test registration is stale")
+			}
+			unlock()
 			updated := time.Now().Add(-cliproxyauth.AntigravityCreditsHintRefreshInterval - time.Minute)
 			if tc.fresh {
 				updated = time.Now()
 			}
 			old := cliproxyauth.AntigravityCreditsHint{Known: true, MinCreditAmount: 50, UpdatedAt: updated}
-			cliproxyauth.SetAntigravityCreditsHint(auth.ID, old)
+			cliproxyauth.SetAntigravityCreditsHintForAuth(auth, old)
 			if tc.failure {
-				antigravityCreditsFailureByAuth.Store(auth.ID, antigravityCreditsFailureState{PermanentlyDisabled: true})
+				antigravityCreditsFailureByAuth.Store(key, antigravityCreditsFailureState{PermanentlyDisabled: true})
 			}
 			t.Cleanup(func() {
 				proCreditsRecoveryObservedHint = nil
-				antigravityCreditsFailureByAuth.Delete(auth.ID)
-				antigravityCreditsBalanceByAuth.Delete(auth.ID)
-				cliproxyauth.SetAntigravityCreditsHint(auth.ID, cliproxyauth.AntigravityCreditsHint{})
+				antigravityCreditsFailureByAuth.Delete(key)
+				antigravityCreditsBalanceByAuth.Delete(key)
+				cliproxyauth.SetAntigravityCreditsHintForAuth(auth, cliproxyauth.AntigravityCreditsHint{})
 			})
 			if tc.refresh {
 				received, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
@@ -57,7 +62,9 @@ func TestProCreditsRecoveryPublicationOrdering(t *testing.T) {
 				}))
 				defer server.Close()
 				auth.Attributes = map[string]string{"base_url": server.URL}
-				exec := NewAntigravityExecutor(&config.Config{})
+				cfg := &config.Config{}
+				cfg.QuotaExceeded.AntigravityCredits = true
+				exec := NewAntigravityExecutor(cfg)
 				go func() { defer close(done); exec.updateAntigravityCreditsBalance(context.Background(), auth, "token") }()
 				select {
 				case <-received:
@@ -76,7 +83,7 @@ func TestProCreditsRecoveryPublicationOrdering(t *testing.T) {
 			}
 			clearAntigravityCreditsFailureState(auth)
 			proCreditsRecoveryObservedHint = nil
-			got, ok := cliproxyauth.GetAntigravityCreditsHint(auth.ID)
+			got, ok := cliproxyauth.GetAntigravityCreditsHintForAuth(auth)
 			if !ok {
 				t.Fatal("hint disappeared")
 			}
@@ -95,7 +102,7 @@ func TestProCreditsRecoveryPublicationOrdering(t *testing.T) {
 			} else if got.Known {
 				t.Fatalf("old failure hint was not invalidated: %+v", got)
 			}
-			if _, exists := antigravityCreditsFailureByAuth.Load(auth.ID); exists {
+			if _, exists := antigravityCreditsFailureByAuth.Load(key); exists {
 				t.Fatal("failure marker remains")
 			}
 		})

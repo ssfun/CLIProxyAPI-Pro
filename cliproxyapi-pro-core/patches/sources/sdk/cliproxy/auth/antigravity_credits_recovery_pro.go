@@ -10,13 +10,16 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// CompareAndSwapAntigravityCreditsHint invalidates an observed failure without
+// CompareAndSwapAntigravityCreditsHintForAuth invalidates an observed failure without
 // replacing a balance published by a concurrent refresh.
-func CompareAndSwapAntigravityCreditsHint(authID string, old, next AntigravityCreditsHint) bool {
-	authID = strings.TrimSpace(authID)
-	if authID == "" {
+func CompareAndSwapAntigravityCreditsHintForAuth(auth *Auth, old, next AntigravityCreditsHint) bool {
+	unlock, current := lockAntigravityCreditsHintScope(auth)
+	if !current {
 		return false
 	}
+	defer unlock()
+	authID := strings.TrimSpace(auth.ID)
+	scope := AntigravityCreditsScope(auth)
 	if next.UpdatedAt.IsZero() {
 		next.UpdatedAt = time.Now()
 	}
@@ -25,13 +28,13 @@ func CompareAndSwapAntigravityCreditsHint(authID string, old, next AntigravityCr
 			log.Errorf("antigravity credits: conditional hint update: %v", err)
 			return false
 		}
-		swapped, err := compareAndSwapHomeAntigravityCreditsHint(context.Background(), client, authID, old, next)
+		swapped, err := compareAndSwapHomeAntigravityCreditsHint(context.Background(), client, antigravityCreditsHintKey(authID, scope), old, next)
 		if err != nil {
 			log.Errorf("antigravity credits: conditional hint update: %v", err)
 		}
 		return swapped
 	}
-	return antigravityCreditsHintByAuth.CompareAndSwap(authID, old, next)
+	return antigravityCreditsHintByAuth.CompareAndSwap(newAntigravityCreditsHintCacheScope(authID, scope), old, next)
 }
 
 type antigravityCreditsHintCASClient interface {
@@ -39,8 +42,7 @@ type antigravityCreditsHintCASClient interface {
 	KVCompareAndSwap(context.Context, string, []byte, bool, []byte, time.Duration) (bool, error)
 }
 
-func compareAndSwapHomeAntigravityCreditsHint(ctx context.Context, client antigravityCreditsHintCASClient, authID string, old, next AntigravityCreditsHint) (bool, error) {
-	key := antigravityCreditsHintKey(authID)
+func compareAndSwapHomeAntigravityCreditsHint(ctx context.Context, client antigravityCreditsHintCASClient, key string, old, next AntigravityCreditsHint) (bool, error) {
 	raw, found, err := client.KVGet(ctx, key)
 	if err != nil || !found {
 		return false, err

@@ -1,26 +1,49 @@
-diff --git a/internal/client/codex/live/media_test.go b/internal/client/codex/live/media_test.go
-index 0a50335..ced3ed5 100644
 --- a/internal/client/codex/live/media_test.go
 +++ b/internal/client/codex/live/media_test.go
-@@ -153 +153 @@ func TestPionMediaRelayBridgesAudioAndDataChannel(t *testing.T) {
+@@ -152,7 +152,7 @@
+ 		logger.ReplaceHooks(previousHooks)
+ 		logger.SetLevel(previousLevel)
+ 	}()
 -	clientAPI := newTestWebRTCAPI(t)
 +	clientAPI := newTestLoopbackWebRTCAPI(t)
-@@ -197,0 +198,4 @@ func TestPionMediaRelayBridgesAudioAndDataChannel(t *testing.T) {
-+	// All four peers live in this process. Keep ICE off host LAN/VPN
-+	// interfaces so routing/firewall differences cannot break this bridge test.
+ 	client, errClient := clientAPI.NewPeerConnection(webrtc.Configuration{})
+ 	if errClient != nil {
+ 		t.Fatalf("create client PeerConnection: %v", errClient)
+@@ -198,6 +198,9 @@
+ 	if errRelay != nil {
+ 		t.Fatalf("create media relay: %v", errRelay)
+ 	}
++	// Keep all four peers on loopback regardless of host interfaces.
 +	relay.downstreamAPI = newTestLoopbackWebRTCAPI(t)
 +	relay.upstreamAPI = newTestLoopbackWebRTCAPI(t)
-@@ -219 +223 @@ func TestPionMediaRelayBridgesAudioAndDataChannel(t *testing.T) {
+ 	session, relayOffer, errSession := relay.NewSession(context.Background(), clientOffer, mediaSessionRoute{
+ 		credential: "Voice credential",
+ 		authIndex:  "auth-index",
+@@ -219,7 +222,7 @@
+ 		t.Fatal("reloaded media relay bypassed the shared session capacity")
+ 	}
+ 
 -	upstreamAPI := newTestWebRTCAPI(t)
 +	upstreamAPI := newTestLoopbackWebRTCAPI(t)
-@@ -267,0 +272,5 @@ func TestPionMediaRelayBridgesAudioAndDataChannel(t *testing.T) {
+ 	upstream, errUpstream := upstreamAPI.NewPeerConnection(webrtc.Configuration{})
+ 	if errUpstream != nil {
+ 		t.Fatalf("create upstream PeerConnection: %v", errUpstream)
+@@ -263,6 +266,11 @@
+ 	downstreamAnswer, errAnswer := session.AcceptUpstreamAnswer(context.Background(), upstreamAnswer)
+ 	if errAnswer != nil {
+ 		t.Fatalf("accept upstream answer: %v", errAnswer)
++	}
 +	for _, sdp := range []string{clientOffer, relayOffer, upstreamAnswer, downstreamAnswer} {
 +		if !offerCandidatesAreLoopback(t, sdp) {
 +			t.Fatal("local bridge test exposed a non-loopback ICE candidate")
 +		}
-+	}
-@@ -542,0 +552,9 @@ func closeTestPeerConnection(t *testing.T, connection *webrtc.PeerConnection) {
-+
+ 	}
+ 	if errRemote := client.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: downstreamAnswer}); errRemote != nil {
+ 		t.Fatalf("set client answer: %v", errRemote)
+@@ -404,6 +412,15 @@
+ 	return candidateCount > 0
+ }
+ 
 +func newTestLoopbackWebRTCAPI(t *testing.T) *webrtc.API {
 +	t.Helper()
 +	api, err := newPionAPIWithOptions(config.CodexLiveMediaRelayConfig{}, false, true)
@@ -29,3 +52,7 @@ index 0a50335..ced3ed5 100644
 +	}
 +	return api
 +}
++
+ func newTestWebRTCAPI(t *testing.T) *webrtc.API {
+ 	t.Helper()
+ 	mediaEngine := &webrtc.MediaEngine{}

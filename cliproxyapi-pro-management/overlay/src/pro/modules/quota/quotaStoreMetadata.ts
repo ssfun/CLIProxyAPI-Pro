@@ -15,6 +15,7 @@ const QUOTA_PROVIDER_METADATA = {
   antigravity: { quotaMapName: 'antigravityQuota', setterName: 'setAntigravityQuota' },
   claude: { quotaMapName: 'claudeQuota', setterName: 'setClaudeQuota' },
   codex: { quotaMapName: 'codexQuota', setterName: 'setCodexQuota' },
+  copilot: { quotaMapName: 'copilotQuota', setterName: 'setCopilotQuota' },
   devin: { quotaMapName: 'devinQuota', setterName: 'setDevinQuota' },
   'gemini-cli': { quotaMapName: 'geminiCliQuota', setterName: 'setGeminiCliQuota' },
   kimi: { quotaMapName: 'kimiQuota', setterName: 'setKimiQuota' },

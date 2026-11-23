@@ -286,7 +286,7 @@ func (m *Manager) ExecutePinnedAuth(ctx context.Context, authID string, req clip
 		}
 		execOpts := opts
 		var errIntercept error
-		execReq, execOpts, errIntercept = applyRequestAfterAuthInterceptor(execCtx, executor, provider, execReq, execOpts, requestedModelAliasFromOptions(execOpts, routeModel))
+		execReq, execOpts, errIntercept = prepareRequestAfterAuth(execCtx, executor, auth, provider, execReq, execOpts, requestedModelAliasFromOptions(execOpts, routeModel))
 		if errIntercept != nil {
 			return cliproxyexecutor.Response{}, errIntercept
 		}

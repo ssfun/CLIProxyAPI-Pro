@@ -21,7 +21,7 @@
   background:
     radial-gradient(circle at 92% 5%, color-mix(in srgb, var(--data-accent) 16%, transparent), transparent 35%),
     color-mix(in srgb, var(--bg-secondary) 94%, transparent);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow);
 }
 
 .headerIdentity { display: flex; align-items: flex-start; gap: 15px; min-width: 0; }
@@ -80,7 +80,7 @@
   border: 1px solid var(--border-color);
   border-radius: 15px;
   background: var(--bg-secondary);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow);
 }
 .panelHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 17px; }
 .panelHeading > div { min-width: 0; }
@@ -147,7 +147,7 @@
 .passwordField { position: relative; }
 .passwordField input { padding-right: 42px; }
 .passwordField button { position: absolute; top: 50%; right: 7px; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; color: var(--text-secondary); cursor: pointer; border: 0; border-radius: 7px; background: transparent; transform: translateY(-50%); }
-.passwordField button:hover { color: var(--text-primary); background: var(--hover-bg); }
+.passwordField button:hover { color: var(--text-primary); background: var(--bg-tertiary); }
 .panelActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .inlineLoading, .loadingState, .emptyState { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 110px; color: var(--text-secondary); font-size: 12px; }
 .loadingState { min-height: 260px; }

@@ -93,7 +93,7 @@
   background: var(--bg-secondary);
 }
 .viewTabs button { min-height: 32px; padding: 5px 12px; border: 0; border-radius: 6px; color: var(--text-secondary); background: transparent; cursor: pointer; }
-.viewTabs .viewTabActive { color: var(--text-primary); background: var(--bg-primary); box-shadow: var(--shadow-sm); font-weight: 600; }
+.viewTabs .viewTabActive { color: var(--text-primary); background: var(--bg-primary); box-shadow: var(--shadow); font-weight: 600; }
 
 .cards {
   display: grid;
@@ -109,7 +109,7 @@
   border: 1px solid var(--border-color);
   border-radius: 12px;
   background: var(--bg-primary);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 
   &:hover {
@@ -492,7 +492,7 @@
 }
 
 .profileRail button:disabled { cursor: not-allowed; opacity: .58; }
-.profileRail .profileActive { color: var(--text-primary); border-color: var(--border-color); background: var(--bg-primary); box-shadow: var(--shadow-sm); }
+.profileRail .profileActive { color: var(--text-primary); border-color: var(--border-color); background: var(--bg-primary); box-shadow: var(--shadow); }
 .profileRail small { padding: 2px 5px; border-radius: 999px; color: var(--success-color); background: color-mix(in srgb, var(--success-color) 12%, transparent); font-size: 9px; font-weight: 700; }
 .profileHeading { justify-content: space-between; align-items: flex-start; gap: 16px; }
 .profileHeading h3,

@@ -254,16 +254,16 @@ apply_validation_fixture_adjustments() {
   local fixture_name
   local fixture_patch
   # Change test setup only, identically for candidate and baseline.
-  for fixture_name in codex_live_media_loopback auth_manager_initialization home_heartbeat_failover_wait pluginhost_unused_once; do
+  for fixture_name in antigravity_credits_refresh_scope codex_live_media_loopback auth_manager_initialization home_heartbeat_failover_wait pluginhost_unused_once; do
     fixture_patch="${repo_root}/scripts/validation/fixtures/${fixture_name}.patch"
-    if git -C "${source_root}" apply --unidiff-zero --reverse --check "${fixture_patch}" >/dev/null 2>&1; then
+    if git -C "${source_root}" apply --reverse --check "${fixture_patch}" >/dev/null 2>&1; then
       continue
     fi
-    if ! git -C "${source_root}" apply --unidiff-zero --check "${fixture_patch}"; then
+    if ! git -C "${source_root}" apply --check "${fixture_patch}"; then
       echo "Validation fixture ${fixture_name} no longer matches the selected upstream" >&2
       return 1
     fi
-    git -C "${source_root}" apply --unidiff-zero "${fixture_patch}" || return
+    git -C "${source_root}" apply "${fixture_patch}" || return
   done
 }
 

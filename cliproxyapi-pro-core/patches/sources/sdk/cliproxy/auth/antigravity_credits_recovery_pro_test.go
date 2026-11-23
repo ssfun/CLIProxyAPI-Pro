@@ -84,26 +84,29 @@ func TestProCreditsRecoveryHomeCompareAndSwap(t *testing.T) {
 }
 func TestProCreditsRecoveryLocalCompareAndSwap(t *testing.T) {
 	const id = "pro-credits-cas"
-	t.Cleanup(func() { antigravityCreditsHintByAuth.Delete(id) })
+	auth := &Auth{ID: id, RegistrationEpoch: 2}
+	t.Cleanup(func() {
+		antigravityCreditsHintByAuth.Delete(newAntigravityCreditsHintCacheScope(id, AntigravityCreditsScope(auth)))
+	})
 	old := AntigravityCreditsHint{Known: true, UpdatedAt: time.Now()}
-	SetAntigravityCreditsHint(id, old)
+	SetAntigravityCreditsHintForAuth(auth, old)
 	newer := old
 	newer.Available = true
 	newer.CreditAmount = 2516
-	SetAntigravityCreditsHint(id, newer)
-	if CompareAndSwapAntigravityCreditsHint(id, old, AntigravityCreditsHint{}) {
+	SetAntigravityCreditsHintForAuth(auth, newer)
+	if CompareAndSwapAntigravityCreditsHintForAuth(auth, old, AntigravityCreditsHint{}) {
 		t.Fatal("stale observation replaced new balance")
 	}
-	if got, _ := GetAntigravityCreditsHint(id); got != newer {
+	if got, _ := GetAntigravityCreditsHintForAuth(auth); got != newer {
 		t.Fatalf("new balance changed: %+v", got)
 	}
-	if !CompareAndSwapAntigravityCreditsHint(id, newer, AntigravityCreditsHint{}) {
+	if !CompareAndSwapAntigravityCreditsHintForAuth(auth, newer, AntigravityCreditsHint{}) {
 		t.Fatal("unchanged observation not cleared")
 	}
-	if got, _ := GetAntigravityCreditsHint(id); got.Known || got.UpdatedAt.IsZero() {
+	if got, _ := GetAntigravityCreditsHintForAuth(auth); got.Known || got.UpdatedAt.IsZero() {
 		t.Fatalf("invalid cleared hint: %+v", got)
 	}
-	if CompareAndSwapAntigravityCreditsHint(" ", old, AntigravityCreditsHint{}) {
+	if CompareAndSwapAntigravityCreditsHintForAuth(&Auth{ID: " "}, old, AntigravityCreditsHint{}) {
 		t.Fatal("blank id accepted")
 	}
 }

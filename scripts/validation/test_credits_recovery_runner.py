@@ -27,7 +27,7 @@ class CreditsRecoveryRunnerTests(unittest.TestCase):
                 source = root / 'core/internal/runtime/executor'
                 source.mkdir(parents=True)
                 (source / 'antigravity_executor_credits.go').write_text(
-                    '\tif hint, ok := cliproxyauth.GetAntigravityCreditsHint(authID); ok && hint.Known && !hint.Available {\n')
+                    '\tif ok && hint.Known && !hint.Available {\n')
                 fake = root / 'go'
                 fake.write_text('#!' + sys.executable + '\nimport os,sys\n'
                                 'print(os.environ["CREDITS_GATE_EVENTS"])\n'

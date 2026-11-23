@@ -1,0 +1,37 @@
+--- a/internal/runtime/executor/antigravity_executor_credits_test.go
++++ b/internal/runtime/executor/antigravity_executor_credits_test.go
+@@ -898,6 +898,7 @@
+ 				ResponseFormat: sdktranslator.FormatAntigravity,
+ 			}
+ 
++			refreshKey := authID + "|" + cliproxyauth.AntigravityCreditsScope(registered)
+ 			// Step 1: Exhaust weekly quota (QUOTA_EXHAUSTED) and credits (INSUFFICIENT_G1_CREDITS_BALANCE).
+ 			cliproxyauth.SetAntigravityCreditsHint(authID, cliproxyauth.AntigravityCreditsHint{
+ 				Known:           true,
+@@ -915,7 +916,7 @@
+ 					t.Fatal("initial Execute() succeeded, want 429 after quota and credits exhaustion")
+ 				}
+ 			}
+-			if value, ok := antigravityCreditsHintRefreshByID.Load(authID); ok {
++			if value, ok := antigravityCreditsHintRefreshByID.Load(refreshKey); ok {
+ 				if state, ok := value.(*antigravityCreditsHintRefreshState); ok && state != nil {
+ 					waitForAntigravityCreditsRefresh(t, state)
+ 				}
+@@ -931,7 +932,7 @@
+ 			// Step 2: Top up credits and expire the cached hint/throttle window while model remains in 1h quota cooldown.
+ 			toppedUp.Store(true)
+ 			callsBeforeTopUp := loadCodeAssistCalls.Load()
+-			if value, ok := antigravityCreditsHintRefreshByID.Load(authID); ok {
++			if value, ok := antigravityCreditsHintRefreshByID.Load(refreshKey); ok {
+ 				if state, ok := value.(*antigravityCreditsHintRefreshState); ok && state != nil {
+ 					state.mu.Lock()
+ 					state.lastAttempt = time.Now().Add(-antigravityCreditsHintRefreshInterval - time.Second)
+@@ -972,7 +973,7 @@
+ 				}
+ 			}
+ 
+-			if value, ok := antigravityCreditsHintRefreshByID.Load(authID); ok {
++			if value, ok := antigravityCreditsHintRefreshByID.Load(refreshKey); ok {
+ 				if state, ok := value.(*antigravityCreditsHintRefreshState); ok && state != nil {
+ 					waitForAntigravityCreditsRefresh(t, state)
+ 				}

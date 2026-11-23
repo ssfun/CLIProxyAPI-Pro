@@ -17,7 +17,7 @@ src, out = a.src.resolve(), a.output.resolve()
 out.mkdir(parents=True, exist_ok=True)
 original = src / 'internal/runtime/executor/antigravity_executor_credits.go'
 code = original.read_text()
-anchor = '\tif hint, ok := cliproxyauth.GetAntigravityCreditsHint(authID); ok && hint.Known && !hint.Available {\n'
+anchor = '\tif ok && hint.Known && !hint.Available {\n'
 if code.count(anchor) != 1:
     raise SystemExit('expected exactly one recovery hint observation')
 overlay_source = out / original.name

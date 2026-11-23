@@ -540,7 +540,7 @@
   border: 1px solid color-mix(in srgb, var(--inspect-line) 78%, transparent);
   border-radius: 16px;
   background: var(--inspect-surface-elevated);
-  box-shadow: 0 10px 28px color-mix(in srgb, var(--inspect-shadow) 6%, transparent);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--shadow) 6%, transparent);
 }
 
 .settingsWorkbenchHeader > div {
