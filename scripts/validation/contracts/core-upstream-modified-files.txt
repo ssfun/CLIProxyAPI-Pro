@@ -86,6 +86,7 @@ sdk/cliproxy/auth/scheduler.go
 sdk/cliproxy/auth/selector.go
 sdk/cliproxy/auth/types.go
 sdk/cliproxy/builder.go
+sdk/cliproxy/executor/types.go
 sdk/cliproxy/rtprovider.go
 sdk/cliproxy/service.go
 sdk/cliproxy/service_auth.go

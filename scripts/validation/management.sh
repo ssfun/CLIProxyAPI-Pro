@@ -41,6 +41,9 @@ fi
   bun run test
   bun test --preload ./tests/disableAbortSignalAny.ts tests/apiClientConnectionIsolation.test.ts
   bun run lint
-  bun run type-check
+  # The upstream production build runs tsc. Keep an explicit check for builds that omit it.
+  if ! bun -e 'process.exit(require("./package.json").scripts.build.split("&&")[0].trim() === "tsc" ? 0 : 1)'; then
+    bun run type-check
+  fi
   VERSION="${VERSION:-review}" bun run build
 )

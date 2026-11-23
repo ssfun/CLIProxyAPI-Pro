@@ -301,7 +301,6 @@ run_upstream_test_groups() {
     ./sdk/proxyutil
   )
   : >"${aggregate_log}"
-  apply_validation_fixture_adjustments "${source_root}" || return 2
 
   # Keep this list scoped to packages containing a modified upstream file or
   # an injected Pro compatibility/test source. Generic upstream-only packages
@@ -331,6 +330,7 @@ run_upstream_test_groups() {
 prepare_baseline_worktree() {
   baseline_root="${validation_tmp}/baseline-upstream"
   git -C "${upstream_root}" worktree add --detach "${baseline_root}" "${upstream_commit}" || return
+  apply_validation_fixture_adjustments "${baseline_root}" || return
   if [[ -n "${release_models_file}" ]]; then
     cp "${release_models_file}" "${baseline_root}/internal/registry/models/models.json" || return
   fi

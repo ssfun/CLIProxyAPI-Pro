@@ -86,6 +86,7 @@ sdk/cliproxy/auth/scheduler.go	must-remain-host-patch	scheduler-runtime-state	re
 sdk/cliproxy/auth/selector.go	must-remain-host-patch	scheduler-runtime-state	retain-cursor-selection-semantics
 sdk/cliproxy/auth/types.go	must-remain-host-patch	scheduler-runtime-state	retain-auth-runtime-counters
 sdk/cliproxy/builder.go	must-remain-host-patch	pro-composition	retain-mixed-pro-service-composition-until-every-static-module-has-plugin-parity
+sdk/cliproxy/executor/types.go	upstream-generic-fix	stream result accounting	Retire when upstream records the translated failure before forwarding its payload.
 sdk/cliproxy/rtprovider.go	must-remain-host-patch	final-outbound-transport	retain-runtime-proxy-generation-in-default-provider-cache
 sdk/cliproxy/service.go	upstream-generic-fix	model-registration	upstream-generation-fenced-model-registration
 sdk/cliproxy/service_auth.go	upstream-generic-fix	model-registration	upstream-generation-fenced-auth-registration

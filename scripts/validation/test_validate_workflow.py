@@ -78,12 +78,8 @@ class ValidateWorkflowTests(unittest.TestCase):
 
     def test_core_validation_applies_media_fixture_to_every_test_root(self) -> None:
         script = (ROOT / "scripts" / "validation" / "core.sh").read_text()
-        function_start = script.index("run_upstream_test_groups()")
-        function_end = script.index("prepare_baseline_worktree()")
-        self.assertIn(
-            'apply_validation_fixture_adjustments "${source_root}"',
-            script[function_start:function_end],
-        )
+        self.assertEqual(script.count('apply_validation_fixture_adjustments "${upstream_root}"'), 1)
+        self.assertEqual(script.count('apply_validation_fixture_adjustments "${baseline_root}"'), 1)
         media_fixture = (ROOT / "scripts/validation/fixtures/codex_live_media_loopback.patch").read_text()
         self.assertIn("newTestLoopbackWebRTCAPI", media_fixture)
         self.assertIn("offerCandidatesAreLoopback(t, sdp)", media_fixture)

@@ -6194,6 +6194,52 @@ replace_once(
     'reporter.ObserveUpstreamRequestModel(wsReqBody)',
 )
 aistudio_executor = ROOT / 'internal/runtime/executor/aistudio_executor.go'
+# Account for a translated error before its SSE payload reaches a client that
+# may cancel immediately. Keep the original later terminal chunk for consumers.
+replace_once(
+    ROOT / 'sdk/cliproxy/executor/types.go',
+    'type StreamChunk struct {',
+    'type StreamChunk struct {\n\t// ResultError records a known failure before delivery of its protocol payload.\n\tResultError error',
+)
+for payload in ('spaced', 'ensureColonSpacedJSON(line)', 'ensureColonSpacedJSON(lines[i])'):
+    old = 'case out <- cliproxyexecutor.StreamChunk{Payload: ' + payload + '}:'
+    # Only translated Claude SSE errors carry the retained failure.
+    new = 'case out <- aiStudioTranslatedChunk(' + payload + ', responseFormat, streamErr):'
+    replace_once(aistudio_executor, old, new)
+insert_before(
+    aistudio_executor, '// ExecuteStream performs a streaming request',
+    '''func aiStudioTranslatedChunk(payload []byte, format sdktranslator.Format, retained error) cliproxyexecutor.StreamChunk {
+	chunk := cliproxyexecutor.StreamChunk{Payload: payload}
+	if retained != nil {
+		if _, ok := helps.TranslatedClaudeStreamErrorPayload(format, [][]byte{payload}); ok {
+			chunk.ResultError = retained
+		}
+	}
+	return chunk
+}
+
+''', 'func aiStudioTranslatedChunk(',
+)
+replace_once(
+    auth_conductor_stream,
+    'if chunk.Err != nil && !failed {',
+    '''resultErr := chunk.Err
+			if resultErr == nil { resultErr = chunk.ResultError }
+			if resultErr != nil && !failed {''',
+)
+stream_text = read(auth_conductor_stream)
+start = stream_text.index('if resultErr != nil && !failed {')
+end = stream_text.index('if okAction && !isRequestTerminatedError(chunk.Err)', start)
+write(auth_conductor_stream, stream_text[:start] + stream_text[start:end].replace('chunk.Err', 'resultErr') + stream_text[end:].replace('if okAction && !isRequestTerminatedError(chunk.Err)', 'if chunk.Err != nil && okAction && !isRequestTerminatedError(chunk.Err)', 1))
+
+# The active stream owns delivery of a quota rejection. A second disconnect
+# notification races the terminal frame and can close its downstream writer.
+codex_stream = ROOT / 'internal/runtime/executor/codex_websockets_stream.go'
+for err_name, body in (('wsErr', 'payload'), ('streamErr', 'terminalBody')):
+    before = '_ = send(cliproxyexecutor.StreamChunk{Err: ' + err_name + '})\n\t\t\t\tif emittedPayload {'
+    after = 'delivered := send(cliproxyexecutor.StreamChunk{Err: ' + err_name + '})\n\t\t\t\tif emittedPayload && (!delivered || !isCodexUsageLimitError(' + body + ')) {'
+    replace_once(codex_stream, before, after)
+
 if 'reporter.SetUpstreamModel(baseModel)' not in read(aistudio_executor):
     replace_all_exact(
         aistudio_executor,
