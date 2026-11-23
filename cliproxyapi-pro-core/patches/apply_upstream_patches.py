@@ -2594,6 +2594,22 @@ replace_once(
 # but do not turn cancellation into a synthesized missing-terminal error.
 # handleChunk returns true to stop the forwarding loop.
 
+# The executor still notifies subscribers after publishing its terminal error.
+# Once a response is committed, the active forwarder owns delivery of quota
+# errors. A concurrent socket close can otherwise discard the terminal frame.
+ws_handler = ROOT / 'sdk/api/handlers/openai/openai_responses_websocket.go'
+replace_once(ws_handler, 'var codexDuplexStream atomic.Bool',
+    'var codexDuplexStream atomic.Bool\n\tvar committedForward atomic.Bool')
+replace_once(ws_handler, 'if writer.closeForUpstreamDisconnect(disconnectErr, wsTimelineLog)',
+    '''if provider == "codex" && committedForward.Load() && isResponsesWebsocketQuotaOrCooldownError(disconnectErr) {
+								return
+							}
+							if writer.closeForUpstreamDisconnect(disconnectErr, wsTimelineLog)''')
+replace_once(ws_handler, 'func() { downstreamCommitted.Store(true) }',
+    'func() { downstreamCommitted.Store(true); committedForward.Store(true) }')
+replace_once(ws_handler, '\t\t\tcliCancel(nil)\n\t\t\tif errForward != nil {',
+    '\t\t\tcommittedForward.Store(false)\n\t\t\tcliCancel(nil)\n\t\t\tif errForward != nil {')
+
 responses_websocket_input = ROOT / 'sdk/api/handlers/openai/openai_responses_websocket_input.go'
 replace_once(responses_websocket_input,
     '\twsTurnActive bool\n',
@@ -6231,14 +6247,6 @@ stream_text = read(auth_conductor_stream)
 start = stream_text.index('if resultErr != nil && !failed {')
 end = stream_text.index('if okAction && !isRequestTerminatedError(chunk.Err)', start)
 write(auth_conductor_stream, stream_text[:start] + stream_text[start:end].replace('chunk.Err', 'resultErr') + stream_text[end:].replace('if okAction && !isRequestTerminatedError(chunk.Err)', 'if chunk.Err != nil && okAction && !isRequestTerminatedError(chunk.Err)', 1))
-
-# The active stream owns delivery of a quota rejection. A second disconnect
-# notification races the terminal frame and can close its downstream writer.
-codex_stream = ROOT / 'internal/runtime/executor/codex_websockets_stream.go'
-for err_name, body in (('wsErr', 'payload'), ('streamErr', 'terminalBody')):
-    before = '_ = send(cliproxyexecutor.StreamChunk{Err: ' + err_name + '})\n\t\t\t\tif emittedPayload {'
-    after = 'delivered := send(cliproxyexecutor.StreamChunk{Err: ' + err_name + '})\n\t\t\t\tif emittedPayload && (!delivered || !isCodexUsageLimitError(' + body + ')) {'
-    replace_once(codex_stream, before, after)
 
 if 'reporter.SetUpstreamModel(baseModel)' not in read(aistudio_executor):
     replace_all_exact(
