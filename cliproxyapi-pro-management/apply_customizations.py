@@ -1940,7 +1940,7 @@ export const isPaidXaiAuthFile = (file: AuthFileItem | Record<string, unknown>):
 
     index_path = target / 'src/features/quota/providers/index.ts'
     replace_once(index_path, "import { XAI_CONFIG } from './xai/data';\nimport { XaiQuotaBody } from './xai/XaiQuotaBody';", "import { GEMINI_CLI_CONFIG, GeminiCliQuotaBody, PRO_XAI_CONFIG, ProXaiQuotaBody } from '@/pro/modules/quota';")
-    replace_once(index_path, "  errorStatus?: number;\n}", "  errorStatus?: number;\n  cachedAt?: number;\n}")
+    replace_once(index_path, "  errorStatus?: number;\n  validation?: AntigravityQuotaState['validation'];\n}", "  errorStatus?: number;\n  cachedAt?: number;\n  validation?: AntigravityQuotaState['validation'];\n}")
     replace_once(index_path, "  codex: { ...CODEX_CONFIG, Body: CodexQuotaBody } as unknown as QuotaAdapter,\n", "  codex: { ...CODEX_CONFIG, Body: CodexQuotaBody } as unknown as QuotaAdapter,\n  'gemini-cli': { ...GEMINI_CLI_CONFIG, Body: GeminiCliQuotaBody } as unknown as QuotaAdapter,\n")
     replace_once(index_path, '  xai: { ...XAI_CONFIG, Body: XaiQuotaBody } as unknown as QuotaAdapter,', '  xai: { ...PRO_XAI_CONFIG, Body: ProXaiQuotaBody } as unknown as QuotaAdapter,')
 
@@ -2028,7 +2028,7 @@ def patch_quota_page_latest(target: Path) -> None:
 def patch_quota_cards_latest(target: Path) -> None:
     renderers = (
         ('src/features/quota/components/QuotaCard.tsx',
-         "import { resolveQuotaErrorMessage } from '@/utils/quota';\n",
+         "import { getQuotaDisplayName } from '@/utils/quota/identity';\n",
          'quotaClasses', 'status', 'quota.cachedAt', '          '),
         ('src/features/authFiles/components/AuthFileQuotaSection.tsx',
          "import { bindQuotaClasses } from '@/features/quota/types';\n",
