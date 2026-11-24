@@ -2036,6 +2036,9 @@ def patch_quota_cards_latest(target: Path) -> None:
     )
     for relative_path, import_anchor, classes, status, cached_at, indent in renderers:
         path = target / relative_path
+        source = read(path)
+        if import_anchor not in source and relative_path.endswith('QuotaCard.tsx'):
+            import_anchor = "import { resolveQuotaErrorMessage } from '@/utils/quota';\n"
         insert_once(path, import_anchor, import_anchor + "import { QuotaCachedTime } from '@/pro/modules/quota';\n", 'import { QuotaCachedTime }')
         body = f'<adapter.Body quota={{quota}} classes={{{classes}}} />'
         timestamp = f'<QuotaCachedTime quotaStatus={{{status}}} cachedAt={{{cached_at}}} />'
