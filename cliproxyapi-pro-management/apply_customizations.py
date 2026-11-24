@@ -2113,6 +2113,7 @@ def patch_auth_files_gemini_quota_latest(target: Path) -> None:
     ensure_string_union_member(path, 'QuotaProviderType', 'gemini-cli', 'codex')
     for marker in (
         'export const QUOTA_PROVIDER_TYPES = new Set<QuotaProviderType>([',
+        'export const AUTH_FILE_MANUAL_REFRESH_PROVIDERS = new Set([',
     ):
         text = read(path)
         start = text.find(marker)
@@ -2124,6 +2125,17 @@ def patch_auth_files_gemini_quota_latest(target: Path) -> None:
             continue
         updated = block.replace("  'codex',\n", "  'codex',\n  'gemini-cli',\n", 1)
         write(path, f'{text[:start]}{updated}{text[end:]}')
+    old_refresh_support = "export const supportsAuthFileManualRefresh = (provider: unknown): boolean =>\n  AUTH_FILE_MANUAL_REFRESH_PROVIDERS.has(normalizeProviderKey(String(provider ?? '')));"
+    if old_refresh_support in read(path):
+        replace_once(
+            path,
+            old_refresh_support,
+            "export const supportsAuthFileManualRefresh = (provider: unknown): boolean => {\n"
+            "  const normalized = normalizeProviderKey(String(provider ?? ''));\n"
+            "  if (normalized === 'gemini-cli') return false;\n"
+            "  return AUTH_FILE_MANUAL_REFRESH_PROVIDERS.has(normalized);\n"
+            "};",
+        )
     quota_section_path = target / 'src/features/authFiles/components/AuthFileQuotaSection.tsx'
     replace_once(
         quota_section_path,
