@@ -6925,6 +6925,13 @@ replace_once(
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if antigravityTargetRejected(result) {
+		return
+	}
+	routedModel := antigravityResultModel(ctx, result)
+	if routedModel != "" {
+		result.Model = routedModel
+	}
 	if m != nil {
 		if policy := m.ResultPolicy(); policy != nil {
 			result = policy.ApplyResultPolicy(ctx, result)
@@ -6938,6 +6945,13 @@ replace_once(
     '''func (m *Manager) markResult(ctx context.Context, result Result) bool {
 	if result.AuthID == "" {
 		return false
+	}
+	if antigravityTargetRejected(result) {
+		return false
+	}
+	routedModel := antigravityResultModel(ctx, result)
+	if routedModel != "" {
+		result.Model = routedModel
 	}
 	if ctx == nil {
 		ctx = context.Background()
