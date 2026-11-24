@@ -1454,7 +1454,7 @@ const fetchAntigravityQuota = async (
       }
 
 ''',
-        '      if (groups.length === 0) {\n        continue;\n      }\n\n',
+        '      if (groups.length === 0) {\n        if (!result.header?.Date) break;\n        continue;\n      }\n\n',
     )
     # The quota page's single/batch hooks and auth-file cards all use this setter.
     # Keep previous evidence through loading/error, while explicit success and
