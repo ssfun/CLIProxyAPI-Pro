@@ -1454,7 +1454,7 @@ const fetchAntigravityQuota = async (
       }
 
 ''',
-        '      if (groups.length === 0) {\n        break;\n      }\n\n',
+        '      if (groups.length === 0) {\n        continue;\n      }\n\n',
     )
     # The quota page's single/batch hooks and auth-file cards all use this setter.
     # Keep previous evidence through loading/error, while explicit success and
@@ -2113,7 +2113,6 @@ def patch_auth_files_gemini_quota_latest(target: Path) -> None:
     ensure_string_union_member(path, 'QuotaProviderType', 'gemini-cli', 'codex')
     for marker in (
         'export const QUOTA_PROVIDER_TYPES = new Set<QuotaProviderType>([',
-        'export const AUTH_FILE_MANUAL_REFRESH_PROVIDERS = new Set([',
     ):
         text = read(path)
         start = text.find(marker)
