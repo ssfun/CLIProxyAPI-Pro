@@ -258,7 +258,7 @@ jobs:
           python-version: '3.x'
 
       - name: Set up Go for actionlint
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: stable
           cache: false
@@ -303,7 +303,7 @@ jobs:
           echo "STATICCHECK_CACHE=${RUNNER_TEMP}/staticcheck-cache" >> "${GITHUB_ENV}"
 
       - name: Set up Go without implicit cache
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: upstream-core/go.mod
           cache: false
