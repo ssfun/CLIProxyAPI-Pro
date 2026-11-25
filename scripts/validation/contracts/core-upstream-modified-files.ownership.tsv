@@ -16,6 +16,7 @@ internal/api/server_options.go	must-remain-host-patch	api-key-policy	retain-host
 internal/api/server_reload.go	must-remain-host-patch	api-key-policy	retain-atomic-configured-key-publication
 internal/api/server_routes.go	must-remain-host-patch	final-response-and-routing	retain-root-route-api-key-policy-and-final-model-filtering
 internal/api/server_test.go	must-remain-host-patch	management-contracts	retain-mixed-host-management-regressions-while-moving-usage-contracts-with-plugin
+internal/api/server_tunnel_test.go	upstream-generic-fix	server-tunnel-compatibility	retain-server-list-test-compatibility-with-asynchronous-upstream-population
 internal/auth/claude/identity.go	upstream-generic-fix	claude-auth-concurrency	upstream-lock-boolean-metadata-reads
 internal/auth/claude/utls_transport.go	must-remain-host-patch	final-outbound-transport	retain-runtime-proxy-generation-in-claude-control-plane
 internal/client/codex/live/client_secret.go	must-remain-host-patch	api-key-policy	retain-realtime-issuer-policy-snapshot
