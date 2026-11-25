@@ -118,6 +118,16 @@ def insert_before(path: Path, marker: str, insertion: str, present: str) -> None
     write(path, text.replace(marker, insertion + marker, 1))
 
 
+def insert_after_regex(path: Path, pattern: str, insertion: str, present: str) -> None:
+    text = read(path)
+    if present in text:
+        return
+    updated, count = re.subn(pattern, lambda match: match.group(0) + insertion, text, count=1)
+    if count != 1:
+        raise SystemExit(f'expected one regex match in {path}, found {count}: {pattern!r}')
+    write(path, updated)
+
+
 def ensure_go_require(path: Path, module: str, version: str) -> None:
     text = read(path)
     if re.search(rf'^\s*{re.escape(module)}\s+', text, re.MULTILINE):
@@ -4198,18 +4208,13 @@ insert_before(
 )
 
 auth_conductor_base = ROOT / 'sdk/cliproxy/auth/conductor.go'
-replace_once(
+insert_after_regex(
     auth_conductor_base,
-    '''	// pluginScheduler runs outside m.mu before falling back to native selection.
-	pluginScheduler PluginScheduler
-''',
-    '''	// pluginScheduler runs outside m.mu before falling back to native selection.
-	pluginScheduler PluginScheduler
-	// accountPolicyResolver derives execution-only OAuth policy overlays.
-	accountPolicyResolver AccountPolicyResolver
-''',
+    r'(?m)^\tpluginScheduler\s+PluginScheduler\n',
+    '\t// accountPolicyResolver derives execution-only OAuth policy overlays.\n\taccountPolicyResolver AccountPolicyResolver\n',
     'accountPolicyResolver AccountPolicyResolver',
 )
+
 # Track attempts after session enrichment in Execute, ExecuteCount and ExecuteStream.
 # Anchor on enrichment so upstream context setup (including request proxy URLs)
 # remains intact when new statements are added at the start of these methods.
