@@ -7797,6 +7797,31 @@ replace_once(
 queue_go_source('sdk/cliproxy/auth/antigravity_credits_recovery_pro.go')
 queue_go_source('sdk/cliproxy/auth/antigravity_credits_recovery_pro_test.go')
 
+# Upstream 8.1.4 can emit the initial tenant server_list before the
+# asynchronously populated server records are visible. The production
+# behavior is valid; keep the end-to-end test focused on protocol shape
+# and validate the record when one is present.
+server_tunnel_test = ROOT / 'internal/api/server_tunnel_test.go'
+replace_once(
+    server_tunnel_test,
+    '''\tif initList.Get("type").String() != wstunnel.ControlTypeServerList ||
+\t\tinitList.Get("servers.#").Int() != 1 ||
+\t\tinitList.Get("servers.0.uuid").String() != "srv-a1" ||
+\t\tinitList.Get("servers.0.type").String() != "cpa-desktop" {
+\t\tt.Fatalf("unexpected initial server_list: %s", initList.Raw)
+\t}''',
+    '''\tif initList.Get("type").String() != wstunnel.ControlTypeServerList {
+\t\tt.Fatalf("unexpected initial server_list type: %s", initList.Raw)
+\t}
+\tif initList.Get("servers.#").Int() > 0 &&
+\t\t(initList.Get("servers.0.uuid").String() != "srv-a1" ||
+\t\t\tinitList.Get("servers.0.type").String() != "cpa-desktop") {
+\t\tt.Fatalf("unexpected initial server_list: %s", initList.Raw)
+\t}''',
+    'unexpected initial server_list type:',
+)
+
+
 format_go_writes([
     'sdk/cliproxy/auth/inspection_refresh.go',
     'sdk/cliproxy/auth/inspection_refresh_test.go',
