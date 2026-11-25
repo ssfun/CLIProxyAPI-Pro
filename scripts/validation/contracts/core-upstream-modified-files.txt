@@ -16,6 +16,7 @@ internal/api/server_options.go
 internal/api/server_reload.go
 internal/api/server_routes.go
 internal/api/server_test.go
+internal/api/server_tunnel_test.go
 internal/auth/claude/identity.go
 internal/auth/claude/utls_transport.go
 internal/client/codex/live/client_secret.go
