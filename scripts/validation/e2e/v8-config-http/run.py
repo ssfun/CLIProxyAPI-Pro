@@ -327,7 +327,13 @@ def scenario_v8_scalar_put(process, client, assertions):
     assert_v8_layout(before)
     assert_missing_startup_fields(before)
     response = require_status(client, "PUT", "/v8/management/config/routing/retry/request-retry", 200, 1)
-    require(response == {"status": "ok", "config-version": 8}, f"unexpected save response: {response!r}")
+    require(isinstance(response, dict), f"unexpected save response type: {response!r}")
+    require(response.get("status") == "ok", f"unexpected save status: {response!r}")
+    require(response.get("config-version") == 8, f"unexpected saved config version: {response!r}")
+    # v8.1.2 adds a server-id to successful writes; accept it while checking its shape.
+    if "server-id" in response:
+        require(isinstance(response["server-id"], str) and response["server-id"],
+                f"unexpected server-id in save response: {response!r}")
     value = require_status(client, "GET", "/v8/management/config/routing/retry/request-retry", 200)
     require(value == 1, f"saved retry value is {value!r}, expected 1")
     after = process.config.read_text(encoding="utf-8")
