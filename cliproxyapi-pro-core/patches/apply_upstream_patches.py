@@ -3517,7 +3517,14 @@ replace_once(
     '''\toriginalRequestedModel := modelName
 \t// Speech-only models are reachable solely through the speech entry protocol.
 \texecOptions.AllowSpeechModel = isModelExecutionSpeechProtocol(entryProtocol)
-\trouteDecision, preparedRoute := preparedModelRouteFromContext(ctx, execOptions.SkipRouterPluginID)
+\tvar routeDecision modelRouteDecision
+\tif !h.isHomeLocalExecutorModel(modelName) {
+\t\tvar preparedRoute bool
+\t\trouteDecision, preparedRoute = preparedModelRouteFromContext(ctx, execOptions.SkipRouterPluginID)
+\t\tif !preparedRoute {
+\t\t\trouteDecision = h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, true, execOptions)
+\t\t}
+\t}
 ''',
     '''\toriginalRequestedModel := modelName
 \t// Speech-only models are reachable solely through the speech entry protocol.
