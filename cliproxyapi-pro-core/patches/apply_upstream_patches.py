@@ -3466,6 +3466,9 @@ replace_once(
 replace_once(
     handlers_execution_source,
     '''\texecCtx = enrichContextWithSessionHierarchy(execCtx, opts.Headers, req.Payload, opts.Metadata)
+\tif grant != nil {
+\t\texecCtx = grant.prepare(execCtx, &req, originalRequestedModel)
+\t}
 \tvar reporter *helps.UsageReporter
 ''',
     '''\texecCtx = enrichContextWithSessionHierarchy(execCtx, opts.Headers, req.Payload, opts.Metadata)
