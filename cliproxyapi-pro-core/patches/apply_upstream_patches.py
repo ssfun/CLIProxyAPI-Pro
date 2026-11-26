@@ -4657,9 +4657,11 @@ replace_once(
 openai_stream_text = read(openai_compat_execute)
 deferred_stream_publish = '''\t\tdefer streamUsage.Publish(ctx, reporter)
 '''
-if openai_stream_text.count(deferred_stream_publish) != 1:
-    raise SystemExit('expected one deferred OpenAI-compatible stream usage publish')
-openai_stream_text = openai_stream_text.replace(deferred_stream_publish, '', 1)
+deferred_stream_publish_count = openai_stream_text.count(deferred_stream_publish)
+if deferred_stream_publish_count == 1:
+    openai_stream_text = openai_stream_text.replace(deferred_stream_publish, '', 1)
+elif openai_stream_text.count('streamUsage.Publish(ctx, reporter)') == 0:
+    raise SystemExit('expected OpenAI-compatible stream usage publish')
 openai_stream_start = '''func (e *OpenAICompatExecutor) ExecuteStream'''
 openai_stream_end = '''func (e *OpenAICompatExecutor) executeImagesStream'''
 if openai_stream_text.count(openai_stream_start) != 1 or openai_stream_text.count(openai_stream_end) != 1:
