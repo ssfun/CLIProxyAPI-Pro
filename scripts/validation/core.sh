@@ -207,7 +207,10 @@ validate_reapplication_guard() {
   fi
 }
 
-test_flags=(-count=1)
+# The upstream management OAuth fixtures and Pro inspection fixtures both touch process-wide HTTP test state.
+# Keep package-level parallel tests serialized so the race detector reports real product races,
+# not fixture interference between unrelated tests.
+test_flags=(-count=1 -parallel=1)
 if [[ "${VALIDATION_RACE:-0}" == "1" ]]; then
   test_flags+=(-race)
 fi
