@@ -3514,39 +3514,27 @@ replace_once(
 handlers_stream_source = ROOT / 'sdk/api/handlers/handlers_stream.go'
 replace_once(
     handlers_stream_source,
-    '''\toriginalRequestedModel := modelName
-\t// Speech-only models are reachable solely through the speech entry protocol.
-\texecOptions.AllowSpeechModel = isModelExecutionSpeechProtocol(entryProtocol)
-\tvar routeDecision modelRouteDecision
-\tif !h.isHomeLocalExecutorModel(modelName) {
-\t\tvar preparedRoute bool
-\t\trouteDecision, preparedRoute = preparedModelRouteFromContext(ctx, execOptions.SkipRouterPluginID)
-\t\tif !preparedRoute {
-\t\t\trouteDecision = h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, true, execOptions)
-\t\t}
+    '''\texecCtx = enrichContextWithSessionHierarchy(execCtx, opts.Headers, req.Payload, opts.Metadata)
+\tif grant != nil {
+\t\texecCtx = grant.prepare(execCtx, &req, originalRequestedModel)
 \t}
+\tvar reporter *helps.UsageReporter
 ''',
-    '''\toriginalRequestedModel := modelName
-\t// Speech-only models are reachable solely through the speech entry protocol.
-\texecOptions.AllowSpeechModel = isModelExecutionSpeechProtocol(entryProtocol)
-\tvar policyErr *interfaces.ErrorMessage
-\tctx, modelName, rawJSON, policyErr = applyAPIKeyModelPolicy(h, ctx, modelName, rawJSON)
-\tif policyErr != nil {
+    '''\texecCtx = enrichContextWithSessionHierarchy(execCtx, opts.Headers, req.Payload, opts.Metadata)
+\tif grant != nil {
+\t\texecCtx = grant.prepare(execCtx, &req, originalRequestedModel)
+\t}
+\texecCtx, interceptErr = admitAPIKeyQuota(execCtx)
+\tif interceptErr != nil {
+\t\tlifecycle.completeError(execCtx, interceptErr)
 \t\terrChan := make(chan *interfaces.ErrorMessage, 1)
-\t\terrChan <- policyErr
+\t\terrChan <- interceptErr
 \t\tclose(errChan)
 \t\treturn nil, nil, errChan
 \t}
-\tvar routeDecision modelRouteDecision
-\tif !h.isHomeLocalExecutorModel(modelName) {
-\t\tvar preparedRoute bool
-\t\trouteDecision, preparedRoute = preparedModelRouteFromContext(ctx, execOptions.SkipRouterPluginID)
-\t\tif !preparedRoute {
-\t\t\trouteDecision = h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, true, execOptions)
-\t\t}
-\t}
+\tvar reporter *helps.UsageReporter
 ''',
-    'ctx, modelName, rawJSON, policyErr = applyAPIKeyModelPolicy(h, ctx, modelName, rawJSON)',
+    'execCtx, interceptErr = admitAPIKeyQuota(execCtx)',
 )
 replace_once(
     handlers_stream_source,
