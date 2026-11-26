@@ -67,7 +67,7 @@ RUN set -eux; \
 COPY cliproxyapi-pro-core/embeddedusage /tmp/embeddedusage
 COPY cliproxyapi-pro-core/patches /tmp/patches
 
-RUN python3 /tmp/patches/apply_upstream_patches.py
+RUN python3 /tmp/patches/apply_upstream_patches.py\nRUN python3 /tmp/patches/apply_home_local_acp_fix.py
 
 RUN go mod tidy
 
