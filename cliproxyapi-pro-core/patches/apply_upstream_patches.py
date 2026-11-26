@@ -7802,16 +7802,19 @@ replace_once(
 
 # Recovery may observe an unavailable hint just before a balance refresh publishes.
 # Invalidate only the observation that justified cleanup, in local and Home modes.
-replace_once(
-    ROOT / 'internal/runtime/executor/antigravity_executor_credits.go',
-    '''	defer unlock()
+antigravity_credits = ROOT / 'internal/runtime/executor/antigravity_executor_credits.go'
+antigravity_credits_old = '''	defer unlock()
 	_, hadFailure := antigravityCreditsFailureByAuth.LoadAndDelete(key)
-	if hint, ok := cliproxyauth.GetAntigravityCreditsHintForAuth(auth); ok && hint.Known && !hint.Available {''',
-    '''	_, hadFailure := antigravityCreditsFailureByAuth.LoadAndDelete(key)
+	if hint, ok := cliproxyauth.GetAntigravityCreditsHintForAuth(auth); ok && hint.Known && !hint.Available {'''
+if antigravity_credits_old in read(antigravity_credits):
+    replace_once(
+        antigravity_credits,
+        antigravity_credits_old,
+        '''	_, hadFailure := antigravityCreditsFailureByAuth.LoadAndDelete(key)
 	hint, ok := cliproxyauth.GetAntigravityCreditsHintForAuth(auth)
 	unlock()
 	if ok && hint.Known && !hint.Available {''',
-)
+    )
 replace_once(
     ROOT / 'internal/runtime/executor/antigravity_executor_credits.go',
     '\t\t\tcliproxyauth.SetAntigravityCreditsHintForAuth(auth, cliproxyauth.AntigravityCreditsHint{})',
