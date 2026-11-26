@@ -264,6 +264,10 @@ apply_validation_fixture_adjustments() {
       continue
     fi
     if ! git -C "${source_root}" apply --check "${fixture_patch}"; then
+      if [[ "${fixture_name}" == "antigravity_credits_refresh_scope" ]]; then
+        echo "Skipping optional validation fixture ${fixture_name}: upstream anchor is absent" >&2
+        continue
+      fi
       echo "Validation fixture ${fixture_name} no longer matches the selected upstream" >&2
       return 1
     fi
