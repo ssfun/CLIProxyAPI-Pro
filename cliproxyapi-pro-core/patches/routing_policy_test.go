@@ -721,9 +721,8 @@ func TestRoutingRecoveryPreservesQuotaSuccessWhenUpstreamTimesOut(t *testing.T) 
 	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
 	}
-	previousTransport := http.DefaultTransport
-	http.DefaultTransport = transport
-	defer func() { http.DefaultTransport = previousTransport; transport.CloseIdleConnections() }()
+	ctx = context.WithValue(ctx, "cliproxy.roundtripper", transport)
+	t.Cleanup(transport.CloseIdleConnections)
 	h := &Handler{authManager: manager, configFilePath: t.TempDir() + "/config.yaml"}
 	t.Setenv("ACCOUNT_INSPECTION_SNAPSHOT_PATH", t.TempDir()+"/snapshot.json")
 	scheduler := newAccountInspectionScheduler(h, nil)
