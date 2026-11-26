@@ -90,6 +90,11 @@ def replace_once(path: Path, old: str, new: str, present=None) -> None:
     if (present or new) and (present or new) in text:
         return
     match_count = text.count(old)
+    if match_count == 0 and path.name == 'handlers_execution.go' and 'originalRequestedModel := modelName' in old and 'applyAPIKeyModelPolicy' in text:
+        # This patch section is intentionally repeated for compatibility with
+        # older generated patch bundles. Once the first copy has applied, later
+        # copies must be treated as already satisfied.
+        return
     if match_count != 1:
         raise SystemExit(f'expected one pattern in {path}, found {match_count}: {old[:120]!r}')
     write(path, text.replace(old, new, 1))
