@@ -3543,11 +3543,15 @@ replace_once(
 )
 replace_once(
     handlers_stream_source,
-    '''\tif !preparedRoute {
+    '''\tvar preparedRoute bool
+\trouteDecision, preparedRoute = preparedModelRouteFromContext(ctx, execOptions.SkipRouterPluginID)
+\tif !preparedRoute {
 \t\trouteDecision = h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, true, execOptions)
 \t}
 ''',
-    '''\tif !preparedRoute {
+    '''\tvar preparedRoute bool
+\trouteDecision, preparedRoute = preparedModelRouteFromContext(ctx, execOptions.SkipRouterPluginID)
+\tif !preparedRoute {
 \t\trouteDecision = h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, true, execOptions)
 \t}
 \tctx, modelName, rawJSON, policyErr = applyAPIKeyRoutedModelPolicy(ctx, modelName, rawJSON, &routeDecision)
