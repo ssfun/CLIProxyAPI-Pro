@@ -3324,7 +3324,10 @@ replace_once(
     '''\toriginalRequestedModel := modelName
 \t// Speech-only models are reachable solely through the speech entry protocol.
 \texecOptions.AllowSpeechModel = isModelExecutionSpeechProtocol(entryProtocol)
-\trouteDecision := h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, false, execOptions)
+\tvar routeDecision modelRouteDecision
+\tif !h.isHomeLocalExecutorModel(modelName) {
+\t\trouteDecision = h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, false, execOptions)
+\t}
 ''',
     '''\toriginalRequestedModel := modelName
 \t// Speech-only models are reachable solely through the speech entry protocol.
@@ -3334,7 +3337,10 @@ replace_once(
 \tif policyErr != nil {
 \t\treturn nil, nil, policyErr
 \t}
-\trouteDecision := h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, false, execOptions)
+\tvar routeDecision modelRouteDecision
+\tif !h.isHomeLocalExecutorModel(modelName) {
+\t\trouteDecision = h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, false, execOptions)
+\t}
 \tctx, modelName, rawJSON, policyErr = applyAPIKeyRoutedModelPolicy(ctx, modelName, rawJSON, &routeDecision)
 \tif policyErr != nil {
 \t\treturn nil, nil, policyErr
