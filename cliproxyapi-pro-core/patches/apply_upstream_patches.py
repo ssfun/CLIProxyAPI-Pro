@@ -3336,7 +3336,7 @@ replace_once(
 \t// Speech-only models are reachable solely through the speech entry protocol.
 \texecOptions.AllowSpeechModel = isModelExecutionSpeechProtocol(entryProtocol)
 \tvar policyErr *interfaces.ErrorMessage
-\tctx, modelName, rawJSON, policyErr = applyAPIKeyModelPolicy(h, ctx, modelName, rawJSON)
+\tvar policyErr *interfaces.ErrorMessage\n\tctx, modelName, rawJSON, policyErr = applyAPIKeyModelPolicy(h, ctx, modelName, rawJSON)
 \tif policyErr != nil {
 \t\treturn nil, nil, policyErr
 \t}

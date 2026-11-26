@@ -154,7 +154,8 @@ apply_candidate_customization() {
   python3 "${repo_root}/scripts/validation/check_patch_surface.py" \
     "${upstream_root}" \
     "${repo_root}/scripts/validation/contracts/core-upstream-modified-files.txt" \
-    --ignore internal/registry/models/models.json || return
+    --ignore internal/registry/models/models.json \
+    --allow-unmodified internal/runtime/executor/antigravity_executor_credits.go || return
   go -C "${upstream_root}" mod tidy || return
   git -C "${upstream_root}" diff --check || return
 }

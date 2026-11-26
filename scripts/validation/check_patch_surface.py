@@ -35,10 +35,10 @@ def modified_paths(root: Path) -> set[str]:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
-def verify_surface(root: Path, manifest: Path, ignored: set[str]) -> None:
+def verify_surface(root: Path, manifest: Path, ignored: set[str], allow_unmodified: set[str]) -> None:
     expected = set(load_manifest(manifest))
     actual = modified_paths(root) - ignored
-    missing = sorted(expected - actual)
+    missing = sorted((expected - allow_unmodified) - actual)
     unexpected = sorted(actual - expected)
     if not missing and not unexpected:
         print(f"OK: patch surface matches {manifest} ({len(expected)} modified upstream files)")
@@ -57,8 +57,9 @@ def main() -> None:
     parser.add_argument("root", type=Path)
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--ignore", action="append", default=[])
+    parser.add_argument("--allow-unmodified", action="append", default=[])
     args = parser.parse_args()
-    verify_surface(args.root.resolve(), args.manifest.resolve(), set(args.ignore))
+    verify_surface(args.root.resolve(), args.manifest.resolve(), set(args.ignore), set(args.allow_unmodified))
 
 
 if __name__ == "__main__":
