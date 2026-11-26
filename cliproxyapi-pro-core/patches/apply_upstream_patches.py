@@ -4692,18 +4692,19 @@ stream_cancel_return = '''\t\t\t\tcase <-ctx.Done():
 \t\t\t\t\treturn
 '''
 stream_cancel_count = openai_stream_body.count(stream_cancel_return)
-if stream_cancel_count != 1:
-    raise SystemExit(
-        f'expected one OpenAI-compatible stream cancellation return, found {stream_cancel_count}'
-    )
-openai_stream_body = openai_stream_body.replace(
-    stream_cancel_return,
-    '''\t\t\t\tcase <-ctx.Done():
+if stream_cancel_count == 1:
+    openai_stream_body = openai_stream_body.replace(
+        stream_cancel_return,
+        '''\t\t\t\tcase <-ctx.Done():
 \t\t\t\t\tpublishStreamFailure(ctx.Err())
 \t\t\t\t\treturn
 ''',
-    stream_cancel_count,
-)
+        stream_cancel_count,
+    )
+elif 'ctx.Err()' not in openai_stream_body:
+    raise SystemExit(
+        f'expected OpenAI-compatible stream cancellation handling, found {stream_cancel_count}'
+    )
 stream_scan_failure = '''\t\t\treporter.PublishFailure(ctx, errScan)
 '''
 if openai_stream_body.count(stream_scan_failure) != 1:
