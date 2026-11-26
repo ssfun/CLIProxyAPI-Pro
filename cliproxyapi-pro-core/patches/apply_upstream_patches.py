@@ -7815,11 +7815,13 @@ if antigravity_credits_old in read(antigravity_credits):
 	unlock()
 	if ok && hint.Known && !hint.Available {''',
     )
-replace_once(
-    ROOT / 'internal/runtime/executor/antigravity_executor_credits.go',
-    '\t\t\tcliproxyauth.SetAntigravityCreditsHintForAuth(auth, cliproxyauth.AntigravityCreditsHint{})',
-    '\t\t\tcliproxyauth.CompareAndSwapAntigravityCreditsHintForAuth(auth, hint, cliproxyauth.AntigravityCreditsHint{})',
-)
+antigravity_executor_credits = ROOT / 'internal/runtime/executor/antigravity_executor_credits.go'
+if '\t\t\tcliproxyauth.SetAntigravityCreditsHintForAuth(auth, cliproxyauth.AntigravityCreditsHint{})' in read(antigravity_executor_credits):
+    replace_once(
+        antigravity_executor_credits,
+        '\t\t\tcliproxyauth.SetAntigravityCreditsHintForAuth(auth, cliproxyauth.AntigravityCreditsHint{})',
+        '\t\t\tcliproxyauth.CompareAndSwapAntigravityCreditsHintForAuth(auth, hint, cliproxyauth.AntigravityCreditsHint{})',
+    )
 queue_go_source('sdk/cliproxy/auth/antigravity_credits_recovery_pro.go')
 queue_go_source('sdk/cliproxy/auth/antigravity_credits_recovery_pro_test.go')
 
