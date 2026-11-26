@@ -3484,6 +3484,9 @@ replace_once(
 replace_once(
     handlers_execution_source,
     '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
+\tif grant != nil {
+\t\tctx = grant.prepare(ctx, &req, originalRequestedModel)
+\t}
 \tresp, errCount := host.CountPluginExecutor(ctx, executorPluginID, req, opts)
 ''',
     '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
