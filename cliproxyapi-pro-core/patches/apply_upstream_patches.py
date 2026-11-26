@@ -54,18 +54,19 @@ def format_go_writes(relative_paths: list[str]) -> None:
     changed_paths = [relative_path for relative_path in relative_paths if ROOT / relative_path in _writes]
     if not changed_paths:
         return
+    relative_paths = changed_paths
 
     with tempfile.TemporaryDirectory(prefix='cliproxyapi-pro-gofmt-') as temp_dir:
         temp_root = Path(temp_dir)
-        for relative_path in changed_paths:
+        for relative_path in relative_paths:
             path = ROOT / relative_path
             temp_path = temp_root / relative_path
             temp_path.parent.mkdir(parents=True, exist_ok=True)
             write_text(temp_path, read(path))
 
-        subprocess.run(['gofmt', '-w', *changed_paths], cwd=temp_root, check=True)
+        subprocess.run(['gofmt', '-w', *relative_paths], cwd=temp_root, check=True)
 
-        for relative_path in changed_paths:
+        for relative_path in relative_paths:
             write(ROOT / relative_path, read_text(temp_root / relative_path))
 
 
