@@ -3161,7 +3161,7 @@ insert_before(
     '''func applyAPIKeyModelPolicy(h *BaseAPIHandler, ctx context.Context, modelName string, rawJSON []byte) (context.Context, string, []byte, *interfaces.ErrorMessage) {
 \tif strings.HasPrefix(modelName, "acp/") {
 \t\thomeModel := strings.TrimPrefix(modelName, "acp/")
-\t\tif h != nil && h.isHomeLocalExecutorModel(homeModel) {
+\t\tif h != nil && h.AuthManager != nil && h.AuthManager.HomeEnabled() {
 \t\t\tmodelName = homeModel
 \t\t\tif len(rawJSON) > 0 {
 \t\t\t\tif updated, errSet := ojson.SetBytes(rawJSON, "model", modelName); errSet == nil {
