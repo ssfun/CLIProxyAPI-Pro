@@ -3160,10 +3160,13 @@ insert_before(
     'func (h *BaseAPIHandler) getRequestDetails(modelName string) (providers []string, normalizedModel string, err *interfaces.ErrorMessage) {\n',
     '''func applyAPIKeyModelPolicy(h *BaseAPIHandler, ctx context.Context, modelName string, rawJSON []byte) (context.Context, string, []byte, *interfaces.ErrorMessage) {
 \tif strings.HasPrefix(modelName, "acp/") {
-\t\tmodelName = strings.TrimPrefix(modelName, "acp/")
-\t\tif len(rawJSON) > 0 {
-\t\t\tif updated, errSet := ojson.SetBytes(rawJSON, "model", modelName); errSet == nil {
-\t\t\t\trawJSON = updated
+\t\thomeModel := strings.TrimPrefix(modelName, "acp/")
+\t\tif h != nil && h.isHomeLocalExecutorModel(homeModel) {
+\t\t\tmodelName = homeModel
+\t\t\tif len(rawJSON) > 0 {
+\t\t\t\tif updated, errSet := ojson.SetBytes(rawJSON, "model", modelName); errSet == nil {
+\t\t\t\t\trawJSON = updated
+\t\t\t\t}
 \t\t\t}
 \t\t}
 \t}
