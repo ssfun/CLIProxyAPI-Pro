@@ -97,9 +97,8 @@ func TestInspectionProviderCoverageHTTPAndSQLite(t *testing.T) {
 			transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
 				return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
 			}
-			previous := http.DefaultTransport
-			http.DefaultTransport = transport
-			defer func() { http.DefaultTransport = previous; transport.CloseIdleConnections() }()
+			ctx = context.WithValue(ctx, "cliproxy.roundtripper", transport)
+			t.Cleanup(transport.CloseIdleConnections)
 			h := &Handler{authManager: manager, pluginHost: pluginhost.New()}
 			s := &accountInspectionScheduler{h: h, quota: accountInspectionQuotaAdapter{h: h}}
 			account := accountFromAuth(auth)
@@ -268,9 +267,8 @@ func TestInspectionRealDevinOAuthHTTPAndSQLite(t *testing.T) {
 	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
 	}
-	previous := http.DefaultTransport
-	http.DefaultTransport = transport
-	defer func() { http.DefaultTransport = previous; transport.CloseIdleConnections() }()
+	ctx = context.WithValue(ctx, "cliproxy.roundtripper", transport)
+	t.Cleanup(transport.CloseIdleConnections)
 	auth, err := devinauth.NewDevinAuthService(&http.Client{Transport: transport}).CreateAuthRecord(ctx, "eyJ.fixture.token")
 	if err != nil {
 		t.Fatal(err)
