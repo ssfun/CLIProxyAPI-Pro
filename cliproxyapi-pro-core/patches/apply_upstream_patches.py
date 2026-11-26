@@ -3396,7 +3396,10 @@ replace_once(
     handlers_execution_source,
     '''func (h *BaseAPIHandler) executeCountWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string, execOptions modelExecutionOptions) ([]byte, http.Header, *interfaces.ErrorMessage) {
 \toriginalRequestedModel := modelName
-\trouteDecision := h.applyModelRouter(ctx, handlerType, modelName, rawJSON, false, execOptions)
+\tvar routeDecision modelRouteDecision
+\tif !h.isHomeLocalExecutorModel(modelName) {
+\t\trouteDecision = h.applyModelRouter(ctx, handlerType, modelName, rawJSON, false, execOptions)
+\t}
 ''',
     '''func (h *BaseAPIHandler) executeCountWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string, execOptions modelExecutionOptions) ([]byte, http.Header, *interfaces.ErrorMessage) {
 \toriginalRequestedModel := modelName
