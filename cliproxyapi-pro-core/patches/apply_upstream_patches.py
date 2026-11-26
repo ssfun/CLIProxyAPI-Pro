@@ -3159,6 +3159,14 @@ insert_before(
     handlers_routing_source,
     'func (h *BaseAPIHandler) getRequestDetails(modelName string) (providers []string, normalizedModel string, err *interfaces.ErrorMessage) {\n',
     '''func applyAPIKeyModelPolicy(h *BaseAPIHandler, ctx context.Context, modelName string, rawJSON []byte) (context.Context, string, []byte, *interfaces.ErrorMessage) {
+\tif strings.HasPrefix(modelName, "acp/") {
+\t\tmodelName = strings.TrimPrefix(modelName, "acp/")
+\t\tif len(rawJSON) > 0 {
+\t\t\tif updated, errSet := ojson.SetBytes(rawJSON, "model", modelName); errSet == nil {
+\t\t\t\trawJSON = updated
+\t\t\t}
+\t\t}
+\t}
 \tdecision, configured := apikeypolicy.DecisionFromContext(ctx)
 \tif !configured {
 \t\treturn ctx, modelName, rawJSON, nil
