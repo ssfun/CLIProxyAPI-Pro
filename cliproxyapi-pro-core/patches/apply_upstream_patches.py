@@ -3408,7 +3408,10 @@ replace_once(
 \tif policyErr != nil {
 \t\treturn nil, nil, policyErr
 \t}
-\trouteDecision := h.applyModelRouter(ctx, handlerType, modelName, rawJSON, false, execOptions)
+\tvar routeDecision modelRouteDecision
+\tif !h.isHomeLocalExecutorModel(modelName) {
+\t\trouteDecision = h.applyModelRouter(ctx, handlerType, modelName, rawJSON, false, execOptions)
+\t}
 \tctx, modelName, rawJSON, policyErr = applyAPIKeyRoutedModelPolicy(ctx, modelName, rawJSON, &routeDecision)
 \tif policyErr != nil {
 \t\treturn nil, nil, policyErr
