@@ -251,11 +251,7 @@ func (s *accountInspectionScheduler) apiCall(ctx context.Context, auth *coreauth
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
 		return accountInspectionHTTPResult{StatusCode: resp.StatusCode, Body: string(raw), Header: resp.Header.Clone()}, nil
 	}
-	transport := s.h.apiCallTransport(auth)
-	if rt, ok := reqCtx.Value("cliproxy.roundtripper").(http.RoundTripper); ok && rt != nil {
-		transport = rt
-	}
-	client := &http.Client{Timeout: time.Duration(timeoutMS) * time.Millisecond, Transport: transport}
+	client := &http.Client{Timeout: time.Duration(timeoutMS) * time.Millisecond, Transport: s.h.apiCallTransport(auth)}
 	requestStartedAt := time.Now()
 	defer func() { inspectionMetricsRecordRequest(ctx, url, time.Since(requestStartedAt)) }()
 	resp, err := client.Do(req)
