@@ -1,6 +1,9 @@
 package pluginhost
 
-import (\n\t"context"\n\t"strings"\n)
+import (
+	"context"
+	"strings"
+)
 
 // PluginExecutorProvider resolves the normalized execution provider declared by a plugin executor.
 func (h *Host) PluginExecutorProvider(pluginID string) (string, bool) {
