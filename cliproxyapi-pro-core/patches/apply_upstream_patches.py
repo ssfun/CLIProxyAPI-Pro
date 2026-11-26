@@ -3550,17 +3550,13 @@ replace_once(
 )
 replace_once(
     handlers_stream_source,
-    '''\tvar preparedRoute bool
-\trouteDecision, preparedRoute = preparedModelRouteFromContext(ctx, execOptions.SkipRouterPluginID)
-\tif !preparedRoute {
-\t\trouteDecision = h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, true, execOptions)
-\t}
+    '''\t\tif !preparedRoute {
+\t\t\trouteDecision = h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, true, execOptions)
+\t\t}
 ''',
-    '''\tvar preparedRoute bool
-\trouteDecision, preparedRoute = preparedModelRouteFromContext(ctx, execOptions.SkipRouterPluginID)
-\tif !preparedRoute {
-\t\trouteDecision = h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, true, execOptions)
-\t}
+    '''\t\tif !preparedRoute {
+\t\t\trouteDecision = h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, true, execOptions)
+\t\t}
 \tctx, modelName, rawJSON, policyErr = applyAPIKeyRoutedModelPolicy(ctx, modelName, rawJSON, &routeDecision)
 \tif policyErr != nil {
 \t\terrChan := make(chan *interfaces.ErrorMessage, 1)
