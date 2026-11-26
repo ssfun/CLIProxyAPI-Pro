@@ -9,8 +9,7 @@ on:
         default: false
         type: boolean
   schedule:
-    - cron: '0 */3 * * *'
-      timezone: 'Asia/Shanghai'
+    - cron: '0 1,4,7,10,13,16,19,22 * * *'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
