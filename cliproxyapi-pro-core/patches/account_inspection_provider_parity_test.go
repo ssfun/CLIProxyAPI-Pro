@@ -143,9 +143,8 @@ func TestOtherProviderQuotaParityHTTPAndSQLite(t *testing.T) {
 			transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
 				return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
 			}
-			previous := http.DefaultTransport
-			http.DefaultTransport = transport
-			defer func() { http.DefaultTransport = previous; transport.CloseIdleConnections() }()
+			ctx = context.WithValue(ctx, "cliproxy.roundtripper", transport)
+			t.Cleanup(transport.CloseIdleConnections)
 			scheduler := &accountInspectionScheduler{h: &Handler{authManager: manager}}
 			account := accountFromAuth(auth)
 			settings := proinspection.DefaultSettings()
