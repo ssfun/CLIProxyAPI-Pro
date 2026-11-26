@@ -3537,7 +3537,14 @@ replace_once(
 \t\tclose(errChan)
 \t\treturn nil, nil, errChan
 \t}
-\trouteDecision, preparedRoute := preparedModelRouteFromContext(ctx, execOptions.SkipRouterPluginID)
+\tvar routeDecision modelRouteDecision
+\tif !h.isHomeLocalExecutorModel(modelName) {
+\t\tvar preparedRoute bool
+\t\trouteDecision, preparedRoute = preparedModelRouteFromContext(ctx, execOptions.SkipRouterPluginID)
+\t\tif !preparedRoute {
+\t\t\trouteDecision = h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, true, execOptions)
+\t\t}
+\t}
 ''',
     'ctx, modelName, rawJSON, policyErr = applyAPIKeyModelPolicy(h, ctx, modelName, rawJSON)',
 )
