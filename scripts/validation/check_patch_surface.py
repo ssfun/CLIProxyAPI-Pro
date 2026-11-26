@@ -35,7 +35,8 @@ def modified_paths(root: Path) -> set[str]:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
-def verify_surface(root: Path, manifest: Path, ignored: set[str], allow_unmodified: set[str]) -> None:
+def verify_surface(root: Path, manifest: Path, ignored: set[str], allow_unmodified: set[str] | None = None) -> None:
+    allow_unmodified = allow_unmodified or set()
     expected = set(load_manifest(manifest))
     actual = modified_paths(root) - ignored
     missing = sorted((expected - allow_unmodified) - actual)
