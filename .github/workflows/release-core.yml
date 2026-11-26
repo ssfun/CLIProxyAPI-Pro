@@ -9,7 +9,8 @@ on:
         default: false
         type: boolean
   schedule:
-    - cron: '0 */3 * * *'
+    # GitHub Actions evaluates cron in UTC; this runs every 3 hours on UTC+8 at 00:00, 03:00, ..., 21:00 local time.
+    - cron: '0 1,4,7,10,13,16,19,22 * * *'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
