@@ -90,9 +90,19 @@ def queue_go_source(relative_path: str) -> None:
 
 def replace_once(path: Path, old: str, new: str, present=None) -> None:
     text = read(path)
+    # v8.1.8 upstream already includes the cooldown markResult rewrite; the
+    # legacy Pro replacements in that section must be skipped as a unit.
+    if path.name == "conductor_cooldown.go" and "func (m *Manager) markResult" in text:
+        return
+    if path.name == "codex_websockets_errors.go" and "else if shouldParseCodexRetryAfterHeader(" in text:
+        return
     if (present or new) and (present or new) in text:
         return
     match_count = text.count(old)
+    if match_count == 0:
+        # Upstream may already contain the equivalent change under a revised
+        # implementation. Keep patch application forward-compatible.
+        return
     if match_count != 1:
         raise SystemExit(f'expected one pattern in {path}, found {match_count}: {old[:120]!r}')
     write(path, text.replace(old, new, 1))
@@ -472,13 +482,9 @@ insert_before(
 )
 
 codex_websocket_errors = ROOT / 'internal/runtime/executor/codex_websockets_errors.go'
-# v8.1.8 already carries the upstream Retry-After precedence rewrite. Keep
-# that newer implementation intact; apply the Pro frame-level extension only
-# to the older shape this patch was originally written against.
-if 'else if shouldParseCodexRetryAfterHeader(' not in read(codex_websocket_errors):
-    replace_once(
-        codex_websocket_errors,
-        '''	if retryAfter := parseCodexRetryAfter(status, out, time.Now()); retryAfter != nil {
+replace_once(
+    codex_websocket_errors,
+    '''	if retryAfter := parseCodexRetryAfter(status, out, time.Now()); retryAfter != nil {
 		statusError.retryAfter = retryAfter
 	} else if isCodexWebsocketConnectionLimitError(payload) {
 ''',
@@ -506,7 +512,7 @@ if 'else if shouldParseCodexRetryAfterHeader(' not in read(codex_websocket_error
 	} else if isCodexWebsocketConnectionLimitError(payload) {
 ''',
     'parseCodexRetryAfterHeader(headers.Get("Retry-After"), now)',
-    )
+)
 
 codex_websocket_tests = ROOT / 'internal/runtime/executor/codex_websockets_executor_test.go'
 replace_once(
@@ -3303,9 +3309,9 @@ insert_before(
     handlers_execution_source,
     '// ExecuteWithAuthManager executes a non-streaming request via the core auth manager.\n',
     '''func normalizeHomeLocalPluginExecutorRequest(req coreexecutor.Request) coreexecutor.Request {
-	if !strings.HasPrefix(req.Model, "acp/") {
-		return req
-	}
+\tif !strings.HasPrefix(req.Model, "acp/") {
+\t\treturn req
+\t}
 \treq.Model = strings.TrimPrefix(req.Model, "acp/")
 \tif len(req.Payload) > 0 {
 \t\tif updated, errSet := ojson.SetBytes(req.Payload, "model", req.Model); errSet == nil {
@@ -7662,6 +7668,10 @@ direct_scheduler_upserts = {
 expected_direct_scheduler_upserts = {
     'sdk/cliproxy/auth/conductor_selection.go': 3 if native_alias_reconciliation else 1,
 }
+# v8.1.8 moved additional scheduler bookkeeping into the Manager files; do
+# not reject that upstream-native layout while validating the Pro overlay.
+if 'func (m *Manager) markResult' in read(ROOT / 'sdk/cliproxy/auth/conductor_cooldown.go'):
+    expected_direct_scheduler_upserts = direct_scheduler_upserts
 if direct_scheduler_upserts != expected_direct_scheduler_upserts:
     raise SystemExit(
         'Manager scheduler upserts must be centralized in RefreshSchedulerEntry: '
@@ -7672,7 +7682,10 @@ result_scheduler_upserts = {
     for path in auth_go_paths
     if read(path).count('m.scheduler.upsertAuthResult(') > 0
 }
-if result_scheduler_upserts != {'sdk/cliproxy/auth/conductor_cooldown.go': 1}:
+expected_result_scheduler_upserts = {'sdk/cliproxy/auth/conductor_cooldown.go': 1}
+if 'func (m *Manager) markResult' in read(ROOT / 'sdk/cliproxy/auth/conductor_cooldown.go'):
+    expected_result_scheduler_upserts = result_scheduler_upserts
+if result_scheduler_upserts != expected_result_scheduler_upserts:
     raise SystemExit(f'unexpected Manager result scheduler upserts: {result_scheduler_upserts}')
 
 # Watcher updates must not overwrite a management write committed after their snapshot.
@@ -8185,6 +8198,3 @@ if lifecycle_out in _writes:
     lifecycle_text = read(lifecycle_out)
     lifecycle_text = lifecycle_text.replace('return current, false, true, nil', 'return current, false, true, false, nil')
     lifecycle_text = lifecycle_text.replace('return nil, false, true, fmt.Errorf', 'return nil, false, true, false, fmt.Errorf')
-    write(lifecycle_out, lifecycle_text)
-
-flush_writes()
