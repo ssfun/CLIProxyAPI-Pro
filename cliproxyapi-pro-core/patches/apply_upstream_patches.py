@@ -475,7 +475,7 @@ codex_websocket_errors = ROOT / 'internal/runtime/executor/codex_websockets_erro
 # v8.1.8 already carries the upstream Retry-After precedence rewrite. Keep
 # that newer implementation intact; apply the Pro frame-level extension only
 # to the older shape this patch was originally written against.
-if 'else if shouldParseCodexRetryAfterHeader(status)' not in read(codex_websocket_errors):
+if 'else if shouldParseCodexRetryAfterHeader(' not in read(codex_websocket_errors):
     replace_once(
         codex_websocket_errors,
         '''	if retryAfter := parseCodexRetryAfter(status, out, time.Now()); retryAfter != nil {
