@@ -100,9 +100,11 @@ def replace_once(path: Path, old: str, new: str, present=None) -> None:
         return
     match_count = text.count(old)
     if match_count == 0:
-        # Upstream may already contain the equivalent change under a revised
-        # implementation. Keep patch application forward-compatible.
-        return
+        if path.name == "service_auth.go":
+            return
+        if path.name == "codex_websockets_errors.go" and "else if shouldParseCodexRetryAfterHeader(" in text:
+            return
+        raise SystemExit(f'expected one pattern in {path}, found {match_count}: {old[:120]!r}')
     if match_count != 1:
         raise SystemExit(f'expected one pattern in {path}, found {match_count}: {old[:120]!r}')
     write(path, text.replace(old, new, 1))
@@ -8212,5 +8214,3 @@ if lifecycle_out in _writes:
     lifecycle_text = lifecycle_text.replace('return current, false, true, nil', 'return current, false, true, false, nil')
     lifecycle_text = lifecycle_text.replace('return nil, false, true, fmt.Errorf', 'return nil, false, true, false, fmt.Errorf')
     write(lifecycle_out, lifecycle_text)
-
-flush_writes()
