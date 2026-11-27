@@ -8214,3 +8214,5 @@ if lifecycle_out in _writes:
     lifecycle_text = lifecycle_text.replace('return current, false, true, nil', 'return current, false, true, false, nil')
     lifecycle_text = lifecycle_text.replace('return nil, false, true, fmt.Errorf', 'return nil, false, true, false, fmt.Errorf')
     write(lifecycle_out, lifecycle_text)
+
+flush_writes()
