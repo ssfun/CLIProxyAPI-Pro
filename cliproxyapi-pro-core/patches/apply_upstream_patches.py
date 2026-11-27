@@ -6770,6 +6770,19 @@ queue_go_source('internal/api/handlers/management/xai_quota_id_token_http_test.g
 queue_go_source('sdk/cliproxy/auth/inspection_refresh_test.go')
 queue_go_source('internal/runtime/executor/inspection_refresh_compat_test.go')
 queue_go_source('sdk/cliproxy/auth/pinned_execution.go')
+# v8.1.8 exposes Manager.MarkResult from the upstream cooldown implementation.
+# Keep the Pro pinned helpers, but omit their compatibility forwarding method to
+# avoid declaring MarkResult twice.
+pinned_execution_target = ROOT / 'sdk/cliproxy/auth/pinned_execution.go'
+if 'func (m *Manager) MarkResult' in read(ROOT / 'sdk/cliproxy/auth/conductor_cooldown.go'):
+    pinned_text = read(pinned_execution_target)
+    pinned_text = re.sub(
+        r'// MarkResult retains the upstream API for ordinary request accounting\.\nfunc \(m \*Manager\) MarkResult\(ctx context\.Context, result Result\) \{\n\tm\.markResult\(ctx, result\)\n\}\n\n',
+        '',
+        pinned_text,
+        count=1,
+    )
+    write(pinned_execution_target, pinned_text)
 
 auth_types = ROOT / 'sdk/cliproxy/auth/types.go'
 replace_once(
