@@ -3906,7 +3906,7 @@ replace_once(
 )
 
 gemini_handlers_source = ROOT / 'sdk/api/handlers/gemini/gemini_handlers.go'
-add_go_import(gemini_handlers_source, '"context"\n', '"encoding/json"\n')
+add_go_import(gemini_handlers_source, '"context"\n', 'stdjson "encoding/json"\n')
 insert_before(
     gemini_handlers_source,
     'func (h *GeminiAPIHandler) GeminiModels(c *gin.Context) {\n',
@@ -3921,7 +3921,7 @@ insert_before(
 \t\t\tCode    string `json:"code"`
 \t\t} `json:"error"`
 \t}
-\tif msg != nil && msg.Error != nil && json.Unmarshal([]byte(msg.Error.Error()), &policyEnvelope) == nil &&
+\tif msg != nil && msg.Error != nil && stdjson.Unmarshal([]byte(msg.Error.Error()), &policyEnvelope) == nil &&
 \t\t(strings.HasPrefix(policyEnvelope.Error.Code, "profile_") || strings.HasPrefix(policyEnvelope.Error.Code, "api_key_policy_")) {
 \t\tstatusName := "UNAVAILABLE"
 \t\tif status == http.StatusForbidden {
