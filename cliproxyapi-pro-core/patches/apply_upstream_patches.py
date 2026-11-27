@@ -472,9 +472,13 @@ insert_before(
 )
 
 codex_websocket_errors = ROOT / 'internal/runtime/executor/codex_websockets_errors.go'
-replace_once(
-    codex_websocket_errors,
-    '''	if retryAfter := parseCodexRetryAfter(status, out, time.Now()); retryAfter != nil {
+# v8.1.8 already carries the upstream Retry-After precedence rewrite. Keep
+# that newer implementation intact; apply the Pro frame-level extension only
+# to the older shape this patch was originally written against.
+if 'else if shouldParseCodexRetryAfterHeader(status)' not in read(codex_websocket_errors):
+    replace_once(
+        codex_websocket_errors,
+        '''	if retryAfter := parseCodexRetryAfter(status, out, time.Now()); retryAfter != nil {
 		statusError.retryAfter = retryAfter
 	} else if isCodexWebsocketConnectionLimitError(payload) {
 ''',
@@ -502,7 +506,7 @@ replace_once(
 	} else if isCodexWebsocketConnectionLimitError(payload) {
 ''',
     'parseCodexRetryAfterHeader(headers.Get("Retry-After"), now)',
-)
+    )
 
 codex_websocket_tests = ROOT / 'internal/runtime/executor/codex_websockets_executor_test.go'
 replace_once(
