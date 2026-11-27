@@ -6772,6 +6772,28 @@ queue_go_source('internal/api/handlers/management/xai_quota_id_token_http_test.g
 queue_go_source('sdk/cliproxy/auth/inspection_refresh_test.go')
 queue_go_source('internal/runtime/executor/inspection_refresh_compat_test.go')
 queue_go_source('sdk/cliproxy/auth/pinned_execution.go')
+# v8.1.8 already contains the Pro-style markResult split, but not the pinned
+# identity fence. Add only the missing atomic guards instead of replacing the
+# upstream implementation wholesale.
+pinned_cooldown_target = ROOT / 'sdk/cliproxy/auth/conductor_cooldown.go'
+if 'func (m *Manager) markResult' in read(pinned_cooldown_target):
+    cooldown_text = read(pinned_cooldown_target)
+    cooldown_anchor = '''\treleaseMutation := m.lockAuthMutation(result.AuthID)
+\tdefer releaseMutation()
+\tm.mu.Lock()
+\tif auth, ok := m.auths[result.AuthID]; ok && auth != nil {'''
+    cooldown_guard = '''\treleaseMutation := m.lockAuthMutation(result.AuthID)
+\tdefer releaseMutation()
+\tm.mu.Lock()
+\tif !pinnedResultIdentityMatches(result, m.auths[result.AuthID]) {
+\t\tm.mu.Unlock()
+\t\treturn false
+\t}
+\tif auth, ok := m.auths[result.AuthID]; ok && auth != nil {'''
+    if cooldown_anchor in cooldown_text and 'pinnedResultIdentityMatches(result, m.auths[result.AuthID])' not in cooldown_text:
+        cooldown_text = cooldown_text.replace(cooldown_anchor, cooldown_guard, 1)
+    cooldown_text = cooldown_text.replace('\t\t\t} else if wasTerminalUnauthorized {', '\t\t\t} else if wasTerminalUnauthorized && result.Options.Metadata[pinnedResultIdentityKey] != nil {', 1)
+    write(pinned_cooldown_target, cooldown_text)
 # v8.1.8 exposes Manager.MarkResult from the upstream cooldown implementation.
 # Keep the Pro pinned helpers, but omit their compatibility forwarding method to
 # avoid declaring MarkResult twice.
