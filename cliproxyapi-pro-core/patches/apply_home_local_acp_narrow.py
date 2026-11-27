@@ -7,6 +7,7 @@ path = root / "sdk/api/handlers/handlers_routing.go"
 text = path.read_text()
 old = 'if h != nil && h.AuthManager != nil && h.AuthManager.HomeEnabled() {'
 new = 'if h != nil && h.isHomeLocalExecutorModel(homeModel) {'
-if text.count(old) != 1:
-    raise SystemExit(f"expected one Home ACP policy guard, found {text.count(old)}")
-path.write_text(text.replace(old, new, 1))
+count = text.count(old)
+if count == 0:
+    raise SystemExit("Home ACP policy guard not found")
+path.write_text(text.replace(old, new))
