@@ -3336,7 +3336,7 @@ add_go_import(handlers_execution_source, 'import (\n', '\t\"github.com/MoeForge/
 insert_before(
     handlers_execution_source,
     '// ExecuteWithAuthManager executes a non-streaming request via the core auth manager.\n',
-    '''func normalizeHomeLocalPluginExecutorRequest(req coreexecutor.Request) coreexecutor.Request {
+    '''func normalizeHomeLocalPluginExecutorRequest(req coreexecutor.Request, opts *coreexecutor.Options) coreexecutor.Request {
 \tif !strings.HasPrefix(req.Model, "acp/") {
 \t\treturn req
 \t}
@@ -3346,7 +3346,7 @@ insert_before(
 \t\t\treq.Payload = updated
 \t\t}
 \t}
-\tif len(req.OriginalRequest) > 0 {\n\t\tif updated, errSet := ojson.SetBytes(req.OriginalRequest, "model", req.Model); errSet == nil {\n\t\t\treq.OriginalRequest = updated\n\t\t}\n\t}\n\treturn req
+\tif opts != nil && len(opts.OriginalRequest) > 0 {\n\t\tif updated, errSet := ojson.SetBytes(opts.OriginalRequest, "model", req.Model); errSet == nil {\n\t\t\topts.OriginalRequest = updated\n\t\t}\n\t}\n\t\treturn req
 }
 
 ''',
@@ -3582,20 +3582,20 @@ handlers_stream_source = ROOT / 'sdk/api/handlers/handlers_stream.go'
 insert_after_regex(
     handlers_stream_source,
     r'(?m)^\treq, opts, interceptErr = h\.applyRequestInterceptorsAfterPluginExecutorRoute\(execCtx, host, executorPluginID, entryProtocol, originalRequestedModel, lifecycle\.requestID\(\), req, opts, execOptions\.SkipInterceptorPluginID\)$',
-    '\n\tif execOptions.homeLocalExecutor != nil {\n\t\treq = normalizeHomeLocalPluginExecutorRequest(req)\n\t}',
+    '\n\tif execOptions.homeLocalExecutor != nil {\n\t\treq = normalizeHomeLocalPluginExecutorRequest(req, &opts)\n\t}',
     'home-local guarded request normalization',
 )
 
 insert_after_regex(
     handlers_execution_source,
     r'(?m)^\treq, opts, interceptErr = h\.applyRequestInterceptorsAfterPluginExecutorRoute\(execCtx, host, executorPluginID, entryProtocol, originalRequestedModel, lifecycle\.requestID\(\), req, opts, execOptions\.SkipInterceptorPluginID\)$',
-    '\n\tif execOptions.homeLocalExecutor != nil {\n\t\treq = normalizeHomeLocalPluginExecutorRequest(req)\n\t}',
+    '\n\tif execOptions.homeLocalExecutor != nil {\n\t\treq = normalizeHomeLocalPluginExecutorRequest(req, &opts)\n\t}',
     'home-local guarded request normalization',
 )
 insert_after_regex(
     handlers_execution_source,
     r'(?m)^\treq, opts, interceptErr = h\.applyRequestInterceptorsAfterPluginExecutorRoute\(ctx, host, executorPluginID, handlerType, originalRequestedModel, lifecycle\.requestID\(\), req, opts, execOptions\.SkipInterceptorPluginID\)$',
-    '\n\tif execOptions.homeLocalExecutor != nil {\n\t\treq = normalizeHomeLocalPluginExecutorRequest(req)\n\t}',
+    '\n\tif execOptions.homeLocalExecutor != nil {\n\t\treq = normalizeHomeLocalPluginExecutorRequest(req, &opts)\n\t}',
     'home-local guarded request normalization',
 )
 replace_once(
