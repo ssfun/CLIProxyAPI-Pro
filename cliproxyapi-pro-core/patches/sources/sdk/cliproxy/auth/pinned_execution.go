@@ -99,7 +99,7 @@ func pinnedRestrictionFingerprint(auth *Auth) string {
 		return ""
 	}
 	return pinnedFingerprint([]any{auth.Disabled, auth.Status, auth.Unavailable,
-		auth.UpdatedAt, auth.NextRetryAfter, auth.Quota, auth.LastError, auth.ModelStates})
+		auth.NextRetryAfter, auth.Quota, auth.LastError, auth.ModelStates})
 }
 
 func pinnedResultIdentityMatches(result Result, auth *Auth) bool {
