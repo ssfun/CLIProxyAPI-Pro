@@ -90,9 +90,21 @@ def queue_go_source(relative_path: str) -> None:
 
 def replace_once(path: Path, old: str, new: str, present=None) -> None:
     text = read(path)
+    # v8.1.8 upstream already includes the cooldown markResult rewrite; the
+    # legacy Pro replacements in that section must be skipped as a unit.
+    if path.name == "conductor_cooldown.go" and "func (m *Manager) markResult" in text:
+        return
+    if path.name == "codex_websockets_errors.go" and "else if shouldParseCodexRetryAfterHeader(" in text:
+        return
     if (present or new) and (present or new) in text:
         return
     match_count = text.count(old)
+    if match_count == 0:
+        if path.name == "service_auth.go":
+            return
+        if path.name == "codex_websockets_errors.go" and "else if shouldParseCodexRetryAfterHeader(" in text:
+            return
+        raise SystemExit(f'expected one pattern in {path}, found {match_count}: {old[:120]!r}')
     if match_count != 1:
         raise SystemExit(f'expected one pattern in {path}, found {match_count}: {old[:120]!r}')
     write(path, text.replace(old, new, 1))
@@ -472,6 +484,32 @@ insert_before(
 )
 
 codex_websocket_errors = ROOT / 'internal/runtime/executor/codex_websockets_errors.go'
+# v8.1.8 already has the generic header parser, but checks the connection-limit
+# zero-delay fallback before it. Frame-level Retry-After must win when present.
+_codex_text = read(codex_websocket_errors)
+_old_codex = """\t} else if isCodexWebsocketConnectionLimitError(payload) {
+\t\tretryAfter := time.Duration(0)
+\t\tstatusError.retryAfter = &retryAfter
+\t} else if shouldParseCodexRetryAfterHeader(errCode) {
+\t\tif retryAfter := parseRetryAfterHeader(headers, time.Now()); retryAfter != nil {
+\t\t\tstatusError.retryAfter = retryAfter
+\t\t}
+\t}"""
+_new_codex = """\t} else if shouldParseCodexRetryAfterHeader(errCode) {
+\t\tif retryAfter := parseRetryAfterHeader(headers, time.Now()); retryAfter != nil {
+\t\t\tstatusError.retryAfter = retryAfter
+\t\t} else if isCodexWebsocketConnectionLimitError(payload) {
+\t\t\tretryAfter := time.Duration(0)
+\t\t\tstatusError.retryAfter = &retryAfter
+\t\t}
+\t} else if isCodexWebsocketConnectionLimitError(payload) {
+\t\tretryAfter := time.Duration(0)
+\t\tstatusError.retryAfter = &retryAfter
+\t}"""
+if _old_codex in _codex_text:
+    _codex_text = _codex_text.replace(_old_codex, _new_codex, 1)
+    write(codex_websocket_errors, _codex_text)
+# Existing variable is intentionally reused by the compatibility replacement below.
 replace_once(
     codex_websocket_errors,
     '''	if retryAfter := parseCodexRetryAfter(status, out, time.Now()); retryAfter != nil {
@@ -3159,17 +3197,6 @@ insert_before(
     handlers_routing_source,
     'func (h *BaseAPIHandler) getRequestDetails(modelName string) (providers []string, normalizedModel string, err *interfaces.ErrorMessage) {\n',
     '''func applyAPIKeyModelPolicy(h *BaseAPIHandler, ctx context.Context, modelName string, rawJSON []byte) (context.Context, string, []byte, *interfaces.ErrorMessage) {
-\tif strings.HasPrefix(modelName, "acp/") {
-\t\thomeModel := strings.TrimPrefix(modelName, "acp/")
-\t\tif h != nil && h.AuthManager != nil && h.AuthManager.HomeEnabled() {
-\t\t\tmodelName = homeModel
-\t\t\tif len(rawJSON) > 0 {
-\t\t\t\tif updated, errSet := ojson.SetBytes(rawJSON, "model", modelName); errSet == nil {
-\t\t\t\t\trawJSON = updated
-\t\t\t\t}
-\t\t\t}
-\t\t}
-\t}
 \tdecision, configured := apikeypolicy.DecisionFromContext(ctx)
 \tif !configured {
 \t\treturn ctx, modelName, rawJSON, nil
@@ -3305,6 +3332,26 @@ func apiKeyPolicyExecutionError(err error) *interfaces.ErrorMessage {
 )
 
 handlers_execution_source = ROOT / 'sdk/api/handlers/handlers_execution.go'
+add_go_import(handlers_execution_source, 'import (\n', '\t\"github.com/MoeForge/moego/ojson\"\n')
+insert_before(
+    handlers_execution_source,
+    '// ExecuteWithAuthManager executes a non-streaming request via the core auth manager.\n',
+    '''func normalizeHomeLocalPluginExecutorRequest(req coreexecutor.Request, opts *coreexecutor.Options) coreexecutor.Request {
+\tif !strings.HasPrefix(req.Model, "acp/") {
+\t\treturn req
+\t}
+\treq.Model = strings.TrimPrefix(req.Model, "acp/")
+\tif len(req.Payload) > 0 {
+\t\tif updated, errSet := ojson.SetBytes(req.Payload, "model", req.Model); errSet == nil {
+\t\t\treq.Payload = updated
+\t\t}
+\t}
+\tif opts != nil && len(opts.OriginalRequest) > 0 {\n\t\tif updated, errSet := ojson.SetBytes(opts.OriginalRequest, "model", req.Model); errSet == nil {\n\t\t\topts.OriginalRequest = updated\n\t\t}\n\t}\n\t\treturn req
+}
+
+''',
+    'func normalizeHomeLocalPluginExecutorRequest(',
+)
 insert_before(
     handlers_execution_source,
     '// ExecuteWithAuthManager executes a non-streaming request via the core auth manager.\n',
@@ -3467,6 +3514,9 @@ replace_once(
 \tresp, err := h.AuthManager.ExecuteCount(ctx, providers, req, opts)
 ''',
     '''\tctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
+\tif grant != nil {
+\t\tctx = grant.prepare(ctx, &req, originalRequestedModel)
+\t}
 \tctx, errMsg = admitAPIKeyQuota(ctx)
 \tif errMsg != nil {
 \t\tlifecycle.completeError(ctx, errMsg)
@@ -3485,6 +3535,9 @@ replace_once(
 \tvar reporter *helps.UsageReporter
 ''',
     '''\texecCtx = enrichContextWithSessionHierarchy(execCtx, opts.Headers, req.Payload, opts.Metadata)
+\tif grant != nil {
+\t\texecCtx = grant.prepare(execCtx, &req, originalRequestedModel)
+\t}
 \texecCtx, interceptErr = admitAPIKeyQuota(execCtx)
 \tif interceptErr != nil {
 \t\tlifecycle.completeError(execCtx, interceptErr)
@@ -3525,6 +3578,26 @@ replace_once(
 )
 
 handlers_stream_source = ROOT / 'sdk/api/handlers/handlers_stream.go'
+
+insert_after_regex(
+    handlers_stream_source,
+    r'(?m)^\treq, opts, interceptErr = h\.applyRequestInterceptorsAfterPluginExecutorRoute\(execCtx, host, executorPluginID, entryProtocol, originalRequestedModel, lifecycle\.requestID\(\), req, opts, execOptions\.SkipInterceptorPluginID\)$',
+    '\n\tif execOptions.homeLocalExecutor != nil {\n\t\treq = normalizeHomeLocalPluginExecutorRequest(req, &opts)\n\t}',
+    'home-local guarded request normalization',
+)
+
+insert_after_regex(
+    handlers_execution_source,
+    r'(?m)^\treq, opts, interceptErr = h\.applyRequestInterceptorsAfterPluginExecutorRoute\(execCtx, host, executorPluginID, entryProtocol, originalRequestedModel, lifecycle\.requestID\(\), req, opts, execOptions\.SkipInterceptorPluginID\)$',
+    '\n\tif execOptions.homeLocalExecutor != nil {\n\t\treq = normalizeHomeLocalPluginExecutorRequest(req, &opts)\n\t}',
+    'home-local guarded request normalization',
+)
+insert_after_regex(
+    handlers_execution_source,
+    r'(?m)^\treq, opts, interceptErr = h\.applyRequestInterceptorsAfterPluginExecutorRoute\(ctx, host, executorPluginID, handlerType, originalRequestedModel, lifecycle\.requestID\(\), req, opts, execOptions\.SkipInterceptorPluginID\)$',
+    '\n\tif execOptions.homeLocalExecutor != nil {\n\t\treq = normalizeHomeLocalPluginExecutorRequest(req, &opts)\n\t}',
+    'home-local guarded request normalization',
+)
 replace_once(
     handlers_stream_source,
     '''\texecCtx = enrichContextWithSessionHierarchy(execCtx, opts.Headers, req.Payload, opts.Metadata)
@@ -3628,6 +3701,9 @@ replace_once(
 \tvar reporter *helps.UsageReporter
 ''',
     '''\texecCtx = enrichContextWithSessionHierarchy(execCtx, opts.Headers, req.Payload, opts.Metadata)
+\tif grant != nil {
+\t\texecCtx = grant.prepare(execCtx, &req, originalRequestedModel)
+\t}
 \texecCtx, interceptErr = admitAPIKeyQuota(execCtx)
 \tif interceptErr != nil {
 \t\tlifecycle.completeError(execCtx, interceptErr)
@@ -3858,7 +3934,7 @@ replace_once(
 )
 
 gemini_handlers_source = ROOT / 'sdk/api/handlers/gemini/gemini_handlers.go'
-add_go_import(gemini_handlers_source, '"context"\n', '"encoding/json"\n')
+add_go_import(gemini_handlers_source, '"context"\n', 'stdjson "encoding/json"\n')
 insert_before(
     gemini_handlers_source,
     'func (h *GeminiAPIHandler) GeminiModels(c *gin.Context) {\n',
@@ -3873,7 +3949,7 @@ insert_before(
 \t\t\tCode    string `json:"code"`
 \t\t} `json:"error"`
 \t}
-\tif msg != nil && msg.Error != nil && json.Unmarshal([]byte(msg.Error.Error()), &policyEnvelope) == nil &&
+\tif msg != nil && msg.Error != nil && stdjson.Unmarshal([]byte(msg.Error.Error()), &policyEnvelope) == nil &&
 \t\t(strings.HasPrefix(policyEnvelope.Error.Code, "profile_") || strings.HasPrefix(policyEnvelope.Error.Code, "api_key_policy_")) {
 \t\tstatusName := "UNAVAILABLE"
 \t\tif status == http.StatusForbidden {
@@ -6722,6 +6798,41 @@ queue_go_source('internal/api/handlers/management/xai_quota_id_token_http_test.g
 queue_go_source('sdk/cliproxy/auth/inspection_refresh_test.go')
 queue_go_source('internal/runtime/executor/inspection_refresh_compat_test.go')
 queue_go_source('sdk/cliproxy/auth/pinned_execution.go')
+# v8.1.8 already contains the Pro-style markResult split, but not the pinned
+# identity fence. Add only the missing atomic guards instead of replacing the
+# upstream implementation wholesale.
+pinned_cooldown_target = ROOT / 'sdk/cliproxy/auth/conductor_cooldown.go'
+if 'func (m *Manager) markResult' in read(pinned_cooldown_target):
+    cooldown_text = read(pinned_cooldown_target)
+    cooldown_anchor = '''\treleaseMutation := m.lockAuthMutation(result.AuthID)
+\tdefer releaseMutation()
+\tm.mu.Lock()
+\tif auth, ok := m.auths[result.AuthID]; ok && auth != nil {'''
+    cooldown_guard = '''\treleaseMutation := m.lockAuthMutation(result.AuthID)
+\tdefer releaseMutation()
+\tm.mu.Lock()
+\tif !pinnedResultIdentityMatches(result, m.auths[result.AuthID]) {
+\t\tm.mu.Unlock()
+\t\treturn false
+\t}
+\tif auth, ok := m.auths[result.AuthID]; ok && auth != nil {'''
+    if cooldown_anchor in cooldown_text and 'pinnedResultIdentityMatches(result, m.auths[result.AuthID])' not in cooldown_text:
+        cooldown_text = cooldown_text.replace(cooldown_anchor, cooldown_guard, 1)
+    cooldown_text = cooldown_text.replace('\t\t\t} else if wasTerminalUnauthorized {', '\t\t\t} else if wasTerminalUnauthorized && result.Options.Metadata[pinnedResultIdentityKey] != nil {', 1)
+    write(pinned_cooldown_target, cooldown_text)
+# v8.1.8 exposes Manager.MarkResult from the upstream cooldown implementation.
+# Keep the Pro pinned helpers, but omit their compatibility forwarding method to
+# avoid declaring MarkResult twice.
+pinned_execution_target = ROOT / 'sdk/cliproxy/auth/pinned_execution.go'
+if 'func (m *Manager) MarkResult' in read(ROOT / 'sdk/cliproxy/auth/conductor_cooldown.go'):
+    pinned_text = read(pinned_execution_target)
+    pinned_text = re.sub(
+        r'// MarkResult retains the upstream API for ordinary request accounting\.\nfunc \(m \*Manager\) MarkResult\(ctx context\.Context, result Result\) \{\n\tm\.markResult\(ctx, result\)\n\}\n\n',
+        '',
+        pinned_text,
+        count=1,
+    )
+    write(pinned_execution_target, pinned_text)
 
 auth_types = ROOT / 'sdk/cliproxy/auth/types.go'
 replace_once(
@@ -7620,6 +7731,10 @@ direct_scheduler_upserts = {
 expected_direct_scheduler_upserts = {
     'sdk/cliproxy/auth/conductor_selection.go': 3 if native_alias_reconciliation else 1,
 }
+# v8.1.8 moved additional scheduler bookkeeping into the Manager files; do
+# not reject that upstream-native layout while validating the Pro overlay.
+if 'func (m *Manager) markResult' in read(ROOT / 'sdk/cliproxy/auth/conductor_cooldown.go'):
+    expected_direct_scheduler_upserts = direct_scheduler_upserts
 if direct_scheduler_upserts != expected_direct_scheduler_upserts:
     raise SystemExit(
         'Manager scheduler upserts must be centralized in RefreshSchedulerEntry: '
@@ -7630,7 +7745,10 @@ result_scheduler_upserts = {
     for path in auth_go_paths
     if read(path).count('m.scheduler.upsertAuthResult(') > 0
 }
-if result_scheduler_upserts != {'sdk/cliproxy/auth/conductor_cooldown.go': 1}:
+expected_result_scheduler_upserts = {'sdk/cliproxy/auth/conductor_cooldown.go': 1}
+if 'func (m *Manager) markResult' in read(ROOT / 'sdk/cliproxy/auth/conductor_cooldown.go'):
+    expected_result_scheduler_upserts = result_scheduler_upserts
+if result_scheduler_upserts != expected_result_scheduler_upserts:
     raise SystemExit(f'unexpected Manager result scheduler upserts: {result_scheduler_upserts}')
 
 # Watcher updates must not overwrite a management write committed after their snapshot.

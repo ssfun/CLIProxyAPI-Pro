@@ -155,7 +155,9 @@ apply_candidate_customization() {
     "${upstream_root}" \
     "${repo_root}/scripts/validation/contracts/core-upstream-modified-files.txt" \
     --ignore internal/registry/models/models.json \
-    --allow-unmodified internal/runtime/executor/antigravity_executor_credits.go || return
+    --allow-unmodified internal/runtime/executor/antigravity_executor_credits.go \
+    --allow-unmodified internal/runtime/executor/codex_websockets_errors.go \
+    --allow-unmodified sdk/cliproxy/auth/conductor_cooldown.go || return
   go -C "${upstream_root}" mod tidy || return
   git -C "${upstream_root}" diff --check || return
 }
